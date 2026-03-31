@@ -1,6 +1,10 @@
 #!/bin/sh
 set -e
 
+export TOKLIGENCE_EMAIL=${TOKLIGENCE_EMAIL:-admin@local}
+export TOKLIGENCE_ANTHROPIC_API_KEY=${MINIMAX_API_KEY}
+export TOKLIGENCE_OPENAI_API_KEY=${MODAL_GLM5_API_KEY}
+
 mkdir -p /root/.tokligence/config/dev /root/.tokligence/logs /data
 
 cat > /root/.tokligence/config/settings.ini << 'EOF'
@@ -16,16 +20,14 @@ ledger_path=/data/ledger.db
 identity_path=/data/identity.db
 work_mode=auto
 
-anthropic_base_url=https://api.minimax.io/anthropic
-anthropic_api_key=${MINIMAX_API_KEY}
+anthropic_api_key=${TOKLIGENCE_ANTHROPIC_API_KEY}
 
-openai_base_url=${MODAL_GLM5_API_BASE}
-openai_api_key=${MODAL_GLM5_API_KEY}
+openai_api_key=${TOKLIGENCE_OPENAI_API_KEY}
 
 sidecar_model_map=zai-org/GLM-5-FP8=zai-org/GLM-5-FP8
 
-model_provider_routes=MiniMax*=anthropic,zai-org*=openai
-routes=MiniMax*=>anthropic,zai-org*=>openai,loopback=>loopback
+model_provider_routes=claude*=anthropic,gpt*=openai,zai-org*=openai
+routes=claude*=>anthropic,gpt*=>openai,zai-org*=>openai,loopback=>loopback
 
 enable_facade=true
 multiport_mode=false
