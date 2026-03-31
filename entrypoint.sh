@@ -41,12 +41,13 @@ if [ -z "$GATEWAYD" ]; then
 fi
 
 echo "Starting gatewayd: $GATEWAYD"
-"$GATEWAYD" > ~/.tokligence/logs/gatewayd.log 2>&1 &
+"$GATEWAYD" &
+GATEWAYD_PID=$!
 
 # Wait for gateway to be ready
-for i in $(seq 1 15); do
+for i in $(seq 1 20); do
   if wget -q -O- http://127.0.0.1:8081/health > /dev/null 2>&1; then
-    echo "Gateway ready"
+    echo "Gateway ready after ${i}s"
     break
   fi
   echo "Waiting for gateway... ($i)"
