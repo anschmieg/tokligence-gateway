@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-mkdir -p ~/.tokligence/config/dev ~/.tokligence/logs
+mkdir -p ~/.tokligence/config/dev ~/.tokligence/logs /data
 
 cat > ~/.tokligence/config/settings.ini << 'EOF'
 environment=dev
@@ -34,9 +34,23 @@ bridge_session_ttl=5m
 bridge_session_max_count=1000
 EOF
 
-# Start gateway in background
-tgw start 2>&1 &
-sleep 2
+# Find and start the gatewayd binary directly, bypassing the CLI wrapper
+GATEWAYD=$(find /usr/local/lib/node_modules/@tokligence/gateway -name "gatewayd" -type f 2>/dev/null | head -1)
+if [ -z "$GATEWAYD" ]; then
+  echo "ERROR: gatewayd binary not found" && exit 1
+fi
 
-# Start proxy in foreground (keeps container alive, logs to stdout)
+echo "Starting gatewayd: $GATEWAYD"
+"$GATEWAYD" > ~/.tokligence/logs/gatewayd.log 2>&1 &
+
+# Wait for gateway to be ready
+for i in $(seq 1 15); do
+  if wget -q -O- http://127.0.0.1:8081/health > /dev/null 2>&1; then
+    echo "Gateway ready"
+    break
+  fi
+  echo "Waiting for gateway... ($i)"
+  sleep 1
+done
+
 exec node /app/tgw-proxy.mjs
