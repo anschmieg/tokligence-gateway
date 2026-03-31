@@ -1,0 +1,16 @@
+services:
+  gateway:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - gateway-data:/data
+    environment:
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY}
+      - MODAL_GLM5_API_BASE=${MODAL_GLM5_API_BASE}
+      - MODAL_GLM5_API_KEY=${MODAL_GLM5_API_KEY}
+      - TOKLIGENCE_AUTH_SECRET=${TOKLIGENCE_AUTH_SECRET:-tokligence-dev-secret}
+
+volumes:
+  gateway-data:
