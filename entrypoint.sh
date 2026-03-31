@@ -1,13 +1,14 @@
 #!/bin/sh
 set -e
 
-mkdir -p ~/.tokligence/config/dev ~/.tokligence/logs /data
+mkdir -p /root/.tokligence/config/dev /root/.tokligence/logs /data
 
-cat > ~/.tokligence/config/settings.ini << 'EOF'
+cat > /root/.tokligence/config/settings.ini << 'EOF'
 environment=dev
 EOF
 
-cat > ~/.tokligence/config/dev/gateway.ini << EOF
+# Unquoted EOF so shell substitutes env vars
+cat > /root/.tokligence/config/dev/gateway.ini << EOF
 auth_disabled=true
 auth_secret=${TOKLIGENCE_AUTH_SECRET:-tokligence-dev-secret}
 log_level=info
@@ -34,7 +35,6 @@ bridge_session_ttl=5m
 bridge_session_max_count=1000
 EOF
 
-# Find and start the gatewayd binary directly, bypassing the CLI wrapper
 GATEWAYD=$(find /usr/local/lib/node_modules/@tokligence/gateway -name "gatewayd" -type f 2>/dev/null | head -1)
 if [ -z "$GATEWAYD" ]; then
   echo "ERROR: gatewayd binary not found" && exit 1
@@ -42,10 +42,9 @@ fi
 
 echo "Starting gatewayd: $GATEWAYD"
 "$GATEWAYD" &
-GATEWAYD_PID=$!
 
-# Wait for gateway to be ready
-for i in $(seq 1 20); do
+# Wait up to 30s for gateway to bind
+for i in $(seq 1 30); do
   if wget -q -O- http://127.0.0.1:8081/health > /dev/null 2>&1; then
     echo "Gateway ready after ${i}s"
     break
