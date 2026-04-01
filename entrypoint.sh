@@ -27,7 +27,7 @@ openai_api_key=${TOKLIGENCE_OPENAI_API_KEY}
 sidecar_model_map=zai-org/GLM-5-FP8=zai-org/GLM-5-FP8
 
 model_provider_routes=claude*=anthropic,gpt*=openai,MiniMax*=anthropic,zai-org*=openai
-routes=claude*->anthropic,gpt*->openai,MiniMax*->anthropic,zai-org*->openai,loopback->loopback
+routes=claude*=>anthropic,gpt*=>openai,MiniMax*=>anthropic,zai-org*=>openai,loopback=>loopback
 
 enable_facade=true
 multiport_mode=false
