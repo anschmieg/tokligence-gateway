@@ -191,7 +191,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PROXY_PORT, "0.0.0.0", () => {
-  console.log(`tgw-proxy :${PROXY_PORT} -> tgw :${TGW_PORT} (fallback)`);
-  console.log("  glm-5 / claude-opus-* -> Modal (direct, non-streaming)");
+  console.log(`tgw-proxy :${PROXY_PORT} -> tgw :${TGW_PORT}`);
+  console.log("  glm-5 / claude-opus-* -> Modal (direct)");
   console.log("  claude-sonnet-* / minimax-* -> Gateway (MiniMax)");
 });
