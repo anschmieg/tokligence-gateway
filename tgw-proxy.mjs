@@ -171,6 +171,7 @@ const server = http.createServer((req, res) => {
               }
             })
             .catch((err) => {
+              console.error("Modal stream error:", err.message);
               res.writeHead(502, { "Content-Type": "application/json" });
               res.end(JSON.stringify({ error: err.message }));
             });
