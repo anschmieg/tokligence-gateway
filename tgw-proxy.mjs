@@ -78,6 +78,116 @@ function callModalNonStream(model, messages, maxTokens) {
   });
 }
 
+function translateToAnthropicStream(res, modalRes) {
+  let contentBlockStarted = false;
+  let contentIndex = 0;
+  let buffer = "";
+  let hasContent = false;
+  let reasoningBuffer = "";
+
+  const sendContentBlockStart = () => {
+    if (!contentBlockStarted) {
+      res.write(`event: content_block_start\ndata: ${JSON.stringify({
+        type: "content_block_start",
+        index: contentIndex,
+        content_block: { type: "text", text: "" }
+      })}\n\n`);
+      contentBlockStarted = true;
+    }
+  };
+
+  modalRes.on("data", (chunk) => {
+    buffer += chunk.toString();
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const dataStr = line.slice(6);
+        if (dataStr === '[DONE]') {
+          if (!hasContent && reasoningBuffer) {
+            const text = extractFinalAnswer(reasoningBuffer);
+            if (text) {
+              sendContentBlockStart();
+              res.write(`event: content_block_delta\ndata: ${JSON.stringify({
+                type: "content_block_delta",
+                index: contentIndex,
+                delta: { type: "text_delta", text }
+              })}\n\n`);
+            }
+          }
+          res.write(`event: message_delta\ndata: ${JSON.stringify({
+            type: "message_delta",
+            delta: { stop_reason: "end_turn" },
+            usage: { input_tokens: 0, output_tokens: 0 }
+          })}\n\n`);
+          res.write(`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`);
+          res.end();
+          continue;
+        }
+        try {
+          const data = JSON.parse(dataStr);
+          const delta = data.choices?.[0]?.delta;
+          if (delta) {
+            const content = delta.content;
+            
+            if (content !== undefined && content !== null) {
+              hasContent = true;
+              if (content) {
+                sendContentBlockStart();
+                res.write(`event: content_block_delta\ndata: ${JSON.stringify({
+                  type: "content_block_delta",
+                  index: contentIndex,
+                  delta: { type: "text_delta", text: content }
+                })}\n\n`);
+              }
+            } else if (delta.reasoning_content) {
+              reasoningBuffer += delta.reasoning_content;
+            }
+          }
+        } catch {}
+      }
+    }
+  });
+
+  modalRes.on("error", (err) => {
+    res.writeHead(502, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: err.message }));
+  });
+
+  modalRes.on("end", () => {
+    if (!contentBlockStarted) {
+      res.write(`event: message_delta\ndata: ${JSON.stringify({
+        type: "message_delta",
+        delta: { stop_reason: "end_turn" },
+        usage: { input_tokens: 0, output_tokens: 0 }
+      })}\n\n`);
+      res.write(`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`);
+      res.end();
+    }
+  });
+}
+
+function extractFinalAnswer(reasoningContent) {
+  const lines = reasoningContent.split('\n');
+  let inResponse = false;
+  let responseLines = [];
+
+  for (const line of lines) {
+    if (line.includes('"') || line.includes("'") || line.includes('"') || line.includes('"')) {
+      inResponse = true;
+    }
+    if (inResponse) {
+      responseLines.push(line);
+    }
+  }
+
+  if (responseLines.length > 0) {
+    return responseLines.join(' ').replace(/^["'"\s]+|["'"\s]+$/g, '');
+  }
+  return reasoningContent.slice(-500);
+}
+
 function callModalStream(model, messages, maxTokens, res) {
   const body = JSON.stringify({
     model: "zai-org/GLM-5-FP8",
@@ -99,73 +209,7 @@ function callModalStream(model, messages, maxTokens, res) {
   };
 
   const req = https.request(options, (modalRes) => {
-    let contentBlockStarted = false;
-    let contentIndex = 0;
-    let buffer = "";
-
-    modalRes.on("data", (chunk) => {
-      buffer += chunk.toString();
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const dataStr = line.slice(6);
-          if (dataStr === '[DONE]') {
-            res.write(`event: message_delta\ndata: ${JSON.stringify({
-              type: "message_delta",
-              delta: { stop_reason: "end_turn" },
-              usage: { input_tokens: 0, output_tokens: 0 }
-            })}\n\n`);
-            res.write(`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`);
-            res.end();
-            continue;
-          }
-          try {
-            const data = JSON.parse(dataStr);
-            const delta = data.choices?.[0]?.delta;
-            if (delta) {
-              const content = delta.content;
-              
-              if (content !== undefined && content !== null) {
-                if (!contentBlockStarted) {
-                  res.write(`event: content_block_start\ndata: ${JSON.stringify({
-                    type: "content_block_start",
-                    index: contentIndex,
-                    content_block: { type: "text", text: "" }
-                  })}\n\n`);
-                  contentBlockStarted = true;
-                }
-                if (content) {
-                  res.write(`event: content_block_delta\ndata: ${JSON.stringify({
-                    type: "content_block_delta",
-                    index: contentIndex,
-                    delta: { type: "text_delta", text: content }
-                  })}\n\n`);
-                }
-              }
-            }
-          } catch {}
-        }
-      }
-    });
-
-    modalRes.on("error", (err) => {
-      res.writeHead(502, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: err.message }));
-    });
-
-    modalRes.on("end", () => {
-      if (!contentBlockStarted) {
-        res.write(`event: message_delta\ndata: ${JSON.stringify({
-          type: "message_delta",
-          delta: { stop_reason: "end_turn" },
-          usage: { input_tokens: 0, output_tokens: 0 }
-        })}\n\n`);
-        res.write(`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`);
-        res.end();
-      }
-    });
+    translateToAnthropicStream(res, modalRes);
   });
 
   req.on("error", (err) => {
