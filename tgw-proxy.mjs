@@ -59,10 +59,14 @@ function callModalStream(model, messages, maxTokens, res) {
   };
 
   const req = https.request(options, (modalRes) => {
+    console.error("MODAL STREAM: connected, statusCode=", modalRes.statusCode);
     let contentBlockStarted = false;
     let contentIndex = 0;
+    let chunkCount = 0;
 
     modalRes.on("data", (chunk) => {
+      chunkCount++;
+      if (chunkCount <= 3) console.error("MODAL STREAM: received chunk", chunkCount, chunk.toString().substring(0, 100));
       const lines = chunk.toString().split('\n');
       for (const line of lines) {
         if (line.startsWith('data: ')) {
@@ -205,6 +209,7 @@ const server = http.createServer((req, res) => {
         }));
 
         if (streamRequested) {
+          console.error(`STREAM: Starting Modal stream for model=${model}`);
           res.writeHead(200, {
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache",
