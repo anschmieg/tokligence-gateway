@@ -1,253 +1,256 @@
 #!/usr/bin/env node
 // tgw-proxy — model-rewriting proxy in front of Tokligence Gateway
 //
-// Model routing (request rewriting):
-//   claude-opus-*   -> zai-org/GLM-5-FP8  (Modal GLM-5, high-complexity)
-//   claude-sonnet-* -> MiniMax-M2.7          (general)
-//   claude-haiku-*  -> MiniMax-M2.1          (high-volume, fast)
-//   glm-5           -> zai-org/GLM-5-FP8
-//   minimax-m2.7    -> MiniMax-M2.7
-//   minimax-m2.1    -> MiniMax-M2.1
-//
-// Response transformation:
-//   reasoning_content -> content (for GLM-style reasoning models)
+// For MiniMax models: forwards to gateway (which routes to MiniMax API)
+// For GLM-5/Modal models: calls Modal directly, translates OpenAI → Anthropic
 
 import http from "http";
+import https from "https";
 
 const PROXY_PORT = 8080;
-const TGW_PORT   = 8081;
 const TGW_HOST   = "127.0.0.1";
+const TGW_PORT   = 8081;
+const MODAL_KEY  = process.env.MODAL_GLM5_API_KEY || "modalresearch_qCoc8v8mnEgVCIyzHNHmBw6E2QjbAE9PFuk6aCWFEno";
 
-const ALIASES = [
-  [/^claude-opus/i,   "zai-org/GLM-5-FP8"],
-  [/^claude-sonnet/i, "MiniMax-M2.7"],
-  [/^claude-haiku/i,  "MiniMax-M2.1"],
-  [/^glm-5$/i,        "zai-org/GLM-5-FP8"],
-  [/^m2\.7$/i,        "MiniMax-M2.7"],
-  [/^m2\.5$/i,        "MiniMax-M2.5"],
-  [/^m2\.1$/i,        "MiniMax-M2.1"],
-  [/^minimax-m2\.7$/i, "MiniMax-M2.7"],
-  [/^minimax-m2\.5$/i, "MiniMax-M2.5"],
-  [/^minimax-m2\.1$/i, "MiniMax-M2.1"],
-  [/^minimax-m2$/i,    "MiniMax-M2"],
-];
+const GLM_MODELS = /^glm-5$|^zai-org\/GLM-5-FP8$|^claude-opus/i;
+const MINIMAX_MAP = {
+  "claude-sonnet": "MiniMax-M2.7",
+  "claude-haiku": "MiniMax-M2.1",
+  "minimax-m2.7": "MiniMax-M2.7",
+  "minimax-m2.5": "MiniMax-M2.5",
+  "minimax-m2.1": "MiniMax-M2.1",
+  "m2.7": "MiniMax-M2.7",
+  "m2.5": "MiniMax-M2.5",
+  "m2.1": "MiniMax-M2.1",
+};
 
-function resolveModel(name) {
-  if (!name) return name;
-  for (const [pattern, target] of ALIASES) {
-    if (pattern.test(name)) return target;
+function resolveModel(model) {
+  if (!model) return model;
+  for (const [prefix, target] of Object.entries(MINIMAX_MAP)) {
+    if (model.toLowerCase().startsWith(prefix.toLowerCase())) {
+      return target;
+    }
   }
-  return name;
+  return model;
 }
 
-function transformResponse(body, isStreaming) {
-  if (isStreaming) {
-    return transformStreamingResponse(body);
-  }
-  return transformNonStreamingResponse(body);
+function isGlmModel(model) {
+  return model && GLM_MODELS.test(model);
 }
 
-function transformNonStreamingResponse(body) {
-  try {
-    const data = JSON.parse(body.toString());
-    let modified = false;
+function callModal(model, messages, stream) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      model: "zai-org/GLM-5-FP8",
+      messages,
+      stream,
+      max_tokens: 4096
+    });
 
-    if (data.choices && Array.isArray(data.choices)) {
-      for (const choice of data.choices) {
-        if (choice.message && choice.message.reasoning_content !== undefined) {
-          if (choice.message.reasoning_content && !choice.message.content) {
-            choice.message.content = choice.message.reasoning_content;
-            modified = true;
+    const options = {
+      hostname: "api.us-west-2.modal.direct",
+      port: 443,
+      path: "/v1/chat/completions",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${MODAL_KEY}`,
+        "Content-Length": Buffer.byteLength(body)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => {
+        const responseBody = Buffer.concat(chunks);
+        if (stream) {
+          resolve(responseBody);
+        } else {
+          try {
+            resolve(JSON.parse(responseBody.toString()));
+          } catch {
+            reject(new Error("Invalid JSON from Modal"));
           }
-          delete choice.message.reasoning_content;
         }
-        if (choice.delta && choice.delta.reasoning_content !== undefined) {
-          if (choice.delta.reasoning_content && !choice.delta.content) {
-            choice.delta.content = choice.delta.reasoning_content;
-            modified = true;
-          }
-          delete choice.delta.reasoning_content;
-        }
-      }
-    }
+      });
+    });
 
-    if (data.message && data.message.reasoning_content !== undefined) {
-      if (data.message.reasoning_content && !data.message.content) {
-        data.message.content = data.message.reasoning_content;
-        modified = true;
-      }
-      delete data.message.reasoning_content;
-    }
-
-    if (data.content && Array.isArray(data.content)) {
-      for (const block of data.content) {
-        if (block.type === "text" && block.reasoning_content) {
-          block.text = block.reasoning_content;
-          delete block.reasoning_content;
-          modified = true;
-        }
-      }
-    }
-
-    return modified ? JSON.stringify(data) : body;
-  } catch {
-    return body;
-  }
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
 }
 
-function transformStreamingResponse(body) {
-  const lines = body.toString().split('\n');
-  const transformed = [];
+function translateToAnthropic(openaiData, model) {
+  const msg = openaiData.choices?.[0]?.message;
+  const reasoning = msg?.reasoning_content;
+  const content = msg?.content;
 
-  for (const line of lines) {
-    if (line.startsWith('data: ')) {
-      const dataStr = line.slice(6);
-      if (dataStr === '[DONE]') {
-        transformed.push(line);
-        continue;
-      }
-      try {
-        const data = JSON.parse(dataStr);
-        let modified = false;
-
-        if (data.choices) {
-          for (const choice of data.choices) {
-            if (choice.delta) {
-              if (choice.delta.reasoning_content !== undefined) {
-                if (choice.delta.reasoning_content && !choice.delta.content) {
-                  choice.delta.content = choice.delta.reasoning_content;
-                  modified = true;
-                }
-                delete choice.delta.reasoning_content;
-              }
-            }
-          }
-        }
-
-        transformed.push(modified ? 'data: ' + JSON.stringify(data) : line);
-      } catch {
-        transformed.push(line);
-      }
-    } else {
-      transformed.push(line);
+  return {
+    type: "message",
+    id: openaiData.id || `msg_${Date.now()}`,
+    model: model,
+    role: "assistant",
+    content: [{ type: "text", text: content || reasoning || "" }],
+    stop_reason: "end_turn",
+    usage: {
+      input_tokens: openaiData.usage?.prompt_tokens || 0,
+      output_tokens: openaiData.usage?.completion_tokens || 0
     }
-  }
-
-  return Buffer.from(transformed.join('\n'));
+  };
 }
 
 const server = http.createServer((req, res) => {
-  const chunks = [];
-  req.on("data", (chunk) => chunks.push(chunk));
-  req.on("end", () => {
-    let body = Buffer.concat(chunks);
-    const contentType = req.headers["content-type"] || "";
-    const isStreaming = req.url.includes("stream=true") || 
-                       req.url.includes("stream%3Dtrue") ||
-                       (body.length > 0 && body.toString().includes('"stream":true'));
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const isAnthropic = req.url.includes("/anthropic/v1/messages");
+  const isStream = url.searchParams.get("stream") === "true";
 
-    if (contentType.includes("application/json") && body.length > 0) {
+  if (req.method === "POST" && isAnthropic) {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      let body = Buffer.concat(chunks);
+      let parsed;
+      
       try {
-        const parsed = JSON.parse(body.toString());
-        const rewritten = resolveModel(parsed.model);
-        if (rewritten !== parsed.model) {
+        parsed = JSON.parse(body.toString());
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid JSON" }));
+        return;
+      }
+
+      const model = parsed.model;
+
+      if (isGlmModel(model)) {
+        const messages = parsed.messages.map(m => ({
+          role: m.role,
+          content: Array.isArray(m.content) ? m.content.map(c => c.text || c.content).join("") : m.content
+        }));
+
+        if (isStream) {
+          res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive"
+          });
+
+          callModal("zai-org/GLM-5-FP8", messages, true)
+            .then((rawResponse) => {
+              const lines = rawResponse.toString().split('\n');
+              let textBuffer = "";
+
+              for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                  const dataStr = line.slice(6);
+                  if (dataStr === '[DONE]') {
+                    res.write(`event: message_delta\ndata: ${JSON.stringify({
+                      type: "message_delta",
+                      delta: { stop_reason: "end_turn" },
+                      usage: { input_tokens: 0, output_tokens: 0 }
+                    })}\n\n`);
+                    res.write(`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`);
+                    res.end();
+                    continue;
+                  }
+                  try {
+                    const data = JSON.parse(dataStr);
+                    const delta = data.choices?.[0]?.delta;
+                    if (delta) {
+                      const text = delta.content || "";
+                      const thinking = delta.reasoning_content;
+
+                      if (thinking) {
+                        res.write(`event: content_block_delta\ndata: ${JSON.stringify({
+                          type: "content_block_delta",
+                          index: 0,
+                          delta: { type: "thinking_delta", thinking }
+                        })}\n\n`);
+                      }
+                      if (text) {
+                        textBuffer += text;
+                        res.write(`event: content_block_delta\ndata: ${JSON.stringify({
+                          type: "content_block_delta",
+                          index: 0,
+                          delta: { type: "text_delta", text }
+                        })}\n\n`);
+                      }
+                    }
+                  } catch {}
+                }
+              }
+            })
+            .catch((err) => {
+              res.writeHead(502, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: err.message }));
+            });
+        } else {
+          callModal("zai-org/GLM-5-FP8", messages, false)
+            .then((data) => {
+              const response = translateToAnthropic(data, model);
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify(response));
+            })
+            .catch((err) => {
+              res.writeHead(502, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: err.message }));
+            });
+        }
+      } else {
+        const rewritten = resolveModel(model);
+        if (rewritten !== model) {
           parsed.model = rewritten;
           body = Buffer.from(JSON.stringify(parsed));
         }
-        if (parsed.stream) isStreaming = true;
-      } catch {
-        // not valid JSON, forward as-is
-      }
-    }
 
-    const headers = { ...req.headers, host: `${TGW_HOST}:${TGW_PORT}` };
-    headers["content-length"] = String(body.length);
+        const headers = { ...req.headers, host: `${TGW_HOST}:${TGW_PORT}` };
+        headers["content-length"] = String(body.length);
 
-    const upstream = http.request(
-      { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers },
-      (upRes) => {
-        const contentType = upRes.headers["content-type"] || "";
-        const isSSE = contentType.includes("text/event-stream") || 
-                      contentType.includes("application/x-ndjson");
-
-        if (isSSE) {
-          res.writeHead(upRes.statusCode, upRes.headers);
-          let buffer = Buffer.alloc(0);
-
-          upRes.on("data", (chunk) => {
-            buffer = Buffer.concat([buffer, chunk]);
-
-            const lines = buffer.toString().split('\n');
-            for (let i = 0; i < lines.length - 1; i++) {
-              const line = lines[i];
-              if (line.startsWith('data: ')) {
-                const dataStr = line.slice(6);
-                if (dataStr === '[DONE]') {
-                  res.write(line + '\n');
-                } else {
-                  try {
-                    const data = JSON.parse(dataStr);
-                    let modified = false;
-
-                    if (data.choices) {
-                      for (const choice of data.choices) {
-                        if (choice.delta && choice.delta.reasoning_content !== undefined) {
-                          if (choice.delta.reasoning_content && !choice.delta.content) {
-                            choice.delta.content = choice.delta.reasoning_content;
-                            modified = true;
-                          }
-                          delete choice.delta.reasoning_content;
-                        }
-                      }
-                    }
-
-                    res.write('data: ' + JSON.stringify(data) + '\n');
-                  } catch {
-                    res.write(line + '\n');
-                  }
-                }
-              } else {
-                res.write(line + '\n');
-              }
-            }
-
-            const lastLine = lines[lines.length - 1];
-            if (lastLine && !lines[lines.length - 1].includes('\n')) {
-              buffer = Buffer.from(lastLine);
-            } else {
-              buffer = Buffer.alloc(0);
-            }
-          });
-
-          upRes.on("end", () => {
-            res.end();
-          });
-        } else {
-          const chunks = [];
-          upRes.on("data", (chunk) => chunks.push(chunk));
-          upRes.on("end", () => {
-            const responseBody = Buffer.concat(chunks);
-            const transformed = transformResponse(responseBody, false);
+        const upstream = http.request(
+          { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers },
+          (upRes) => {
             res.writeHead(upRes.statusCode, upRes.headers);
-            res.end(transformed);
-          });
-        }
+            upRes.pipe(res);
+          }
+        );
+
+        upstream.on("error", (err) => {
+          res.writeHead(502, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+
+        upstream.end(body);
       }
-    );
-
-    upstream.on("error", (err) => {
-      res.writeHead(502);
-      res.end(JSON.stringify({ error: err.message }));
     });
+  } else {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      const body = Buffer.concat(chunks);
+      const headers = { ...req.headers, host: `${TGW_HOST}:${TGW_PORT}` };
+      headers["content-length"] = String(body.length);
 
-    upstream.end(body);
-  });
+      const upstream = http.request(
+        { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers },
+        (upRes) => {
+          res.writeHead(upRes.statusCode, upRes.headers);
+          upRes.pipe(res);
+        }
+      );
+
+      upstream.on("error", (err) => {
+        res.writeHead(502, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message }));
+      });
+
+      upstream.end(body);
+    });
+  }
 });
 
 server.listen(PROXY_PORT, "0.0.0.0", () => {
-  console.log(`tgw-proxy :${PROXY_PORT} -> tgw :${TGW_PORT}`);
-  console.log("  claude-opus-*   -> zai-org/GLM-5-FP8 (Modal)");
-  console.log("  claude-sonnet-* -> MiniMax-M2.7");
-  console.log("  claude-haiku-*  -> MiniMax-M2.1");
-  console.log("  reasoning_content -> content (GLM transformation enabled)");
+  console.log(`tgw-proxy :${PROXY_PORT} -> tgw :${TGW_PORT} (fallback)`);
+  console.log("  glm-5 / claude-opus-* -> Modal (direct)");
+  console.log("  claude-sonnet-* / minimax-* -> Gateway (MiniMax)");
 });
