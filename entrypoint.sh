@@ -27,8 +27,8 @@ openai_base_url=${MODAL_GLM5_API_BASE:-https://api.us-west-2.modal.direct/v1}
 
 sidecar_model_map=zai-org/GLM-5-FP8=zai-org/GLM-5-FP8
 
-model_provider_routes=claude*=anthropic,gpt*=openai,MiniMax*=anthropic,zai-org*=openai
-routes=claude*=>anthropic,gpt*=>openai,MiniMax*=>anthropic,zai-org*=>openai,loopback=>loopback
+model_provider_routes=claude*=anthropic,gpt*=openai,MiniMax*=openai,zai-org*=openai
+routes=claude*=>anthropic,gpt*=>openai,MiniMax*=>openai,zai-org*=>openai,loopback=>loopback
 
 enable_facade=true
 multiport_mode=false
