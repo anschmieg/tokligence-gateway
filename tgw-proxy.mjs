@@ -66,12 +66,12 @@ function callModalStream(model, messages, maxTokens, res) {
 
     modalRes.on("data", (chunk) => {
       chunkCount++;
-      if (chunkCount <= 3) console.error("MODAL STREAM: received chunk", chunkCount, chunk.toString().substring(0, 100));
       const lines = chunk.toString().split('\n');
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           const dataStr = line.slice(6);
           if (dataStr === '[DONE]') {
+            console.error("MODAL STREAM: received DONE");
             res.write(`event: message_delta\ndata: ${JSON.stringify({
               type: "message_delta",
               delta: { stop_reason: "end_turn" },
@@ -86,8 +86,10 @@ function callModalStream(model, messages, maxTokens, res) {
             const delta = data.choices?.[0]?.delta;
             if (delta) {
               const text = delta.content;
+              console.error("MODAL STREAM: chunk", chunkCount, "delta.content=", JSON.stringify(text));
               
               if (text) {
+                console.error("MODAL STREAM: sending text:", text);
                 if (!contentBlockStarted) {
                   res.write(`event: content_block_start\ndata: ${JSON.stringify({
                     type: "content_block_start",
@@ -103,7 +105,9 @@ function callModalStream(model, messages, maxTokens, res) {
                 })}\n\n`);
               }
             }
-          } catch {}
+          } catch (e) {
+            console.error("MODAL STREAM: parse error:", e.message);
+          }
         }
       }
     });
