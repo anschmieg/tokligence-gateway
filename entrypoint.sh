@@ -5,14 +5,14 @@ export TOKLIGENCE_EMAIL=${TOKLIGENCE_EMAIL:-admin@local}
 export TOKLIGENCE_ANTHROPIC_API_KEY=${MINIMAX_API_KEY}
 export TOKLIGENCE_OPENAI_API_KEY=${MODAL_GLM5_API_KEY}
 
-mkdir -p /root/.tokligence/config/dev /root/.tokligence/logs /data
+mkdir -p /app/config/dev /root/.tokligence/logs /data
 
-cat > /root/.tokligence/config/settings.ini << 'EOF'
+cat > /app/config/settings.ini << 'EOF'
 environment=dev
 EOF
 
 # Unquoted EOF so shell substitutes env vars
-cat > /root/.tokligence/config/dev/gateway.ini << EOF
+cat > /app/config/dev/gateway.ini << EOF
 auth_disabled=true
 auth_secret=${TOKLIGENCE_AUTH_SECRET:-tokligence-dev-secret}
 log_level=info
