@@ -103,6 +103,7 @@ const server = http.createServer((req, res) => {
       }
 
       const model = parsed.model;
+      const streamRequested = isStream || parsed.stream === true;
 
       if (isGlmModel(model)) {
         const messages = parsed.messages.map(m => ({
@@ -112,7 +113,7 @@ const server = http.createServer((req, res) => {
             : m.content
         }));
 
-        if (isStream) {
+        if (streamRequested) {
           res.writeHead(200, {
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache",
