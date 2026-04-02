@@ -104,6 +104,7 @@ const server = http.createServer((req, res) => {
 
       const model = parsed.model;
       const streamRequested = isStream || parsed.stream === true;
+      console.error(`GLM check: model=${model}, isGlm=${isGlmModel(model)}, stream=${streamRequested}, parsed.stream=${parsed.stream}`);
 
       if (isGlmModel(model)) {
         const messages = parsed.messages.map(m => ({
