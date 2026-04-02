@@ -38,12 +38,107 @@ function isGlmModel(model) {
   return model && GLM_MODELS.test(model);
 }
 
-function callModal(model, messages, stream, maxTokens = 4096) {
+function callModalStream(model, messages, maxTokens, res) {
+  const body = JSON.stringify({
+    model: "zai-org/GLM-5-FP8",
+    messages,
+    stream: true,
+    max_tokens: maxTokens
+  });
+
+  const options = {
+    hostname: "api.us-west-2.modal.direct",
+    port: 443,
+    path: "/v1/chat/completions",
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${MODAL_KEY}`,
+      "Content-Length": Buffer.byteLength(body)
+    }
+  };
+
+  const req = https.request(options, (modalRes) => {
+    let contentBlockStarted = false;
+    let contentIndex = 0;
+
+    modalRes.on("data", (chunk) => {
+      const lines = chunk.toString().split('\n');
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const dataStr = line.slice(6);
+          if (dataStr === '[DONE]') {
+            res.write(`event: message_delta\ndata: ${JSON.stringify({
+              type: "message_delta",
+              delta: { stop_reason: "end_turn" },
+              usage: { input_tokens: 0, output_tokens: 0 }
+            })}\n\n`);
+            res.write(`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`);
+            res.end();
+            continue;
+          }
+          try {
+            const data = JSON.parse(dataStr);
+            const delta = data.choices?.[0]?.delta;
+            if (delta) {
+              const text = delta.content;
+              
+              if (text) {
+                if (!contentBlockStarted) {
+                  res.write(`event: content_block_start\ndata: ${JSON.stringify({
+                    type: "content_block_start",
+                    index: contentIndex,
+                    content_block: { type: "text", text: "" }
+                  })}\n\n`);
+                  contentBlockStarted = true;
+                }
+                res.write(`event: content_block_delta\ndata: ${JSON.stringify({
+                  type: "content_block_delta",
+                  index: contentIndex,
+                  delta: { type: "text_delta", text }
+                })}\n\n`);
+              }
+            }
+          } catch {}
+        }
+      }
+    });
+
+    modalRes.on("error", (err) => {
+      console.error("Modal stream error:", err.message);
+      res.writeHead(502, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: err.message }));
+    });
+
+    modalRes.on("end", () => {
+      if (!contentBlockStarted) {
+        res.write(`event: message_delta\ndata: ${JSON.stringify({
+          type: "message_delta",
+          delta: { stop_reason: "end_turn" },
+          usage: { input_tokens: 0, output_tokens: 0 }
+        })}\n\n`);
+        res.write(`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`);
+        res.end();
+      }
+    });
+  });
+
+  req.on("error", (err) => {
+    console.error("Modal request error:", err.message);
+    res.writeHead(502, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: err.message }));
+  });
+
+  req.write(body);
+  req.end();
+}
+
+function callModalNonStream(model, messages, maxTokens) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
       model: "zai-org/GLM-5-FP8",
       messages,
-      stream,
+      stream: false,
       max_tokens: maxTokens
     });
 
@@ -63,15 +158,11 @@ function callModal(model, messages, stream, maxTokens = 4096) {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(chunk));
       res.on("end", () => {
-        const responseBody = Buffer.concat(chunks);
-        if (stream) {
-          resolve(responseBody);
-        } else {
-          try {
-            resolve(JSON.parse(responseBody.toString()));
-          } catch {
-            reject(new Error("Invalid JSON from Modal"));
-          }
+        try {
+          const data = JSON.parse(Buffer.concat(chunks).toString());
+          resolve(data);
+        } catch {
+          reject(new Error("Invalid JSON from Modal"));
         }
       });
     });
@@ -104,7 +195,6 @@ const server = http.createServer((req, res) => {
 
       const model = parsed.model;
       const streamRequested = isStream || parsed.stream === true;
-      console.error(`GLM check: model=${model}, isGlm=${isGlmModel(model)}, stream=${streamRequested}, parsed.stream=${parsed.stream}`);
 
       if (isGlmModel(model)) {
         const messages = parsed.messages.map(m => ({
@@ -121,63 +211,9 @@ const server = http.createServer((req, res) => {
             "Connection": "keep-alive"
           });
 
-          callModal("zai-org/GLM-5-FP8", messages, true, parsed.max_tokens || 4096)
-            .then((rawResponse) => {
-              const lines = rawResponse.toString().split('\n');
-              let msgId = `msg_${Date.now()}`;
-              let contentIndex = 0;
-              let sentContentStart = false;
-
-              const sendContentBlockStart = () => {
-                if (!sentContentStart) {
-                  res.write(`event: content_block_start\ndata: ${JSON.stringify({
-                    type: "content_block_start",
-                    index: contentIndex,
-                    content_block: { type: "text", text: "" }
-                  })}\n\n`);
-                  sentContentStart = true;
-                }
-              };
-
-              for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                  const dataStr = line.slice(6);
-                  if (dataStr === '[DONE]') {
-                    res.write(`event: message_delta\ndata: ${JSON.stringify({
-                      type: "message_delta",
-                      delta: { stop_reason: "end_turn" },
-                      usage: { input_tokens: 0, output_tokens: 0 }
-                    })}\n\n`);
-                    res.write(`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`);
-                    res.end();
-                    continue;
-                  }
-                  try {
-                    const data = JSON.parse(dataStr);
-                    const delta = data.choices?.[0]?.delta;
-                    if (delta) {
-                      const text = delta.content;
-                      
-                      if (text) {
-                        sendContentBlockStart();
-                        res.write(`event: content_block_delta\ndata: ${JSON.stringify({
-                          type: "content_block_delta",
-                          index: contentIndex,
-                          delta: { type: "text_delta", text }
-                        })}\n\n`);
-                      }
-                    }
-                  } catch {}
-                }
-              }
-            })
-            .catch((err) => {
-              console.error("Modal stream error:", err.message);
-              res.writeHead(502, { "Content-Type": "application/json" });
-              res.end(JSON.stringify({ error: err.message }));
-            });
+          callModalStream("zai-org/GLM-5-FP8", messages, parsed.max_tokens || 4096, res);
         } else {
-          callModal("zai-org/GLM-5-FP8", messages, false, parsed.max_tokens || 4096)
+          callModalNonStream("zai-org/GLM-5-FP8", messages, parsed.max_tokens || 4096)
             .then((data) => {
               const msg = data.choices?.[0]?.message;
               let text = msg?.content;
@@ -203,6 +239,7 @@ const server = http.createServer((req, res) => {
               res.end(JSON.stringify(response));
             })
             .catch((err) => {
+              console.error("Modal error:", err.message);
               res.writeHead(502, { "Content-Type": "application/json" });
               res.end(JSON.stringify({ error: err.message }));
             });
