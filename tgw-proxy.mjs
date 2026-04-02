@@ -21,6 +21,15 @@ const ALIASES = [
   [/^m2\.7$/i,        "MiniMax-M2.7"],
   [/^m2\.5$/i,        "MiniMax-M2.5"],
   [/^m2\.1$/i,        "MiniMax-M2.1"],
+  // MiniMax model names from OpenRouter/CLI config
+  [/^minimax\/minimax-m2\.7$/i, "MiniMax-M2.7"],
+  [/^minimax\/minimax-m2\.5$/i, "MiniMax-M2.5"],
+  [/^minimax\/minimax-m2\.1$/i, "MiniMax-M2.1"],
+  [/^minimax\/minimax-m2$/i,    "MiniMax-M2"],
+  [/^minimax-m2\.7$/i,         "MiniMax-M2.7"],
+  [/^minimax-m2\.5$/i,         "MiniMax-M2.5"],
+  [/^minimax-m2\.1$/i,         "MiniMax-M2.1"],
+  [/^minimax-m2$/i,             "MiniMax-M2"],
 ];
 
 function resolveModel(name) {
