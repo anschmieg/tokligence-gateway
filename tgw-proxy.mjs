@@ -38,13 +38,13 @@ function isGlmModel(model) {
   return model && GLM_MODELS.test(model);
 }
 
-function callModal(model, messages, stream) {
+function callModal(model, messages, stream, maxTokens = 4096) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
       model: "zai-org/GLM-5-FP8",
       messages,
       stream,
-      max_tokens: 4096
+      max_tokens: maxTokens
     });
 
     const options = {
@@ -82,25 +82,6 @@ function callModal(model, messages, stream) {
   });
 }
 
-function translateToAnthropic(openaiData, model) {
-  const msg = openaiData.choices?.[0]?.message;
-  const reasoning = msg?.reasoning_content;
-  const content = msg?.content;
-
-  return {
-    type: "message",
-    id: openaiData.id || `msg_${Date.now()}`,
-    model: model,
-    role: "assistant",
-    content: [{ type: "text", text: content || reasoning || "" }],
-    stop_reason: "end_turn",
-    usage: {
-      input_tokens: openaiData.usage?.prompt_tokens || 0,
-      output_tokens: openaiData.usage?.completion_tokens || 0
-    }
-  };
-}
-
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const isAnthropic = req.url.includes("/anthropic/v1/messages");
@@ -126,7 +107,9 @@ const server = http.createServer((req, res) => {
       if (isGlmModel(model)) {
         const messages = parsed.messages.map(m => ({
           role: m.role,
-          content: Array.isArray(m.content) ? m.content.map(c => c.text || c.content).join("") : m.content
+          content: Array.isArray(m.content) 
+            ? m.content.map(c => c.text || c.content || "").join("")
+            : m.content
         }));
 
         if (isStream) {
@@ -136,10 +119,23 @@ const server = http.createServer((req, res) => {
             "Connection": "keep-alive"
           });
 
-          callModal("zai-org/GLM-5-FP8", messages, true)
+          callModal("zai-org/GLM-5-FP8", messages, true, parsed.max_tokens || 4096)
             .then((rawResponse) => {
               const lines = rawResponse.toString().split('\n');
-              let textBuffer = "";
+              let msgId = `msg_${Date.now()}`;
+              let contentIndex = 0;
+              let sentContentStart = false;
+
+              const sendContentBlockStart = () => {
+                if (!sentContentStart) {
+                  res.write(`event: content_block_start\ndata: ${JSON.stringify({
+                    type: "content_block_start",
+                    index: contentIndex,
+                    content_block: { type: "text", text: "" }
+                  })}\n\n`);
+                  sentContentStart = true;
+                }
+              };
 
               for (const line of lines) {
                 if (line.startsWith('data: ')) {
@@ -158,21 +154,13 @@ const server = http.createServer((req, res) => {
                     const data = JSON.parse(dataStr);
                     const delta = data.choices?.[0]?.delta;
                     if (delta) {
-                      const text = delta.content || "";
-                      const thinking = delta.reasoning_content;
-
-                      if (thinking) {
-                        res.write(`event: content_block_delta\ndata: ${JSON.stringify({
-                          type: "content_block_delta",
-                          index: 0,
-                          delta: { type: "thinking_delta", thinking }
-                        })}\n\n`);
-                      }
+                      const text = delta.content;
+                      
                       if (text) {
-                        textBuffer += text;
+                        sendContentBlockStart();
                         res.write(`event: content_block_delta\ndata: ${JSON.stringify({
                           type: "content_block_delta",
-                          index: 0,
+                          index: contentIndex,
                           delta: { type: "text_delta", text }
                         })}\n\n`);
                       }
@@ -186,9 +174,28 @@ const server = http.createServer((req, res) => {
               res.end(JSON.stringify({ error: err.message }));
             });
         } else {
-          callModal("zai-org/GLM-5-FP8", messages, false)
+          callModal("zai-org/GLM-5-FP8", messages, false, parsed.max_tokens || 4096)
             .then((data) => {
-              const response = translateToAnthropic(data, model);
+              const msg = data.choices?.[0]?.message;
+              let text = msg?.content;
+              
+              if (!text && msg?.reasoning_content) {
+                text = msg.reasoning_content;
+              }
+
+              const response = {
+                type: "message",
+                id: data.id || `msg_${Date.now()}`,
+                model: model,
+                role: "assistant",
+                content: text ? [{ type: "text", text }] : [],
+                stop_reason: "end_turn",
+                usage: {
+                  input_tokens: data.usage?.prompt_tokens || 0,
+                  output_tokens: data.usage?.completion_tokens || 0
+                }
+              };
+
               res.writeHead(200, { "Content-Type": "application/json" });
               res.end(JSON.stringify(response));
             })
