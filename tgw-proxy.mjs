@@ -100,6 +100,18 @@ const server = http.createServer((req, res) => {
       const model = parsed.model;
 
       if (isGlmModel(model)) {
+        // Modal's GLM-5 has broken streaming: all text (including actual responses)
+        // comes through reasoning_content instead of content, making streaming unusable.
+        // We ALWAYS use non-streaming and extract the actual response from content
+        // (falling back to reasoning_content if needed).
+        
+        const streamRequested = isStream || parsed.stream === true;
+        let warning = null;
+        
+        if (streamRequested) {
+          warning = "Note: Streaming is not supported for GLM-5 on Modal. Response is non-streaming.";
+        }
+        
         const messages = parsed.messages.map(m => ({
           role: m.role,
           content: Array.isArray(m.content) 
@@ -121,7 +133,10 @@ const server = http.createServer((req, res) => {
               id: data.id || `msg_${Date.now()}`,
               model: model,
               role: "assistant",
-              content: text ? [{ type: "text", text }] : [],
+              content: warning ? [
+                { type: "text", text: warning },
+                { type: "text", text: text || "" }
+              ] : (text ? [{ type: "text", text }] : []),
               stop_reason: "end_turn",
               usage: {
                 input_tokens: data.usage?.prompt_tokens || 0,
@@ -190,6 +205,6 @@ const server = http.createServer((req, res) => {
 
 server.listen(PROXY_PORT, "0.0.0.0", () => {
   console.log(`tgw-proxy :${PROXY_PORT} -> tgw :${TGW_PORT}`);
-  console.log("  glm-5 / claude-opus-* -> Modal (direct, non-streaming)");
-  console.log("  claude-sonnet-* / minimax-* -> Gateway (MiniMax)");
+  console.log("  glm-5 / claude-opus-* -> Modal (always non-streaming)");
+  console.log("  claude-sonnet-* / minimax-* -> Gateway (MiniMax, streaming OK)");
 });
