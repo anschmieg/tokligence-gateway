@@ -17,7 +17,7 @@ const MODAL_KEY  = process.env.MODAL_GLM5_API_KEY || "modalresearch_qCoc8v8mnEgV
 const AUTH_SECRET = process.env.TOKLIGENCE_AUTH_SECRET;
 const AUTH_PREFIXES = ["sk-proj-", "sk-ant-"];
 
-const GLM_MODELS = /^glm-5$|^zai-org\/GLM-5-FP8$|^claude-opus/i;
+const GLM_MODELS = /^glm-5|^zai-org\/GLM-5|^claude-opus/i;
 const MINIMAX_MAP = {
   "claude-sonnet": "MiniMax-M2.7",
   "claude-haiku": "MiniMax-M2.1",
