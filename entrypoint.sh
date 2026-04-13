@@ -2,8 +2,10 @@
 set -e
 
 export TOKLIGENCE_EMAIL=${TOKLIGENCE_EMAIL:-admin@local}
-export TOKLIGENCE_ANTHROPIC_API_KEY=${MINIMAX_API_KEY}
-export TOKLIGENCE_OPENAI_API_KEY=${MODAL_GLM5_API_KEY}
+export TOKLIGENCE_ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+export TOKLIGENCE_OPENAI_API_KEY=${OPENAI_API_KEY}
+export MINIMAX_API_BASE=${MINIMAX_API_BASE}
+export MODAL_GLM5_API_BASE=${MODAL_GLM5_API_BASE}
 
 mkdir -p /app/config/dev /root/.tokligence/logs /data
 
@@ -14,19 +16,19 @@ EOF
 # Unquoted EOF so shell substitutes env vars
 cat > /app/config/dev/gateway.ini << EOF
 auth_disabled=true
-auth_secret=${TOKLIGENCE_AUTH_SECRET:-tokligence-dev-secret}
+auth_secret=${TOKLIGENCE_AUTH_SECRET}
 log_level=info
 ledger_path=/data/ledger.db
 identity_path=/data/identity.db
 work_mode=auto
 
 anthropic_api_key=${TOKLIGENCE_ANTHROPIC_API_KEY}
-anthropic_base_url=${MINIMAX_API_BASE:-https://api.minimax.io/anthropic}
+anthropic_base_url=${ANTHROPIC_API_BASE:-https://api.anthropic.com}
 
 openai_api_key=${TOKLIGENCE_OPENAI_API_KEY}
-openai_base_url=${MODAL_GLM5_API_BASE:-https://api.us-west-2.modal.direct/v1}
+openai_base_url=${OPENAI_API_BASE:-https://api.openai.com/v1}
 
-sidecar_model_map=zai-org/GLM-5-FP8=zai-org/GLM-5-FP8
+sidecar_model_map=glm-5.1:cloud=zai-org/GLM-5.1-FP8,glm-5:cloud=zai-org/GLM-5-FP8
 
 model_provider_routes=claude*=anthropic,gpt*=openai,MiniMax*=anthropic,zai-org*=openai
 routes=claude*=>anthropic,gpt*=>openai,MiniMax*=>anthropic,zai-org*=>openai,loopback=>loopback

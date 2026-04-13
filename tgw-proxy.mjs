@@ -12,6 +12,11 @@ const TGW_HOST   = "127.0.0.1";
 const TGW_PORT   = 8081;
 const MODAL_KEY  = process.env.MODAL_GLM5_API_KEY || "modalresearch_qCoc8v8mnEgVCIyzHNHmBw6E2QjbAE9PFuk6aCWFEno";
 
+// Auth token prefix stripping: clients send sk-proj-<SECRET> or sk-ant-<SECRET>
+// We validate against TOKLIGENCE_AUTH_SECRET and forward the bare secret to gateway
+const AUTH_SECRET = process.env.TOKLIGENCE_AUTH_SECRET;
+const AUTH_PREFIXES = ["sk-proj-", "sk-ant-"];
+
 const GLM_MODELS = /^glm-5$|^zai-org\/GLM-5-FP8$|^claude-opus/i;
 const MINIMAX_MAP = {
   "claude-sonnet": "MiniMax-M2.7",
@@ -36,6 +41,25 @@ function resolveModel(model) {
 
 function isGlmModel(model) {
   return model && GLM_MODELS.test(model);
+}
+
+function extractAuthToken(authHeader) {
+  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
+  const token = authHeader.slice(7);
+  for (const prefix of AUTH_PREFIXES) {
+    if (token.startsWith(prefix)) {
+      const secret = token.slice(prefix.length);
+      if (AUTH_SECRET && secret === AUTH_SECRET) return secret;
+    }
+  }
+  return null;
+}
+
+function validateAndStripAuth(req) {
+  const strippedToken = extractAuthToken(req.headers["authorization"]);
+  if (!strippedToken) return false;
+  req.headers["authorization"] = `Bearer ${strippedToken}`;
+  return true;
 }
 
 function callModal(model, messages, maxTokens) {
@@ -80,6 +104,13 @@ function callModal(model, messages, maxTokens) {
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
+
+  if (!validateAndStripAuth(req)) {
+    res.writeHead(401, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Unauthorized" }));
+    return;
+  }
+
   const isAnthropic = req.url.includes("/anthropic/v1/messages");
 
   if (req.method === "POST" && isAnthropic) {
@@ -105,7 +136,7 @@ const server = http.createServer((req, res) => {
         // We ALWAYS use non-streaming and extract the actual response from content
         // (falling back to reasoning_content if needed).
         
-        const streamRequested = isStream || parsed.stream === true;
+        const streamRequested = parsed.stream === true;
         let warning = null;
         
         if (streamRequested) {
