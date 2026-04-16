@@ -112,6 +112,97 @@ const server = http.createServer((req, res) => {
   }
 
   const isAnthropic = req.url.includes("/anthropic/v1/messages");
+  const isResponses = req.url.includes("/responses");
+
+  // Handle Responses API - translate to Messages API
+  if (req.method === "POST" && isResponses) {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      const body = Buffer.concat(chunks);
+      let parsed;
+      
+      try {
+        parsed = JSON.parse(body.toString());
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid JSON" }));
+        return;
+      }
+
+      // Translate Responses API to Messages API
+      const model = parsed.model;
+      const messages = parsed.messages || [{ role: "user", content: parsed.input }];
+      
+      // Check if GLM model
+      if (isGlmModel(model)) {
+        const msgContents = messages.map(m => 
+          typeof m.content === 'string' ? m.content : (m.content?.[0]?.text || '')
+        );
+        
+        callModal("zai-org/GLM-5-FP8", messages.map((m, i) => ({
+          role: m.role,
+          content: typeof m.content === 'string' ? m.content : (m.content?.[0]?.text || '')
+        })), parsed.max_tokens || 4096)
+          .then((data) => {
+            const msg = data.choices?.[0]?.message;
+            let text = msg?.content || msg?.reasoning_content || "";
+            
+            const response = {
+              status: "completed",
+              output: text
+            };
+
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(response));
+          })
+          .catch((err) => {
+            res.writeHead(502, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: err.message }));
+          });
+      } else {
+        // Forward to gateway as Messages API
+        const rewritten = resolveModel(model);
+        const messagesPayload = {
+          model: rewritten,
+          max_tokens: parsed.max_tokens || 4096,
+          messages: messages
+        };
+        
+        const proxyBody = Buffer.from(JSON.stringify(messagesPayload));
+        const headers = { ...req.headers, host: `${TGW_HOST}:${TGW_PORT}` };
+        headers["content-type"] = "application/json";
+        headers["anthropic-version"] = "2023-06-01";
+        headers["content-length"] = String(proxyBody.length);
+
+        const upstream = http.request(
+          { host: TGW_HOST, port: TGW_PORT, path: "/anthropic/v1/messages", method: "POST", headers },
+          (upRes) => {
+            let data = '';
+            upRes.on('data', c => data += c);
+            upRes.on('end', () => {
+              try {
+                const resp = JSON.parse(data);
+                // Translate back to Responses API format
+                const output = resp.content?.[0]?.text || resp.content?.[0]?.thinking || "";
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ status: "completed", output }));
+              } catch {
+                res.writeHead(upRes.statusCode, upRes.headers);
+                res.end(data);
+              }
+            });
+          }
+        );
+        upstream.on("error", (err) => {
+          res.writeHead(502, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        upstream.end(proxyBody);
+      }
+    });
+    return;
+  }
 
   if (req.method === "POST" && isAnthropic) {
     const chunks = [];
