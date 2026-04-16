@@ -2,7 +2,7 @@
 set -e
 
 export TOKLIGENCE_EMAIL=${TOKLIGENCE_EMAIL:-admin@local}
-export TOKLIGENCE_ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+export TOKLIGENCE_ANTHROPIC_API_KEY=${MINIMAX_API_KEY}
 export TOKLIGENCE_OPENAI_API_KEY=${OPENAI_API_KEY}
 export MINIMAX_API_BASE=${MINIMAX_API_BASE}
 export MODAL_GLM5_API_BASE=${MODAL_GLM5_API_BASE}
@@ -23,7 +23,7 @@ identity_path=/data/identity.db
 work_mode=auto
 
 anthropic_api_key=${TOKLIGENCE_ANTHROPIC_API_KEY}
-anthropic_base_url=${ANTHROPIC_API_BASE:-https://api.anthropic.com}
+anthropic_base_url=${MINIMAX_API_BASE:-https://api.minimax.io/anthropic}
 
 openai_api_key=${TOKLIGENCE_OPENAI_API_KEY}
 openai_base_url=${OPENAI_API_BASE:-https://api.openai.com/v1}
