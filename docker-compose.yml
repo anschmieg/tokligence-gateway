@@ -7,11 +7,15 @@ services:
     volumes:
       - gateway-data:/data
     environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - MINIMAX_API_KEY=${MINIMAX_API_KEY}
       - MINIMAX_API_BASE=${MINIMAX_API_BASE:-https://api.minimax.io/anthropic}
       - MODAL_GLM5_API_BASE=${MODAL_GLM5_API_BASE}
       - MODAL_GLM5_API_KEY=${MODAL_GLM5_API_KEY}
-      - TOKLIGENCE_AUTH_SECRET=${TOKLIGENCE_AUTH_SECRET:-tokligence-dev-secret}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENCODE_API_KEY=${OPENCODE_API_KEY}
+      - TOKLIGENCE_AUTH_SECRET=${TOKLIGENCE_AUTH_SECRET}
 
 volumes:
   gateway-data:

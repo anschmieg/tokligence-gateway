@@ -11,16 +11,30 @@ const PROXY_PORT = 8080;
 const TGW_HOST   = "127.0.0.1";
 const TGW_PORT   = 8081;
 const MODAL_KEY  = process.env.MODAL_GLM5_API_KEY || "modalresearch_qCoc8v8mnEgVCIyzHNHmBw6E2QjbAE9PFuk6aCWFEno";
+const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY;
+const OPENCODE_KEY = process.env.OPENCODE_API_KEY;
 
 // Auth token prefix stripping: clients send sk-proj-<SECRET> or sk-ant-<SECRET>
 // We validate against TOKLIGENCE_AUTH_SECRET and forward the bare secret to gateway
 const AUTH_SECRET = process.env.TOKLIGENCE_AUTH_SECRET;
 const AUTH_PREFIXES = ["sk-proj-", "sk-ant-"];
 
-const GLM_MODELS = /^glm-5|^zai-org\/GLM-5|^claude-opus/i;
+const GLM_MODELS = /^glm-5|^zai-org\/GLM-5/i;
+const OPENROUTER_MODELS = /^openrouter\/|^or\/|^free/i;
+const OPENCODE_MODELS = /^opencode-go\/|^oc\//i;
+
+const CLAUDE_TIER_MAP = {
+  "claude-opus": "oc/deepseek-v4-pro",
+  "claude-sonnet": "oc/kimi-k2.6",
+  "claude-haiku": "oc/minimax-m2.7",
+};
+
+const OPENROUTER_ALIASES = {
+  // Manual mapping for specific model families
+  "free": "openrouter/free",
+};
+
 const MINIMAX_MAP = {
-  "claude-sonnet": "MiniMax-M2.7",
-  "claude-haiku": "MiniMax-M2.1",
   "minimax-m2.7": "MiniMax-M2.7",
   "minimax-m2.5": "MiniMax-M2.5",
   "minimax-m2.1": "MiniMax-M2.1",
@@ -31,10 +45,51 @@ const MINIMAX_MAP = {
 
 function resolveModel(model) {
   if (!model) return model;
+  const lower = model.toLowerCase();
+  for (const [prefix, target] of Object.entries(CLAUDE_TIER_MAP)) {
+    if (lower.startsWith(prefix.toLowerCase())) {
+      return target;
+    }
+  }
   for (const [prefix, target] of Object.entries(MINIMAX_MAP)) {
+    if (lower.startsWith(prefix.toLowerCase())) {
+      return target;
+    }
+  }
+  return model;
+}
+
+function isOpenRouterModel(model) {
+  return model && OPENROUTER_MODELS.test(model);
+}
+
+function isOpenCodeModel(model) {
+  return model && OPENCODE_MODELS.test(model);
+}
+
+function resolveOpenRouterModel(model) {
+  if (!model) return model;
+  if (model.toLowerCase().startsWith("openrouter/")) {
+    return model.slice(11);
+  }
+  if (model.toLowerCase().startsWith("or/")) {
+    return model.slice(3);
+  }
+  for (const [prefix, target] of Object.entries(OPENROUTER_ALIASES)) {
     if (model.toLowerCase().startsWith(prefix.toLowerCase())) {
       return target;
     }
+  }
+  return model;
+}
+
+function resolveOpenCodeModel(model) {
+  if (!model) return model;
+  if (model.toLowerCase().startsWith("opencode-go/")) {
+    return model;
+  }
+  if (model.toLowerCase().startsWith("oc/")) {
+    return "opencode-go/" + model.slice(3);
   }
   return model;
 }
@@ -102,6 +157,88 @@ function callModal(model, messages, maxTokens) {
   });
 }
 
+function callOpenCodeGoOpenAI(model, messages, maxTokens) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      model: resolveOpenCodeModel(model),
+      messages,
+      stream: false,
+      max_tokens: maxTokens
+    });
+
+    const options = {
+      hostname: "opencode.ai",
+      port: 443,
+      path: "/zen/go/v1/chat/completions",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${OPENCODE_KEY}`,
+        "Content-Length": Buffer.byteLength(body)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => {
+        try {
+          const data = JSON.parse(Buffer.concat(chunks).toString());
+          resolve(data);
+        } catch {
+          reject(new Error("Invalid JSON from OpenCode Go"));
+        }
+      });
+    });
+
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+function callOpenRouterOpenAI(model, messages, maxTokens) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      model: resolveOpenRouterModel(model),
+      messages,
+      stream: false,
+      max_tokens: maxTokens
+    });
+
+    const options = {
+      hostname: "openrouter.ai",
+      port: 443,
+      path: "/api/v1/chat/completions",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${OPENROUTER_KEY}`,
+        "Content-Length": Buffer.byteLength(body),
+        "HTTP-Referer": "https://github.com/tokligence/gateway",
+        "X-Title": "Tokligence Gateway"
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => {
+        try {
+          const data = JSON.parse(Buffer.concat(chunks).toString());
+          resolve(data);
+        } catch {
+          reject(new Error("Invalid JSON from OpenRouter"));
+        }
+      });
+    });
+
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
@@ -111,7 +248,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  const isAnthropic = req.url.includes("/anthropic/v1/messages");
+  const isAnthropic = req.url.includes("/v1/messages") && !req.url.includes("/responses");
   const isResponses = req.url.includes("/responses");
 
   // Handle Responses API - translate to Messages API
@@ -131,7 +268,7 @@ const server = http.createServer((req, res) => {
       }
 
       // Translate Responses API to Messages API
-      const model = parsed.model;
+      const model = resolveModel(parsed.model);
       const messages = parsed.messages || [{ role: "user", content: parsed.input }];
       
       // Check if GLM model
@@ -160,11 +297,52 @@ const server = http.createServer((req, res) => {
             res.writeHead(502, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: err.message }));
           });
+      } else if (isOpenCodeModel(model)) {
+        callOpenCodeGoOpenAI(model, messages.map((m) => ({
+          role: m.role,
+          content: typeof m.content === 'string' ? m.content : (m.content?.[0]?.text || '')
+        })), parsed.max_tokens || 4096)
+          .then((data) => {
+            const msg = data.choices?.[0]?.message;
+            let text = msg?.content || "";
+            
+            const response = {
+              status: "completed",
+              output: text
+            };
+
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(response));
+          })
+          .catch((err) => {
+            res.writeHead(502, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: err.message }));
+          });
+      } else if (isOpenRouterModel(model)) {
+        callOpenRouterOpenAI(model, messages.map((m) => ({
+          role: m.role,
+          content: typeof m.content === 'string' ? m.content : (m.content?.[0]?.text || '')
+        })), parsed.max_tokens || 4096)
+          .then((data) => {
+            const msg = data.choices?.[0]?.message;
+            let text = msg?.content || "";
+            
+            const response = {
+              status: "completed",
+              output: text
+            };
+
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(response));
+          })
+          .catch((err) => {
+            res.writeHead(502, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: err.message }));
+          });
       } else {
         // Forward to gateway as Messages API
-        const rewritten = resolveModel(model);
         const messagesPayload = {
-          model: rewritten,
+          model: model,
           max_tokens: parsed.max_tokens || 4096,
           messages: messages
         };
@@ -176,7 +354,7 @@ const server = http.createServer((req, res) => {
         headers["content-length"] = String(proxyBody.length);
 
         const upstream = http.request(
-          { host: TGW_HOST, port: TGW_PORT, path: "/anthropic/v1/messages", method: "POST", headers },
+          { host: TGW_HOST, port: TGW_PORT, path: "/v1/messages", method: "POST", headers },
           (upRes) => {
             let data = '';
             upRes.on('data', c => data += c);
@@ -219,7 +397,7 @@ const server = http.createServer((req, res) => {
         return;
       }
 
-      const model = parsed.model;
+      const model = resolveModel(parsed.model);
 
       if (isGlmModel(model)) {
         // Modal's GLM-5 has broken streaming: all text (including actual responses)
@@ -273,15 +451,78 @@ const server = http.createServer((req, res) => {
             res.writeHead(502, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: err.message }));
           });
-      } else {
-        const rewritten = resolveModel(model);
-        if (rewritten !== model) {
-          parsed.model = rewritten;
-          body = Buffer.from(JSON.stringify(parsed));
+      } else if (isOpenCodeModel(model)) {
+        const messages = parsed.messages.map(m => ({
+          role: m.role,
+          content: Array.isArray(m.content) 
+            ? m.content.map(c => c.text || c.content || "").join("")
+            : m.content
+        }));
+
+        callOpenCodeGoOpenAI(model, messages, parsed.max_tokens || 4096)
+          .then((data) => {
+            const msg = data.choices?.[0]?.message;
+            let text = msg?.content || "";
+            
+            const response = {
+              type: "message",
+              id: data.id || `msg_${Date.now()}`,
+              model: model,
+              role: "assistant",
+              content: [{ type: "text", text }],
+              stop_reason: "end_turn",
+              usage: {
+                input_tokens: data.usage?.prompt_tokens || 0,
+                output_tokens: data.usage?.completion_tokens || 0
+              }
+            };
+
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(response));
+          })
+          .catch((err) => {
+            res.writeHead(502, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: err.message }));
+          });
+      } else if (isOpenRouterModel(model)) {
+        const rewritten = resolveOpenRouterModel(model);
+        parsed.model = rewritten;
+        const proxyBody = Buffer.from(JSON.stringify(parsed));
+
+        const forwardHeaders = {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${OPENROUTER_KEY}`,
+          "HTTP-Referer": "https://github.com/tokligence/gateway",
+          "X-Title": "Tokligence Gateway"
+        };
+        
+        if (req.headers["anthropic-version"]) {
+          forwardHeaders["anthropic-version"] = req.headers["anthropic-version"];
         }
 
+        const options = {
+          hostname: "openrouter.ai",
+          port: 443,
+          path: "/api/v1/messages",
+          method: "POST",
+          headers: forwardHeaders
+        };
+
+        const upstream = https.request(options, (upRes) => {
+          res.writeHead(upRes.statusCode, upRes.headers);
+          upRes.pipe(res);
+        });
+
+        upstream.on("error", (err) => {
+          res.writeHead(502, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+
+        upstream.end(proxyBody);
+      } else {
         const headers = { ...req.headers, host: `${TGW_HOST}:${TGW_PORT}` };
-        headers["content-length"] = String(body.length);
+        const updatedBody = Buffer.from(JSON.stringify(parsed));
+        headers["content-length"] = String(updatedBody.length);
 
         const upstream = http.request(
           { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers },
@@ -296,7 +537,7 @@ const server = http.createServer((req, res) => {
           res.end(JSON.stringify({ error: err.message }));
         });
 
-        upstream.end(body);
+        upstream.end(updatedBody);
       }
     });
   } else {
@@ -327,6 +568,9 @@ const server = http.createServer((req, res) => {
 
 server.listen(PROXY_PORT, "0.0.0.0", () => {
   console.log(`tgw-proxy :${PROXY_PORT} -> tgw :${TGW_PORT}`);
-  console.log("  glm-5 / claude-opus-* -> Modal (always non-streaming)");
-  console.log("  claude-sonnet-* / minimax-* -> Gateway (MiniMax, streaming OK)");
+  console.log("  glm-5 / zai-org/* -> Modal (always non-streaming)");
+  console.log("  opencode-go/* / oc/* -> OpenCode Go (non-streaming)");
+  console.log("  openrouter/* / or/* / free -> OpenRouter (streaming OK)");
+  console.log("  claude-* -> OpenCode Go (Tier mapping, non-streaming)");
+  console.log("  minimax-* -> Gateway (MiniMax, streaming OK)");
 });
