@@ -344,9 +344,26 @@ function toAnthropicMessages(messages) {
 }
 
 function responseTextFromAnthropic(data) {
+  if (typeof data?.output_text === "string") return data.output_text;
+  if (typeof data?.completion === "string") return data.completion;
+  if (typeof data?.text === "string") return data.text;
+  if (typeof data?.message?.content === "string") return data.message.content;
+  if (Array.isArray(data?.choices)) {
+    return data.choices
+      .map((choice) => choice.message?.content || choice.message?.reasoning_content || choice.text || "")
+      .join("");
+  }
   const content = data?.content || [];
+  if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
-  return content.map((part) => part.text || part.thinking || "").join("");
+  return content.map((part) => (
+    part.text ||
+    part.thinking ||
+    part.content ||
+    part.input ||
+    (Array.isArray(part.content) ? textFromContent(part.content) : "") ||
+    ""
+  )).join("");
 }
 
 function anthropicToChatCompletion(data, requestedModel) {
