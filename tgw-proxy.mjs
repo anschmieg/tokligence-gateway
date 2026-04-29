@@ -639,6 +639,12 @@ function callOpenRouterOpenAI(model, messages, maxTokens) {
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
+  if (req.method === "GET" && url.pathname === "/health") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ status: "ok" }));
+    return;
+  }
+
   // Handle /models endpoint - return aggregated model list
   if ((req.method === "GET" || req.method === "POST") && url.pathname.match(/\/models$/)) {
     if (!validateAndStripAuth(req)) {
