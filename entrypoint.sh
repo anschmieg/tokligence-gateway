@@ -53,6 +53,12 @@ EOF
       fi
       sleep 1
     done
+
+    if [ "${CODEX_AUTO_DEVICE_LOGIN:-false}" = "true" ] \
+      && ! find /data/cliproxy/auth -type f -name '*.json' -print -quit | grep -q .; then
+      echo "No Codex OAuth credential found; starting one-time device authorization"
+      cli-proxy-api --codex-device-login --no-browser --config /data/cliproxy/config.yaml &
+    fi
   else
     echo "Using external Codex OAuth adapter: ${CODEX_PROXY_BASE_URL}"
   fi

@@ -26,6 +26,7 @@ Enable the embedded adapter and give it a separate internal key:
 
 ```dotenv
 CODEX_PROXY_ENABLED=true
+CODEX_AUTO_DEVICE_LOGIN=true
 CODEX_PROXY_API_KEY=replace-with-a-separate-internal-key
 ```
 
@@ -33,8 +34,12 @@ The internal key must be different from `TOKLIGENCE_AUTH_SECRET`. Leave
 `CODEX_PROXY_BASE_URL` unset to use the embedded loopback service. An explicit
 base URL remains supported for an external adapter.
 
-OAuth credentials persist under `/data/cliproxy/auth`. After the first deploy,
-run this once in the Coolify container terminal:
+OAuth credentials persist under `/data/cliproxy/auth`. With automatic device
+login enabled, the first deployment without a credential prints an OpenAI
+device URL and code to the application logs. Complete that authorization once;
+future starts detect the persistent credential and skip the login flow.
+
+The equivalent manual command is:
 
 ```sh
 cli-proxy-api --codex-device-login --no-browser --config /data/cliproxy/config.yaml
