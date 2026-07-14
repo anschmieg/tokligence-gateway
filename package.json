@@ -1,5 +1,10 @@
 {
+  "type": "module",
+  "scripts": {
+    "lint": "node --check tgw-proxy.mjs && node --check gateway-config.mjs && node --check test/gateway-config.test.mjs && node --check test/proxy-integration.test.mjs",
+    "test": "node --test"
+  },
   "dependencies": {
-    "@tokligence/gateway": "^0.4.0"
+    "@tokligence/gateway": "0.4.0"
   }
 }

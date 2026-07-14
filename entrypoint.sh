@@ -1,13 +1,64 @@
 #!/bin/sh
-set -e
+set -eu
 
-export TOKLIGENCE_EMAIL=${TOKLIGENCE_EMAIL:-admin@local}
-export TOKLIGENCE_ANTHROPIC_API_KEY=${MINIMAX_API_KEY}
-export TOKLIGENCE_OPENAI_API_KEY=${OPENAI_API_KEY}
-export MINIMAX_API_BASE=${MINIMAX_API_BASE}
-export MODAL_GLM5_API_BASE=${MODAL_GLM5_API_BASE}
+export TOKLIGENCE_EMAIL="${TOKLIGENCE_EMAIL:-admin@local}"
+export TOKLIGENCE_ANTHROPIC_API_KEY="${MINIMAX_API_KEY:-}"
+export TOKLIGENCE_OPENAI_API_KEY="${OPENAI_API_KEY:-}"
+export MINIMAX_API_BASE="${MINIMAX_API_BASE:-}"
+export MODAL_GLM5_API_BASE="${MODAL_GLM5_API_BASE:-}"
 
-mkdir -p /app/config/dev /root/.tokligence/logs /data
+mkdir -p /app/config/dev /root/.tokligence/logs /data /data/cliproxy/auth
+
+if [ "${CODEX_PROXY_ENABLED:-false}" = "true" ]; then
+  if [ -z "${CODEX_PROXY_API_KEY:-}" ]; then
+    echo "ERROR: CODEX_PROXY_API_KEY is required when CODEX_PROXY_ENABLED=true" >&2
+    exit 1
+  fi
+
+  case "${CODEX_PROXY_API_KEY}" in
+    *[!A-Za-z0-9._-]*)
+      echo "ERROR: CODEX_PROXY_API_KEY may only contain letters, numbers, dots, underscores, and hyphens" >&2
+      exit 1
+      ;;
+  esac
+
+  if [ -z "${CODEX_PROXY_BASE_URL:-}" ]; then
+    cat > /data/cliproxy/config.yaml << EOF
+host: "127.0.0.1"
+port: 8317
+remote-management:
+  allow-remote: false
+  secret-key: ""
+  disable-control-panel: true
+auth-dir: "/data/cliproxy/auth"
+api-keys:
+  - "${CODEX_PROXY_API_KEY}"
+debug: false
+logging-to-file: false
+usage-statistics-enabled: false
+EOF
+
+    echo "Starting embedded CLIProxyAPI on 127.0.0.1:8317"
+    cli-proxy-api --config /data/cliproxy/config.yaml &
+    export CODEX_PROXY_BASE_URL=http://127.0.0.1:8317
+
+    for i in $(seq 1 30); do
+      if curl -fsS -H "Authorization: Bearer ${CODEX_PROXY_API_KEY}" http://127.0.0.1:8317/v1/models > /dev/null 2>&1; then
+        echo "CLIProxyAPI ready after ${i}s"
+        break
+      fi
+      if [ "$i" -eq 30 ]; then
+        echo "ERROR: CLIProxyAPI did not become ready" >&2
+        exit 1
+      fi
+      sleep 1
+    done
+  else
+    echo "Using external Codex OAuth adapter: ${CODEX_PROXY_BASE_URL}"
+  fi
+else
+  unset CODEX_PROXY_BASE_URL CODEX_PROXY_API_KEY
+fi
 
 cat > /app/config/settings.ini << 'EOF'
 environment=dev

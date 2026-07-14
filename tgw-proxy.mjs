@@ -7,15 +7,24 @@
 
 import http from "http";
 import https from "https";
+import {
+  CODEX_REASONING_LEVELS,
+  codexUpstreamUrl,
+  isCodexModel,
+  isReservedCodexModel,
+  loadCodexConfig,
+  resolveClaudeTier,
+} from "./gateway-config.mjs";
 
-const PROXY_PORT = 8080;
-const TGW_HOST   = "127.0.0.1";
-const TGW_PORT   = 8081;
-const MODAL_KEY  = process.env.MODAL_GLM5_API_KEY || "modalresearch_qCoc8v8mnEgVCIyzHNHmBw6E2QjbAE9PFuk6aCWFEno";
+const PROXY_PORT = Number(process.env.PROXY_PORT || 8080);
+const TGW_HOST   = process.env.TGW_HOST || "127.0.0.1";
+const TGW_PORT   = Number(process.env.TGW_PORT || 8081);
+const MODAL_KEY  = process.env.MODAL_GLM5_API_KEY;
 const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY;
 const OPENCODE_KEY = process.env.OPENCODE_API_KEY;
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
 const DEBUG = process.env.TGW_DEBUG === "1";
+const CODEX = loadCodexConfig();
 
 // Auth token prefix stripping: clients send sk-proj-<SECRET> or sk-ant-<SECRET>
 // We validate against TOKLIGENCE_AUTH_SECRET and forward the bare secret to gateway
@@ -52,6 +61,14 @@ const FALLBACK_MODELS = [
   { id: "glm-5", provider: "modal" },
   { id: "glm-5.1", provider: "modal" },
   { id: "zai-org/GLM-5", provider: "modal" },
+  ...CODEX.models.map((id) => ({
+    id,
+    provider: "codex-oauth",
+    context_window: 1050000,
+    supported_reasoning_levels: CODEX_REASONING_LEVELS,
+    supports_reasoning_summaries: true,
+    supports_parallel_tool_calls: true,
+  })),
 ];
 
 const MODEL_REGISTRY = new Map();
@@ -79,7 +96,10 @@ const MINIMAX_MAP = {
 
 function registerModel(id, provider, extra = {}) {
   if (!id) return;
-  MODEL_REGISTRY.set(id.toLowerCase(), {
+  const key = id.toLowerCase();
+  const existing = MODEL_REGISTRY.get(key);
+  if (existing?.provider === "codex-oauth" && provider !== "codex-oauth") return;
+  MODEL_REGISTRY.set(key, {
     id,
     provider,
     object: "model",
@@ -97,12 +117,12 @@ function modelProvider(model) {
 function getAvailableModels() {
   return Array.from(MODEL_REGISTRY.values())
     .sort((a, b) => a.id.localeCompare(b.id))
-    .map(({ id, object, created, owned_by, provider }) => ({
-      id,
-      slug: id,
-      display_name: id,
-      description: `${provider} model`,
-      supported_reasoning_levels: [],
+    .map((model) => ({
+      id: model.id,
+      slug: model.id,
+      display_name: model.display_name || model.id,
+      description: model.description || `${model.provider} model`,
+      supported_reasoning_levels: model.supported_reasoning_levels || [],
       shell_type: "shell_command",
       visibility: "list",
       supported_in_api: true,
@@ -110,20 +130,20 @@ function getAvailableModels() {
       availability_nux: null,
       upgrade: null,
       base_instructions: "",
-      supports_reasoning_summaries: false,
-      default_reasoning_summary: "none",
+      supports_reasoning_summaries: model.supports_reasoning_summaries || false,
+      default_reasoning_summary: model.supports_reasoning_summaries ? "auto" : "none",
       support_verbosity: false,
       default_verbosity: null,
       apply_patch_tool_type: null,
       truncation_policy: { mode: "bytes", limit: 10000 },
-      supports_parallel_tool_calls: false,
+      supports_parallel_tool_calls: model.supports_parallel_tool_calls || false,
       supports_image_detail_original: false,
-      context_window: 272000,
+      context_window: model.context_window || 272000,
       experimental_supported_tools: [],
-      object,
-      created,
-      owned_by,
-      provider
+      object: model.object,
+      created: model.created,
+      owned_by: model.owned_by,
+      provider: model.provider,
     }));
 }
 
@@ -134,13 +154,15 @@ function seedConfiguredModels() {
     if (model.provider.startsWith("opencode") && !OPENCODE_KEY) continue;
     if (model.provider === "openrouter" && !OPENROUTER_KEY) continue;
     if (model.provider === "openai" && !OPENAI_KEY) continue;
-    registerModel(model.id, model.provider);
+    if (model.provider === "modal" && !MODAL_KEY) continue;
+    if (model.provider === "codex-oauth" && !CODEX.enabled) continue;
+    registerModel(model.id, model.provider, model);
   }
 }
 
 function fetchJson(options) {
   return new Promise((resolve, reject) => {
-    const client = options.port === 443 ? https : http;
+    const client = options.protocol === "https:" || Number(options.port) === 443 ? https : http;
     const req = client.request(options, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(chunk));
@@ -241,12 +263,9 @@ seedConfiguredModels();
 
 function resolveModel(model) {
   if (!model) return model;
+  const tierResolved = resolveClaudeTier(model, CODEX.tiers, CLAUDE_TIER_MAP);
+  if (tierResolved !== model) return tierResolved;
   const lower = model.toLowerCase();
-  for (const [prefix, target] of Object.entries(CLAUDE_TIER_MAP)) {
-    if (lower.startsWith(prefix.toLowerCase())) {
-      return target;
-    }
-  }
   for (const [prefix, target] of Object.entries(MINIMAX_MAP)) {
     if (lower.startsWith(prefix.toLowerCase())) {
       return target;
@@ -490,6 +509,80 @@ function validateAndStripAuth(req) {
   return true;
 }
 
+const CODEX_FORWARD_HEADERS = [
+  "accept",
+  "anthropic-beta",
+  "anthropic-version",
+  "content-type",
+  "user-agent",
+  "x-request-id",
+];
+
+function proxyToCodex(req, res, body) {
+  const target = codexUpstreamUrl(CODEX, req.url);
+  const client = target.protocol === "https:" ? https : http;
+  const headers = {
+    Authorization: `Bearer ${CODEX.apiKey}`,
+    "Content-Length": String(body.length),
+  };
+  for (const name of CODEX_FORWARD_HEADERS) {
+    if (req.headers[name] !== undefined) headers[name] = req.headers[name];
+  }
+
+  const upstream = client.request({
+    protocol: target.protocol,
+    hostname: target.hostname,
+    port: target.port || undefined,
+    path: `${target.pathname}${target.search}`,
+    method: req.method,
+    headers,
+  }, (upRes) => {
+    res.writeHead(upRes.statusCode || 502, upRes.headers);
+    upRes.pipe(res);
+  });
+
+  upstream.on("error", (err) => {
+    if (res.headersSent) {
+      res.destroy(err);
+      return;
+    }
+    res.writeHead(502, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Codex backend unavailable" }));
+  });
+  req.once("aborted", () => upstream.destroy());
+  res.once("close", () => {
+    if (!res.writableEnded) upstream.destroy();
+  });
+  upstream.end(body);
+}
+
+function handleCodexRoute(req, res, parsed, model) {
+  if (isCodexModel(CODEX, model)) {
+    proxyToCodex(req, res, Buffer.from(JSON.stringify({ ...parsed, model })));
+    return true;
+  }
+  if (isReservedCodexModel(model)) {
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: `Codex model is not configured: ${model}` }));
+    return true;
+  }
+  return false;
+}
+
+function providerSummary() {
+  return {
+    object: "list",
+    data: [
+      { id: "tokligence", configured: true, role: "default" },
+      { id: "codex-oauth", configured: CODEX.enabled, models: CODEX.models },
+      { id: "openrouter", configured: Boolean(OPENROUTER_KEY) },
+      { id: "opencode", configured: Boolean(OPENCODE_KEY) },
+      { id: "modal", configured: Boolean(MODAL_KEY) },
+      { id: "openai-api-key", configured: Boolean(OPENAI_KEY) },
+    ],
+  };
+}
+
 function callModal(model, messages, maxTokens) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
@@ -658,7 +751,14 @@ const server = http.createServer((req, res) => {
 
   if (req.method === "GET" && url.pathname === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ status: "ok" }));
+    res.end(JSON.stringify({
+      status: "ok",
+      service: "tgw-proxy",
+      backends: {
+        tokligence: "configured",
+        codex: CODEX.enabled ? "configured" : "disabled",
+      },
+    }));
     return;
   }
 
@@ -689,6 +789,12 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === "GET" && url.pathname === "/v1/providers") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(providerSummary()));
+    return;
+  }
+
   const isAnthropic = req.url.includes("/v1/messages") && !req.url.includes("/responses");
   const isResponses = req.url.includes("/responses");
   const isChatCompletions = req.url.includes("/v1/chat/completions");
@@ -709,6 +815,8 @@ const server = http.createServer((req, res) => {
       }
 
       const model = resolveModel(parsed.model);
+
+      if (handleCodexRoute(req, res, parsed, model)) return;
       
       if (isOpenCodeMiniMaxModel(model)) {
         callOpenCodeMessages(model, parsed.messages || [], parsed.max_tokens || 4096)
@@ -827,6 +935,8 @@ const server = http.createServer((req, res) => {
 
       const model = resolveModel(parsed.model);
       const messages = responsesPayloadToMessages(parsed);
+
+      if (handleCodexRoute(req, res, parsed, model)) return;
       if (DEBUG) {
         console.error(`responses request model=${model} stream=${parsed.stream === true} messages=${JSON.stringify(messages).slice(0, 1000)}`);
       }
@@ -975,6 +1085,8 @@ const server = http.createServer((req, res) => {
       }
 
       const model = resolveModel(parsed.model);
+
+      if (handleCodexRoute(req, res, parsed, model)) return;
 
       if (isGlmModel(model)) {
         // Modal's GLM-5 has broken streaming: all text (including actual responses)
@@ -1171,11 +1283,16 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PROXY_PORT, "0.0.0.0", () => {
-  console.log(`tgw-proxy :${PROXY_PORT} -> tgw :${TGW_PORT}`);
+  const address = server.address();
+  const listeningPort = typeof address === "object" && address ? address.port : PROXY_PORT;
+  console.log(`tgw-proxy :${listeningPort} -> tgw ${TGW_HOST}:${TGW_PORT}`);
   console.log("  glm-5 / zai-org/* -> Modal (always non-streaming)");
   console.log("  OpenCode MiniMax -> OpenCode Messages (non-streaming)");
   console.log("  other opencode-go/* / oc/* -> OpenCode chat completions (non-streaming)");
   console.log("  openrouter/* / or/* / free -> OpenRouter (streaming OK)");
-  console.log("  claude-* -> OpenCode Go (Tier mapping, non-streaming)");
+  console.log(CODEX.enabled
+    ? "  claude-* -> Codex OAuth (GPT-5.6 tier mapping)"
+    : "  claude-* -> OpenCode Go (Tier mapping, non-streaming)");
   console.log("  bare minimax-* -> Gateway (MiniMax, streaming OK)");
+  console.log(`  codex-oauth -> ${CODEX.enabled ? "private Codex backend" : "disabled"}`);
 });

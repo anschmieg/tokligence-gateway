@@ -5,3 +5,4 @@
 .claude/
 .codex/
 .playwright-mcp/
+node_modules/
