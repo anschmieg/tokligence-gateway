@@ -106,6 +106,8 @@ test("the façade routes exact Codex models and preserves Claude effort", async 
       TGW_HOST: "127.0.0.1",
       TGW_PORT: String(tokligencePort),
       TOKLIGENCE_AUTH_SECRET: "public-secret",
+      TOKLIGENCE_ADMIN_SECRET: "admin-secret",
+      CODEX_PROXY_ENABLED: "true",
       CODEX_PROXY_BASE_URL: `http://127.0.0.1:${codexPort}`,
       CODEX_PROXY_API_KEY: "internal-secret",
       OPENAI_API_KEY: "",
@@ -128,12 +130,39 @@ test("the façade routes exact Codex models and preserves Claude effort", async 
     "Content-Type": "application/json",
   };
 
+  const health = await fetch(`${baseUrl}/health`);
+  assert.equal(health.status, 200);
+  assert.deepEqual(await health.json(), { status: "ok", service: "tgw-proxy" });
+
+  for (const protectedPath of ["/v1/models", "/v1/providers", "/v1/messages"]) {
+    const denied = await fetch(`${baseUrl}${protectedPath}`);
+    assert.equal(denied.status, 401, `${protectedPath} must require public authentication`);
+  }
+
   const providers = await fetch(`${baseUrl}/v1/providers`, { headers });
   assert.equal(providers.status, 200);
   const providerBody = await providers.json();
   assert.equal(
     providerBody.data.find((provider) => provider.id === "codex-oauth").configured,
     true,
+  );
+
+  const deniedRoutes = await fetch(`${baseUrl}/admin/routes`, { headers });
+  assert.equal(deniedRoutes.status, 401);
+  const unknownAdmin = await fetch(`${baseUrl}/admin/unknown`, {
+    headers: { Authorization: "Bearer admin-secret" },
+  });
+  assert.equal(unknownAdmin.status, 404);
+  const routes = await fetch(`${baseUrl}/admin/routes`, {
+    headers: { Authorization: "Bearer admin-secret" },
+  });
+  assert.equal(routes.status, 200);
+  const routesBody = await routes.json();
+  assert.equal(routesBody.version, 1);
+  assert.equal(routesBody.providers.find((provider) => provider.default).id, "tokligence");
+  assert.equal(
+    routesBody.providers.find((provider) => provider.id === "codex-oauth").credential_pool.strategy,
+    "round-robin",
   );
 
   const models = await fetch(`${baseUrl}/v1/models`, { headers });

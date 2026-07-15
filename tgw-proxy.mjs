@@ -7,91 +7,82 @@
 
 import http from "http";
 import https from "https";
+import path from "node:path";
+import { timingSafeEqual } from "node:crypto";
 import {
   CODEX_REASONING_LEVELS,
   codexUpstreamUrl,
   isCodexModel,
   isReservedCodexModel,
-  loadCodexConfig,
-  resolveClaudeTier,
 } from "./gateway-config.mjs";
+import {
+  configuredModels,
+  loadRoutingConfig,
+  matchConfiguredProvider,
+  providerById,
+  providerEnabled,
+  publicRoutingConfig,
+  resolveConfiguredAlias,
+} from "./route-config.mjs";
 
 const PROXY_PORT = Number(process.env.PROXY_PORT || 8080);
 const TGW_HOST   = process.env.TGW_HOST || "127.0.0.1";
 const TGW_PORT   = Number(process.env.TGW_PORT || 8081);
-const MODAL_KEY  = process.env.MODAL_GLM5_API_KEY;
-const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY;
-const OPENCODE_KEY = process.env.OPENCODE_API_KEY;
-const OPENAI_KEY = process.env.OPENAI_API_KEY;
 const DEBUG = process.env.TGW_DEBUG === "1";
-const CODEX = loadCodexConfig();
+const ROUTING_CONFIG_PATH = path.resolve(process.env.ROUTING_CONFIG_PATH || "gateway.routes.yaml");
+const ROUTING = loadRoutingConfig(ROUTING_CONFIG_PATH);
+
+function providerApiKey(id) {
+  const provider = providerById(ROUTING, id);
+  return provider?.api_key_env ? process.env[provider.api_key_env] : null;
+}
+
+function providerBaseUrl(id) {
+  const provider = providerById(ROUTING, id);
+  const value = (provider?.base_url_env && process.env[provider.base_url_env]) || provider?.default_base_url;
+  return value ? new URL(value) : null;
+}
+
+const MODAL_KEY = providerApiKey("modal");
+const MODAL_URL = providerBaseUrl("modal");
+const OPENROUTER_KEY = providerApiKey("openrouter");
+const OPENROUTER_URL = providerBaseUrl("openrouter");
+const OPENCODE_KEY = providerApiKey("opencode-go");
+const OPENCODE_URL = providerBaseUrl("opencode-go");
+
+function loadOAuthAdapterConfig() {
+  const provider = providerById(ROUTING, "codex-oauth");
+  const enabled = Boolean(provider && providerEnabled(provider));
+  const models = enabled ? provider.models.map(({ id }) => id) : [];
+  const baseUrl = enabled
+    ? new URL(process.env[provider.external_base_url_env] || "http://127.0.0.1:8317")
+    : null;
+  return {
+    enabled,
+    baseUrl,
+    apiKey: enabled ? process.env[provider.internal_api_key_env] : null,
+    models,
+    modelSet: new Set(models.map((model) => model.toLowerCase())),
+  };
+}
+
+const CODEX = loadOAuthAdapterConfig();
 
 // Auth token prefix stripping: clients send sk-proj-<SECRET> or sk-ant-<SECRET>
 // We validate against TOKLIGENCE_AUTH_SECRET and forward the bare secret to gateway
-const AUTH_SECRET = process.env.TOKLIGENCE_AUTH_SECRET;
+const AUTH_SECRET = process.env[ROUTING.access.public_secret_env];
+const ADMIN_AUTH_SECRET = process.env[ROUTING.access.admin_secret_env];
 const AUTH_PREFIXES = ["sk-proj-", "sk-ant-"];
 
-const GLM_MODELS = /^glm-5|^zai-org\/GLM-5/i;
-const OPENROUTER_MODELS = /^openrouter\/|^or\/|^free/i;
-const OPENCODE_MODELS = /^opencode-go\/|^opencode-zen\/|^oc\/|^zen\/|^deepseek-v4|^kimi-k2|^glm-5\.\d|^mimo-v2|^qwen3/i;
 const MINIMAX_BARE_MODELS = /^minimax-m2/i;
 const MINIMAX_MODEL_FRAGMENT = /(^|\/)minimax-m2/i;
-
-const FALLBACK_MODELS = [
-  { id: "opencode-go/deepseek-v4-pro", provider: "opencode-go" },
-  { id: "opencode-go/deepseek-v4-flash", provider: "opencode-go" },
-  { id: "opencode-go/glm-5", provider: "opencode-go" },
-  { id: "opencode-go/glm-5.1", provider: "opencode-go" },
-  { id: "opencode-go/kimi-k2.5", provider: "opencode-go" },
-  { id: "opencode-go/kimi-k2.6", provider: "opencode-go" },
-  { id: "opencode-go/mimo-v2.5", provider: "opencode-go" },
-  { id: "opencode-go/mimo-v2.5-pro", provider: "opencode-go" },
-  { id: "opencode-go/mimo-v2-pro", provider: "opencode-go" },
-  { id: "opencode-go/mimo-v2-omni", provider: "opencode-go" },
-  { id: "opencode-go/minimax-m2.5", provider: "opencode-go" },
-  { id: "opencode-go/minimax-m2.7", provider: "opencode-go" },
-  { id: "opencode-go/qwen3.5-plus", provider: "opencode-go" },
-  { id: "opencode-go/qwen3.6-plus", provider: "opencode-go" },
-  { id: "claude-opus", provider: "opencode-go" },
-  { id: "claude-sonnet", provider: "opencode-go" },
-  { id: "claude-haiku", provider: "opencode-go" },
-  { id: "minimax-m2.1", provider: "gateway" },
-  { id: "minimax-m2.5", provider: "gateway" },
-  { id: "minimax-m2.7", provider: "gateway" },
-  { id: "glm-5", provider: "modal" },
-  { id: "glm-5.1", provider: "modal" },
-  { id: "zai-org/GLM-5", provider: "modal" },
-  ...CODEX.models.map((id) => ({
-    id,
-    provider: "codex-oauth",
-    context_window: 1050000,
-    supported_reasoning_levels: CODEX_REASONING_LEVELS,
-    supports_reasoning_summaries: true,
-    supports_parallel_tool_calls: true,
-  })),
-];
 
 const MODEL_REGISTRY = new Map();
 let modelRegistryRefresh = null;
 
-const CLAUDE_TIER_MAP = {
-  "claude-opus": "oc/deepseek-v4-pro",
-  "claude-sonnet": "oc/kimi-k2.6",
-  "claude-haiku": "oc/minimax-m2.7",
-};
-
 const OPENROUTER_ALIASES = {
   // Manual mapping for specific model families
   "free": "openrouter/free",
-};
-
-const MINIMAX_MAP = {
-  "minimax-m2.7": "MiniMax-M2.7",
-  "minimax-m2.5": "MiniMax-M2.5",
-  "minimax-m2.1": "MiniMax-M2.1",
-  "m2.7": "MiniMax-M2.7",
-  "m2.5": "MiniMax-M2.5",
-  "m2.1": "MiniMax-M2.1",
 };
 
 function registerModel(id, provider, extra = {}) {
@@ -150,13 +141,13 @@ function getAvailableModels() {
 function seedConfiguredModels() {
   MODEL_REGISTRY.clear();
 
-  for (const model of FALLBACK_MODELS) {
-    if (model.provider.startsWith("opencode") && !OPENCODE_KEY) continue;
-    if (model.provider === "openrouter" && !OPENROUTER_KEY) continue;
-    if (model.provider === "openai" && !OPENAI_KEY) continue;
-    if (model.provider === "modal" && !MODAL_KEY) continue;
-    if (model.provider === "codex-oauth" && !CODEX.enabled) continue;
-    registerModel(model.id, model.provider, model);
+  for (const model of configuredModels(ROUTING)) {
+    const codexMetadata = model.provider === "codex-oauth" ? {
+      supported_reasoning_levels: CODEX_REASONING_LEVELS,
+      supports_reasoning_summaries: true,
+      supports_parallel_tool_calls: true,
+    } : {};
+    registerModel(model.id, model.provider, { ...model, ...codexMetadata });
   }
 }
 
@@ -212,16 +203,16 @@ async function refreshModelRegistry() {
       const headers = { Authorization: `Bearer ${OPENCODE_KEY}` };
       refreshes.push(registerModelsFromEndpoint({
         provider: "opencode-go",
-        hostname: "opencode.ai",
-        port: 443,
+        hostname: OPENCODE_URL.hostname,
+        port: OPENCODE_URL.port || 443,
         path: "/zen/go/v1/models",
         headers,
         prefix: "opencode-go/"
       }));
       refreshes.push(registerModelsFromEndpoint({
         provider: "opencode-zen",
-        hostname: "opencode.ai",
-        port: 443,
+        hostname: OPENCODE_URL.hostname,
+        port: OPENCODE_URL.port || 443,
         path: "/zen/v1/models",
         headers,
         prefix: "opencode-zen/"
@@ -231,16 +222,16 @@ async function refreshModelRegistry() {
     if (OPENROUTER_KEY) {
       refreshes.push(registerModelsFromEndpoint({
         provider: "openrouter",
-        hostname: "openrouter.ai",
-        port: 443,
-        path: "/api/v1/models",
+        hostname: OPENROUTER_URL.hostname,
+        port: OPENROUTER_URL.port || 443,
+        path: `${OPENROUTER_URL.pathname.replace(/\/$/, "")}/models`,
         headers: { Authorization: `Bearer ${OPENROUTER_KEY}` },
         prefix: "openrouter/"
       }));
     }
 
     refreshes.push(registerModelsFromEndpoint({
-      provider: "gateway",
+      provider: "tokligence",
       hostname: TGW_HOST,
       port: TGW_PORT,
       path: "/v1/models"
@@ -262,25 +253,17 @@ async function refreshModelRegistry() {
 seedConfiguredModels();
 
 function resolveModel(model) {
-  if (!model) return model;
-  const tierResolved = resolveClaudeTier(model, CODEX.tiers, CLAUDE_TIER_MAP);
-  if (tierResolved !== model) return tierResolved;
-  const lower = model.toLowerCase();
-  for (const [prefix, target] of Object.entries(MINIMAX_MAP)) {
-    if (lower.startsWith(prefix.toLowerCase())) {
-      return target;
-    }
-  }
-  return model;
+  return resolveConfiguredAlias(ROUTING, model);
 }
 
 function isOpenRouterModel(model) {
-  return modelProvider(model) === "openrouter" || (model && OPENROUTER_MODELS.test(model));
+  return modelProvider(model) === "openrouter" || matchConfiguredProvider(ROUTING, model) === "openrouter";
 }
 
 function isOpenCodeModel(model) {
   const provider = modelProvider(model);
-  return provider === "opencode-go" || provider === "opencode-zen" || (model && OPENCODE_MODELS.test(model));
+  const configured = matchConfiguredProvider(ROUTING, model);
+  return provider === "opencode-go" || provider === "opencode-zen" || configured === "opencode-go" || configured === "opencode-zen";
 }
 
 function isOpenCodeMiniMaxModel(model) {
@@ -487,26 +470,42 @@ function sendResponsesResult(res, model, text, stream = false) {
 }
 
 function isGlmModel(model) {
-  return model && GLM_MODELS.test(model);
+  return matchConfiguredProvider(ROUTING, model) === "modal";
 }
 
-function extractAuthToken(authHeader) {
+function extractBearerToken(authHeader) {
   if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
-  const token = authHeader.slice(7);
+  return authHeader.slice(7);
+}
+
+function secretsEqual(actual, expected) {
+  if (!actual || !expected) return false;
+  const actualBuffer = Buffer.from(actual);
+  const expectedBuffer = Buffer.from(expected);
+  return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+function publicSecretFromToken(token) {
+  if (!token) return null;
+  if (secretsEqual(token, AUTH_SECRET)) return AUTH_SECRET;
   for (const prefix of AUTH_PREFIXES) {
     if (token.startsWith(prefix)) {
       const secret = token.slice(prefix.length);
-      if (AUTH_SECRET && secret === AUTH_SECRET) return secret;
+      if (secretsEqual(secret, AUTH_SECRET)) return secret;
     }
   }
   return null;
 }
 
 function validateAndStripAuth(req) {
-  const strippedToken = extractAuthToken(req.headers["authorization"]);
+  const strippedToken = publicSecretFromToken(extractBearerToken(req.headers["authorization"]));
   if (!strippedToken) return false;
   req.headers["authorization"] = `Bearer ${strippedToken}`;
   return true;
+}
+
+function validateAdminAuth(req) {
+  return secretsEqual(extractBearerToken(req.headers["authorization"]), ADMIN_AUTH_SECRET);
 }
 
 const CODEX_FORWARD_HEADERS = [
@@ -570,17 +569,8 @@ function handleCodexRoute(req, res, parsed, model) {
 }
 
 function providerSummary() {
-  return {
-    object: "list",
-    data: [
-      { id: "tokligence", configured: true, role: "default" },
-      { id: "codex-oauth", configured: CODEX.enabled, models: CODEX.models },
-      { id: "openrouter", configured: Boolean(OPENROUTER_KEY) },
-      { id: "opencode", configured: Boolean(OPENCODE_KEY) },
-      { id: "modal", configured: Boolean(MODAL_KEY) },
-      { id: "openai-api-key", configured: Boolean(OPENAI_KEY) },
-    ],
-  };
+  const config = publicRoutingConfig(ROUTING);
+  return { object: "list", data: config.providers };
 }
 
 function callModal(model, messages, maxTokens) {
@@ -593,9 +583,9 @@ function callModal(model, messages, maxTokens) {
     });
 
     const options = {
-      hostname: "api.us-west-2.modal.direct",
-      port: 443,
-      path: "/v1/chat/completions",
+      hostname: MODAL_URL.hostname,
+      port: MODAL_URL.port || 443,
+      path: MODAL_URL.pathname,
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -633,8 +623,8 @@ function callOpenCodeGoOpenAI(model, messages, maxTokens) {
     });
 
     const options = {
-      hostname: "opencode.ai",
-      port: 443,
+      hostname: OPENCODE_URL.hostname,
+      port: OPENCODE_URL.port || 443,
       path: getOpenCodeChatCompletionsPath(model),
       method: "POST",
       headers: {
@@ -673,8 +663,8 @@ function callOpenCodeMessages(model, messages, maxTokens) {
     });
 
     const options = {
-      hostname: "opencode.ai",
-      port: 443,
+      hostname: OPENCODE_URL.hostname,
+      port: OPENCODE_URL.port || 443,
       path: getOpenCodeMessagesPath(model),
       method: "POST",
       headers: {
@@ -714,9 +704,9 @@ function callOpenRouterOpenAI(model, messages, maxTokens) {
     });
 
     const options = {
-      hostname: "openrouter.ai",
-      port: 443,
-      path: "/api/v1/chat/completions",
+      hostname: OPENROUTER_URL.hostname,
+      port: OPENROUTER_URL.port || 443,
+      path: `${OPENROUTER_URL.pathname.replace(/\/$/, "")}/chat/completions`,
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -754,16 +744,28 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({
       status: "ok",
       service: "tgw-proxy",
-      backends: {
-        tokligence: "configured",
-        codex: CODEX.enabled ? "configured" : "disabled",
-      },
     }));
     return;
   }
 
+  if (url.pathname.startsWith("/admin/")) {
+    if (!validateAdminAuth(req)) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Unauthorized" }));
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/admin/routes") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(publicRoutingConfig(ROUTING)));
+      return;
+    }
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Not found" }));
+    return;
+  }
+
   // Handle /models endpoint - return aggregated model list
-  if ((req.method === "GET" || req.method === "POST") && url.pathname.match(/\/models$/)) {
+  if ((req.method === "GET" || req.method === "POST") && ["/models", "/v1/models"].includes(url.pathname)) {
     if (!validateAndStripAuth(req)) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Unauthorized" }));
@@ -853,9 +855,9 @@ const server = http.createServer((req, res) => {
         };
 
         const options = {
-          hostname: "openrouter.ai",
-          port: 443,
-          path: "/api/v1/chat/completions",
+          hostname: OPENROUTER_URL.hostname,
+          port: OPENROUTER_URL.port || 443,
+          path: `${OPENROUTER_URL.pathname.replace(/\/$/, "")}/chat/completions`,
           method: "POST",
           headers: forwardHeaders
         };
@@ -873,7 +875,7 @@ const server = http.createServer((req, res) => {
         upstream.end(proxyBody);
       } else if (MINIMAX_BARE_MODELS.test(model)) {
         // MiniMax models: forward to gateway (port 8081)
-        const mappedModel = MINIMAX_MAP[model.toLowerCase()] || model;
+        const mappedModel = resolveConfiguredAlias(ROUTING, model);
         const proxyBody = Buffer.from(JSON.stringify({ ...parsed, model: mappedModel }));
         const headers = { ...req.headers, host: `${TGW_HOST}:${TGW_PORT}` };
         headers["content-type"] = "application/json";
@@ -1195,9 +1197,9 @@ const server = http.createServer((req, res) => {
         }
 
         const options = {
-          hostname: "openrouter.ai",
-          port: 443,
-          path: "/api/v1/messages",
+          hostname: OPENROUTER_URL.hostname,
+          port: OPENROUTER_URL.port || 443,
+          path: `${OPENROUTER_URL.pathname.replace(/\/$/, "")}/messages`,
           method: "POST",
           headers: forwardHeaders
         };

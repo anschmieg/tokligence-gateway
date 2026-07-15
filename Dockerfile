@@ -23,8 +23,11 @@ RUN npm install -g @tokligence/gateway@0.4.0
 COPY --from=cliproxy /usr/local/bin/cli-proxy-api /usr/local/bin/cli-proxy-api
 
 WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 COPY tgw-proxy.mjs ./
 COPY gateway-config.mjs ./
+COPY route-config.mjs compile-config.mjs gateway.routes.yaml ./
 COPY entrypoint.sh ./
 RUN chmod +x entrypoint.sh
 

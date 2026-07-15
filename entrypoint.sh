@@ -1,12 +1,6 @@
 #!/bin/sh
 set -eu
 
-export TOKLIGENCE_EMAIL="${TOKLIGENCE_EMAIL:-admin@local}"
-export TOKLIGENCE_ANTHROPIC_API_KEY="${MINIMAX_API_KEY:-}"
-export TOKLIGENCE_OPENAI_API_KEY="${OPENAI_API_KEY:-}"
-export MINIMAX_API_BASE="${MINIMAX_API_BASE:-}"
-export MODAL_GLM5_API_BASE="${MODAL_GLM5_API_BASE:-}"
-
 mkdir -p /app/config/dev /root/.tokligence/logs /data /data/cliproxy/auth
 
 if [ "${CODEX_PROXY_ENABLED:-false}" = "true" ]; then
@@ -22,21 +16,13 @@ if [ "${CODEX_PROXY_ENABLED:-false}" = "true" ]; then
       ;;
   esac
 
+fi
+
+# Compile Tokligence and OAuth-proxy configs from the single routing policy.
+node /app/compile-config.mjs
+
+if [ "${CODEX_PROXY_ENABLED:-false}" = "true" ]; then
   if [ -z "${CODEX_PROXY_BASE_URL:-}" ]; then
-    cat > /data/cliproxy/config.yaml << EOF
-host: "127.0.0.1"
-port: 8317
-remote-management:
-  allow-remote: false
-  secret-key: ""
-  disable-control-panel: true
-auth-dir: "/data/cliproxy/auth"
-api-keys:
-  - "${CODEX_PROXY_API_KEY}"
-debug: false
-logging-to-file: false
-usage-statistics-enabled: false
-EOF
 
     echo "Starting embedded CLIProxyAPI on 127.0.0.1:8317"
     cli-proxy-api --config /data/cliproxy/config.yaml &
@@ -65,38 +51,6 @@ EOF
 else
   unset CODEX_PROXY_BASE_URL CODEX_PROXY_API_KEY
 fi
-
-cat > /app/config/settings.ini << 'EOF'
-environment=dev
-EOF
-
-# Unquoted EOF so shell substitutes env vars
-cat > /app/config/dev/gateway.ini << EOF
-auth_disabled=true
-auth_secret=${TOKLIGENCE_AUTH_SECRET}
-log_level=info
-ledger_path=/data/ledger.db
-identity_path=/data/identity.db
-work_mode=auto
-
-anthropic_api_key=${TOKLIGENCE_ANTHROPIC_API_KEY}
-anthropic_base_url=${MINIMAX_API_BASE:-https://api.minimax.io/anthropic}
-
-openai_api_key=${TOKLIGENCE_OPENAI_API_KEY}
-openai_base_url=${OPENAI_API_BASE:-https://api.openai.com/v1}
-
-sidecar_model_map=glm-5.1:cloud=zai-org/GLM-5.1-FP8,glm-5:cloud=zai-org/GLM-5-FP8
-
-model_provider_routes=claude*=anthropic,gpt*=openai,MiniMax*=anthropic,zai-org*=openai
-routes=claude*=>anthropic,gpt*=>openai,MiniMax*=>anthropic,zai-org*=>openai,loopback=>loopback
-
-enable_facade=true
-multiport_mode=false
-facade_port=8081
-bridge_session_enabled=false
-bridge_session_ttl=5m
-bridge_session_max_count=1000
-EOF
 
 GATEWAYD=$(find /usr/local/lib/node_modules/@tokligence/gateway -name "gatewayd" -type f 2>/dev/null | head -1)
 if [ -z "$GATEWAYD" ]; then

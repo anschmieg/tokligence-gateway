@@ -13,12 +13,34 @@ only to loopback and is never exposed directly to the internet.
 - `GET /health` — façade and backend-configuration status
 - `GET /v1/models` — unified model registry
 - `GET /v1/providers` — configured provider registry without secrets
+- `GET /admin/routes` — effective routing policy without secrets
 - `POST /v1/messages` — Anthropic Messages, including streaming and tools
 - `POST /v1/messages/count_tokens` — Anthropic token counting
 - `POST /v1/responses` — OpenAI Responses
 - `POST /v1/chat/completions` — OpenAI Chat Completions
 
 All endpoints except `/health` require the existing gateway bearer token.
+`/admin/*` uses a separate `TOKLIGENCE_ADMIN_SECRET`; the public gateway token
+cannot access administrative routes. `/health` intentionally returns only a
+generic liveness result and exposes no provider state.
+
+## Routing policy
+
+Edit `gateway.routes.yaml` to manage providers, models, aliases, routes, and
+OAuth credential-pool policy. Secrets remain in the deployment environment and
+are referenced by environment-variable name. At container startup,
+`compile-config.mjs` validates this policy and generates the private Tokligence
+and OAuth-proxy configuration files. Invalid policy prevents startup.
+
+A deployment restart is the single apply operation. There is intentionally no
+partial hot reload: the middleware, Tokligence, and OAuth proxy always start
+from the same policy revision. `GET /admin/routes` shows the effective sanitized
+policy currently in use.
+
+CLIProxyAPI is used strictly as the OAuth proxy. It owns OAuth login, refresh,
+credential selection, affinity, and retry/cooldown behavior. Add an account with
+its device-login command; credentials persist under `/data/cliproxy/auth`. The
+public middleware never exposes or modifies OAuth tokens.
 
 ## Codex backend
 
@@ -28,6 +50,7 @@ Enable the embedded adapter and give it a separate internal key:
 CODEX_PROXY_ENABLED=true
 CODEX_AUTO_DEVICE_LOGIN=true
 CODEX_PROXY_API_KEY=replace-with-a-separate-internal-key
+TOKLIGENCE_ADMIN_SECRET=replace-with-a-separate-admin-key
 ```
 
 The internal key must be different from `TOKLIGENCE_AUTH_SECRET`. Leave
@@ -48,18 +71,13 @@ cli-proxy-api --codex-device-login --no-browser --config /data/cliproxy/config.y
 Open the displayed OpenAI device URL and enter its code. The running adapter
 automatically discovers the saved credential.
 
-Optional model configuration:
+Codex models, Claude tier aliases, pool strategy, affinity, and retry limits are
+configured only in `gateway.routes.yaml`. Unlisted `gpt-5.6-*` IDs return 404
+and never fall through to another provider.
 
-```dotenv
-CODEX_MODELS=gpt-5.6-luna,gpt-5.6-terra,gpt-5.6-sol
-CODEX_HAIKU_MODEL=gpt-5.6-luna
-CODEX_SONNET_MODEL=gpt-5.6-terra
-CODEX_OPUS_MODEL=gpt-5.6-sol
-CODEX_FABLE_MODEL=gpt-5.6-sol
-```
-
-Only exact IDs in `CODEX_MODELS` are routed to Codex OAuth. Other
-`gpt-5.6-*` IDs return 404 and never fall through to another provider.
+Each Claude tier has one mapping with multiple wildcard patterns, covering both
+tier-first names such as `claude-sonnet-4.5` and version-first names such as
+`claude-3.5-sonnet` without duplicating its target configuration.
 
 For Claude Code, adaptive thinking and `output_config.effort` are forwarded
 unchanged. The internal adapter translates the explicit `low`, `medium`,
