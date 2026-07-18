@@ -4,9 +4,10 @@
 publishes the unified model/provider registry, and routes each exact model to
 Tokligence or a configured provider adapter.
 
-Tokligence remains the default backend. Codex OAuth is optional and is reached
-through CLIProxyAPI v7.2.75 embedded in the same container. The adapter binds
-only to loopback and is never exposed directly to the internet.
+Tokligence remains the loopback protocol-translation layer. Ollama Cloud is its
+configured OpenAI-compatible upstream for execution and economy traffic; Codex
+OAuth remains the architecture provider through CLIProxyAPI v7.2.75. Neither
+internal adapter is exposed directly to the internet.
 
 ## Public endpoints
 
@@ -71,9 +72,10 @@ cli-proxy-api --codex-device-login --no-browser --config /data/cliproxy/config.y
 Open the displayed OpenAI device URL and enter its code. The running adapter
 automatically discovers the saved credential.
 
-Codex models, Claude tier aliases, pool strategy, affinity, and retry limits are
-configured only in `gateway.routes.yaml`. Unlisted `gpt-5.6-*` IDs return 404
-and never fall through to another provider.
+Codex models, Ollama Cloud models, Claude tier aliases, pool strategy, affinity,
+and retry limits are configured only in `gateway.routes.yaml`. Every public
+model ID is explicitly cataloged: unknown IDs, including unlisted `gpt-5.6-*`
+IDs, return 404 and never fall through to another provider.
 
 Each Claude tier has one mapping with multiple wildcard patterns, covering both
 tier-first names such as `claude-sonnet-4.5` and version-first names such as
@@ -82,6 +84,23 @@ tier-first names such as `claude-sonnet-4.5` and version-first names such as
 For Claude Code, adaptive thinking and `output_config.effort` are forwarded
 unchanged. The internal adapter translates the explicit `low`, `medium`,
 `high`, `xhigh`, and `max` values to Codex `reasoning.effort`.
+
+## Ollama Cloud execution layer
+
+Set the Ollama Cloud credentials only in the deployment environment:
+
+```dotenv
+OLLAMA_API_KEY=replace-with-an-ollama-cloud-key
+OLLAMA_API_BASE=https://ollama.com/v1
+```
+
+Public direct model IDs use the `ollama/` prefix, such as
+`ollama/kimi-k2.7-code` and `ollama/gpt-oss-20b`. `gateway/execution` and
+`gateway/cheap` use the explicitly declared Ollama candidates. Tokligence owns
+Messages, Chat Completions, and Responses translation; unsupported model
+features fail closed. The policy deliberately keeps OpenRouter and Mistral as
+separate disabled/future providers so execution traffic can transition without
+changing the public profile IDs.
 
 ## Claude Code wrapper
 

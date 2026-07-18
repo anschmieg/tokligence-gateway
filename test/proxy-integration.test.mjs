@@ -110,10 +110,8 @@ test("the façade routes exact Codex models and preserves Claude effort", async 
       CODEX_PROXY_ENABLED: "true",
       CODEX_PROXY_BASE_URL: `http://127.0.0.1:${codexPort}`,
       CODEX_PROXY_API_KEY: "internal-secret",
-      OPENAI_API_KEY: "",
+      OLLAMA_API_KEY: "ollama-secret",
       OPENROUTER_API_KEY: "",
-      OPENCODE_API_KEY: "",
-      MODAL_GLM5_API_KEY: "",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -159,7 +157,7 @@ test("the façade routes exact Codex models and preserves Claude effort", async 
   assert.equal(routes.status, 200);
   const routesBody = await routes.json();
   assert.equal(routesBody.version, 2);
-  assert.equal(routesBody.providers.find((provider) => provider.default).id, "tokligence");
+  assert.equal(routesBody.providers.find((provider) => provider.default).id, "ollama-cloud");
   assert.equal(
     routesBody.providers.find((provider) => provider.id === "codex-oauth").credential_pool.strategy,
     "round-robin",
@@ -213,9 +211,9 @@ test("the façade routes exact Codex models and preserves Claude effort", async 
       messages: [{ role: "user", content: "hello" }],
     }),
   });
-  assert.equal(unknown.status, 200);
+  assert.equal(unknown.status, 404);
   assert.equal(codexRequests.length, 2);
-  assert.equal(tokligenceRequests.length, 1);
+  assert.equal(tokligenceRequests.length, 0);
 
   const existing = await fetch(`${baseUrl}/v1/messages`, {
     method: "POST",
@@ -225,8 +223,8 @@ test("the façade routes exact Codex models and preserves Claude effort", async 
       messages: [{ role: "user", content: "hello" }],
     }),
   });
-  assert.equal(existing.status, 200);
-  assert.equal(tokligenceRequests.length, 2);
+  assert.equal(existing.status, 404);
+  assert.equal(tokligenceRequests.length, 0);
 });
 
 test("the façade preserves upstream failures without synthesizing success", async (t) => {
@@ -246,7 +244,7 @@ test("the façade preserves upstream failures without synthesizing success", asy
       TOKLIGENCE_AUTH_SECRET: "public-secret",
       TOKLIGENCE_ADMIN_SECRET: "admin-secret",
       CODEX_PROXY_ENABLED: "false",
-      OPENAI_API_KEY: "",
+      OLLAMA_API_KEY: "ollama-secret",
       OPENROUTER_API_KEY: "",
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -256,7 +254,7 @@ test("the façade preserves upstream failures without synthesizing success", asy
   const response = await fetch(`http://127.0.0.1:${port}/v1/messages`, {
     method: "POST",
     headers: { Authorization: "Bearer sk-ant-public-secret", "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "unrelated-existing-model", messages: [{ role: "user", content: "hello" }] }),
+    body: JSON.stringify({ model: "ollama/deepseek-v4-flash", messages: [{ role: "user", content: "hello" }] }),
   });
   assert.equal(response.status, 503);
   const body = await response.json();

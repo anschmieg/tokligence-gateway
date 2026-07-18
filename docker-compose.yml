@@ -7,14 +7,9 @@ services:
     volumes:
       - gateway-data:/data
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_API_BASE=${OPENAI_API_BASE:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - MINIMAX_API_KEY=${MINIMAX_API_KEY}
-      - MINIMAX_API_BASE=${MINIMAX_API_BASE:-https://api.minimax.io/anthropic}
-      - MODAL_GLM5_API_BASE=${MODAL_GLM5_API_BASE}
-      - MODAL_GLM5_API_KEY=${MODAL_GLM5_API_KEY}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY}
+      - OLLAMA_API_BASE=${OLLAMA_API_BASE:-https://ollama.com/v1}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENROUTER_API_BASE=${OPENROUTER_API_BASE:-https://openrouter.ai/api/v1}
       - MISTRAL_ENABLED=${MISTRAL_ENABLED:-false}
       - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}

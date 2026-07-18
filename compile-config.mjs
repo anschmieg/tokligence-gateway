@@ -24,6 +24,15 @@ for (const provider of config.providers) {
     if (provider.adapter === "oauth-proxy" && !process.env[provider.internal_api_key_env]) {
       throw new Error(`enabled provider ${provider.id} requires environment variable ${provider.internal_api_key_env}`);
     }
+    if (provider.adapter === "tokligence") {
+      for (const [upstreamId, upstream] of Object.entries(provider.upstreams || {})) {
+        if (!process.env[upstream.api_key_env]) throw new Error(`enabled provider ${provider.id} upstream ${upstreamId} requires environment variable ${upstream.api_key_env}`);
+        const baseUrl = process.env[upstream.base_url_env] || upstream.default_base_url;
+        if (!baseUrl) throw new Error(`enabled provider ${provider.id} upstream ${upstreamId} requires a base URL`);
+        const parsed = new URL(baseUrl);
+        if (parsed.protocol !== "https:") throw new Error(`enabled provider ${provider.id} upstream ${upstreamId} base URL must use HTTPS`);
+      }
+    }
   }
 }
 

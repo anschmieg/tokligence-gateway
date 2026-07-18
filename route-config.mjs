@@ -109,6 +109,15 @@ export function parseRoutingConfig(source) {
     }
     if (provider.default_base_url) normalizedUrl(provider.default_base_url, `${label}.default_base_url`);
     if (provider.base_url) normalizedUrl(provider.base_url, `${label}.base_url`, { allowHttp: adapter === "tokligence" });
+    if (adapter === "tokligence") {
+      const upstreams = provider.upstreams || {};
+      for (const [upstreamId, upstream] of Object.entries(upstreams)) {
+        if (!upstream || typeof upstream !== "object") throw new Error(`${label}.upstreams.${upstreamId} must be an object`);
+        requireString(upstream.api_key_env, `${label}.upstreams.${upstreamId}.api_key_env`);
+        if (!upstream.base_url_env && !upstream.default_base_url) throw new Error(`${label}.upstreams.${upstreamId} requires base_url_env or default_base_url`);
+        if (upstream.default_base_url) normalizedUrl(upstream.default_base_url, `${label}.upstreams.${upstreamId}.default_base_url`);
+      }
+    }
     return { ...provider, id, adapter, billing_class, protocols, default: provider.default === true,
       retry_owner: provider.retry_owner || "gateway" };
   });
@@ -126,11 +135,19 @@ export function parseRoutingConfig(source) {
     if (!new Set(["premium", "standard", "economy"]).has(quality_tier)) throw new Error(`${label}.quality_tier is invalid`);
     const context_window = Number(model?.context_window || 0);
     if (!Number.isSafeInteger(context_window) || context_window <= 0) throw new Error(`${label}.context_window must be a positive integer`);
-    return { ...model, id, provider, upstream_model: requireString(model?.upstream_model, `${label}.upstream_model`), quality_tier, context_window,
-      capabilities: normalizeCapabilities(model?.capabilities, `${label}.capabilities`) };
+    const public_model = requireString(model?.public_model, `${label}.public_model`);
+    const providerConfig = providers.find((candidate) => candidate.id === provider);
+    const capabilities = normalizeCapabilities(model?.capabilities, `${label}.capabilities`);
+    for (const protocol of capabilities.protocols) {
+      if (!providerConfig.protocols.includes(protocol)) throw new Error(`${label}.capabilities.protocols must be supported by provider ${provider}`);
+    }
+    return { ...model, id, public_model, direct_access: model?.direct_access === true, provider,
+      upstream_model: requireString(model?.upstream_model, `${label}.upstream_model`), quality_tier, context_window, capabilities };
   });
   const modelIds = new Set(models.map(({ id }) => id.toLowerCase()));
   if (modelIds.size !== models.length) throw new Error("model IDs must be unique case-insensitively");
+  const directPublicModels = new Set(models.filter(({ direct_access }) => direct_access).map(({ public_model }) => public_model.toLowerCase()));
+  if (directPublicModels.size !== models.filter(({ direct_access }) => direct_access).length) throw new Error("direct public model IDs must be unique case-insensitively");
 
   const profiles = (raw.profiles || []).map((profile, index) => {
     const label = `profiles[${index}]`;
@@ -143,8 +160,12 @@ export function parseRoutingConfig(source) {
     if (!Number.isSafeInteger(max_attempts) || max_attempts < 1 || max_attempts > candidates.length) throw new Error(`${label}.max_attempts must select configured candidates`);
     return { ...profile, id, public_model, candidates, max_attempts, permit_paygo: profile.permit_paygo === true };
   });
-  const publicModels = new Set(profiles.map(({ public_model }) => public_model.toLowerCase()));
-  if (publicModels.size !== profiles.length) throw new Error("profile public models must be unique case-insensitively");
+  const profilePublicModels = new Set(profiles.map(({ public_model }) => public_model.toLowerCase()));
+  if (profilePublicModels.size !== profiles.length) throw new Error("profile public models must be unique case-insensitively");
+  for (const publicModel of directPublicModels) {
+    if (profilePublicModels.has(publicModel)) throw new Error("profile and direct public model IDs must be unique case-insensitively");
+  }
+  const publicModels = new Set([...profilePublicModels, ...directPublicModels]);
 
   const aliases = (raw.aliases || []).map((alias, index) => {
     const label = `aliases[${index}]`;
@@ -160,9 +181,21 @@ export function parseRoutingConfig(source) {
   const routes = (raw.routes || []).map((route, index) => {
     const provider = requireString(route?.provider, `routes[${index}].provider`);
     if (!knownProvider(provider)) throw new Error(`routes[${index}] references unknown provider: ${provider}`);
-    return { provider, upstream: route.upstream ? requireString(route.upstream, `routes[${index}].upstream`) : null,
+    const providerConfig = providers.find((candidate) => candidate.id === provider);
+    const upstream = route.upstream ? requireString(route.upstream, `routes[${index}].upstream`) : null;
+    if (providerConfig.adapter === "tokligence" && (!upstream || !providerConfig.upstreams?.[upstream])) {
+      throw new Error(`routes[${index}] references an undefined Tokligence upstream`);
+    }
+    return { provider, upstream,
       prefixes: requireList(route?.prefixes, `routes[${index}].prefixes`).map((prefix) => requireString(prefix, `routes[${index}].prefix`)) };
   });
+  for (const model of models) {
+    const provider = providers.find((candidate) => candidate.id === model.provider);
+    if (provider.adapter !== "tokligence") continue;
+    if (!routes.some((route) => route.provider === provider.id && route.prefixes.some((prefix) => model.upstream_model.toLowerCase().startsWith(prefix.toLowerCase())))) {
+      throw new Error(`model ${model.id} has no Tokligence route for upstream_model ${model.upstream_model}`);
+    }
+  }
   const budget = { monthly_limit_eur: Number(raw.budget?.monthly_limit_eur), local_paygo_limit_eur: Number(raw.budget?.local_paygo_limit_eur) };
   if (!Number.isFinite(budget.monthly_limit_eur) || budget.monthly_limit_eur < 0 || !Number.isFinite(budget.local_paygo_limit_eur) || budget.local_paygo_limit_eur < 0) throw new Error("budget limits must be non-negative numbers");
   return { version: 2, access, providers, models, profiles, aliases, routes, budget };
@@ -170,8 +203,13 @@ export function parseRoutingConfig(source) {
 
 export function loadRoutingConfig(path) { return parseRoutingConfig(fs.readFileSync(path, "utf8")); }
 export function providerEnabled(provider, env = process.env) {
-  if (!envEnabled(provider, env)) return false;
-  if (provider.adapter === "tokligence") return true;
+  if (!provider || !envEnabled(provider, env)) return false;
+  if (provider.adapter === "tokligence") {
+    return Object.values(provider.upstreams || {}).every((upstream) => {
+      const baseUrl = envValue(env, upstream.base_url_env, upstream.default_base_url);
+      return Boolean(env[upstream.api_key_env]) && Boolean(baseUrl);
+    });
+  }
   if (provider.api_key_env) return Boolean(env[provider.api_key_env]);
   if (provider.adapter === "oauth-proxy") return Boolean(env[provider.internal_api_key_env]);
   return true;
@@ -183,12 +221,13 @@ export function profileByModel(config, model) { return config.profiles.find((pro
 export function configuredModels(config, env = process.env) { return config.models.filter((model) => providerEnabled(providerById(config, model.provider), env)); }
 export function matchConfiguredProvider(config, model, env = process.env) {
   if (!model) return null;
-  const lower = model.toLowerCase();
-  const route = config.routes.filter((candidate) => providerEnabled(providerById(config, candidate.provider), env))
-    .flatMap((candidate) => candidate.prefixes.map((prefix) => ({ candidate, prefix })))
-    .filter(({ prefix }) => lower.startsWith(prefix.toLowerCase()))
-    .sort((a, b) => b.prefix.length - a.prefix.length)[0]?.candidate;
-  return route?.provider || enabledProviders(config, env).find(({ default: isDefault }) => isDefault)?.id || null;
+  const resolved = resolveConfiguredAlias(config, model);
+  const profile = profileByModel(config, resolved);
+  if (profile) return providerById(config, modelById(config, profile.candidates[0])?.provider)?.id || null;
+  const physical = modelById(config, resolved)
+    || config.models.find((candidate) => candidate.direct_access && candidate.public_model.toLowerCase() === String(resolved).toLowerCase());
+  if (!physical || !providerEnabled(providerById(config, physical.provider), env)) return null;
+  return physical.provider;
 }
 export function resolveConfiguredAlias(config, model) {
   if (!model) return model;
@@ -202,8 +241,12 @@ export function compileTokligenceIni(config, env = process.env) {
   const provider = config.providers.find(({ adapter }) => adapter === "tokligence");
   if (!provider) throw new Error("routing config requires one Tokligence provider");
   const anthropic = provider.upstreams?.anthropic || {}; const openai = provider.upstreams?.openai || {};
-  const routePairs = config.routes.filter((route) => route.provider === provider.id).flatMap((route) => route.prefixes.map((prefix) => `${prefix}*=>${route.upstream || "anthropic"}`));
-  const providerRoutePairs = config.routes.filter((route) => route.provider === provider.id).flatMap((route) => route.prefixes.map((prefix) => `${prefix}*=${route.upstream || "anthropic"}`));
+  const routePairs = config.routes.filter((route) => route.provider === provider.id)
+    .flatMap((route) => route.prefixes.map((prefix) => `${prefix}*=>${route.upstream}`))
+    .sort((a, b) => b.length - a.length);
+  const providerRoutePairs = config.routes.filter((route) => route.provider === provider.id)
+    .flatMap((route) => route.prefixes.map((prefix) => `${prefix}*=${route.upstream}`))
+    .sort((a, b) => b.length - a.length);
   return ["auth_disabled=true", `auth_secret=${env[config.access.public_secret_env] || ""}`, "log_level=info", "ledger_path=/data/ledger.db", "identity_path=/data/identity.db", "work_mode=auto", "", `anthropic_api_key=${envValue(env, anthropic.api_key_env)}`, `anthropic_base_url=${envValue(env, anthropic.base_url_env, anthropic.default_base_url)}`, "", `openai_api_key=${envValue(env, openai.api_key_env)}`, `openai_base_url=${envValue(env, openai.base_url_env, openai.default_base_url)}`, "", `model_provider_routes=${providerRoutePairs.join(",")}`, `routes=${[...routePairs, "loopback=>loopback"].join(",")}`, "enable_facade=true", "multiport_mode=false", "facade_port=8081", ""].join("\n");
 }
 export function compileOAuthProxyYaml(config, env = process.env) {

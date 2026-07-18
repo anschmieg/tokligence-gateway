@@ -38,7 +38,7 @@ function readJson(req, limit = 10 * 1024 * 1024) {
   });
 }
 function modelList() {
-  const physical = configuredModels(ROUTING).map((model) => ({ id: model.upstream_model, slug: model.upstream_model, object: "model", provider: model.provider, kind: "physical", quality_tier: model.quality_tier, billing_class: model.billing_class, context_window: model.context_window, supported_reasoning_levels: model.provider === "codex-oauth" ? CODEX_REASONING_LEVELS : [] }));
+  const physical = configuredModels(ROUTING).filter((model) => model.direct_access).map((model) => ({ id: model.public_model, slug: model.public_model, object: "model", provider: model.provider, kind: "physical", quality_tier: model.quality_tier, billing_class: ROUTING.providers.find((provider) => provider.id === model.provider)?.billing_class, context_window: model.context_window, supported_reasoning_levels: model.provider === "codex-oauth" ? CODEX_REASONING_LEVELS : [] }));
   const profiles = ROUTING.profiles.map((profile) => ({ id: profile.public_model, slug: profile.public_model, object: "model", kind: "profile", intent: profile.intent, provider: null }));
   return [...profiles, ...physical];
 }
