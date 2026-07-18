@@ -6,6 +6,7 @@ import {
   compileOAuthProxyYaml,
   compileTokligenceIni,
   loadRoutingConfig,
+  providerEnabled,
 } from "./route-config.mjs";
 
 const policyPath = path.resolve(process.env.ROUTING_CONFIG_PATH || "gateway.routes.yaml");
@@ -14,6 +15,16 @@ const config = loadRoutingConfig(policyPath);
 
 for (const [name, envName] of Object.entries(config.access)) {
   if (!process.env[envName]) throw new Error(`${name} requires environment variable ${envName}`);
+}
+for (const provider of config.providers) {
+  if (!provider.enabled_env || String(process.env[provider.enabled_env]).toLowerCase() === "true") {
+    if (provider.adapter === "openai-compatible" && !process.env[provider.api_key_env]) {
+      throw new Error(`enabled provider ${provider.id} requires environment variable ${provider.api_key_env}`);
+    }
+    if (provider.adapter === "oauth-proxy" && !process.env[provider.internal_api_key_env]) {
+      throw new Error(`enabled provider ${provider.id} requires environment variable ${provider.internal_api_key_env}`);
+    }
+  }
 }
 
 function outputPath(absolutePath) {

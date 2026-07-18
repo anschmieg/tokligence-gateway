@@ -27,7 +27,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY tgw-proxy.mjs ./
 COPY gateway-config.mjs ./
-COPY route-config.mjs compile-config.mjs gateway.routes.yaml ./
+COPY route-config.mjs routing-planner.mjs provider-adapters.mjs request-executor.mjs protocol-codecs.mjs compile-config.mjs gateway.routes.yaml ./
 COPY entrypoint.sh ./
 RUN chmod +x entrypoint.sh
 

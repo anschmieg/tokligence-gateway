@@ -1,15 +1,18 @@
-version: 1
+version: 2
 
 access:
   public_secret_env: TOKLIGENCE_AUTH_SECRET
   admin_secret_env: TOKLIGENCE_ADMIN_SECRET
 
-# This is the single source of truth for providers, models, aliases, and routing.
-# Secrets stay in Coolify and are referenced here by environment-variable name.
 providers:
   - id: tokligence
     adapter: tokligence
     default: true
+    billing_class: subscription
+    protocols: [chat_completions, responses, messages]
+    retry_owner: gateway
+    base_url: http://127.0.0.1:8081
+    api_key_env: TOKLIGENCE_AUTH_SECRET
     upstreams:
       anthropic:
         api_key_env: MINIMAX_API_KEY
@@ -19,7 +22,6 @@ providers:
         api_key_env: OPENAI_API_KEY
         base_url_env: OPENAI_API_BASE
         default_base_url: https://api.openai.com/v1
-    models: [minimax-m2.1, minimax-m2.5, minimax-m2.7]
 
   - id: codex-oauth
     adapter: oauth-proxy
@@ -27,13 +29,9 @@ providers:
     internal_api_key_env: CODEX_PROXY_API_KEY
     external_base_url_env: CODEX_PROXY_BASE_URL
     auth_dir: /data/cliproxy/auth
-    models:
-      - id: gpt-5.6-luna
-        context_window: 1050000
-      - id: gpt-5.6-terra
-        context_window: 1050000
-      - id: gpt-5.6-sol
-        context_window: 1050000
+    billing_class: subscription
+    protocols: [chat_completions, responses, messages]
+    retry_owner: adapter
     credential_pool:
       strategy: round-robin
       session_affinity: true
@@ -42,55 +40,110 @@ providers:
       max_retry_credentials: 2
       max_retry_interval: 30
 
-  - id: modal
-    adapter: middleware
-    api_key_env: MODAL_GLM5_API_KEY
-    base_url_env: MODAL_GLM5_API_BASE
-    default_base_url: https://api.us-west-2.modal.direct/v1/chat/completions
-    models: [glm-5, glm-5.1, zai-org/GLM-5]
+  # Disabled until the actual account entitlement and API behaviour are verified.
+  - id: mistral
+    adapter: openai-compatible
+    enabled_env: MISTRAL_ENABLED
+    api_key_env: MISTRAL_API_KEY
+    base_url_env: MISTRAL_API_BASE
+    billing_class: subscription
+    protocols: [chat_completions]
+    retry_owner: gateway
 
   - id: openrouter
-    adapter: middleware
+    adapter: openai-compatible
     api_key_env: OPENROUTER_API_KEY
+    base_url_env: OPENROUTER_API_BASE
     default_base_url: https://openrouter.ai/api/v1
-    discover_models: true
+    billing_class: paygo
+    protocols: [chat_completions]
+    retry_owner: gateway
+    headers:
+      HTTP-Referer: https://github.com/tokligence/gateway
+      X-Title: Tokligence Gateway
 
-  - id: opencode-go
-    adapter: middleware
-    api_key_env: OPENCODE_API_KEY
-    default_base_url: https://opencode.ai
-    discover_models: true
-    models:
-      - opencode-go/deepseek-v4-pro
-      - opencode-go/deepseek-v4-flash
-      - opencode-go/glm-5
-      - opencode-go/glm-5.1
-      - opencode-go/kimi-k2.5
-      - opencode-go/kimi-k2.6
-      - opencode-go/mimo-v2.5
-      - opencode-go/mimo-v2.5-pro
-      - opencode-go/mimo-v2-pro
-      - opencode-go/mimo-v2-omni
-      - opencode-go/minimax-m2.5
-      - opencode-go/minimax-m2.7
-      - opencode-go/qwen3.5-plus
-      - opencode-go/qwen3.6-plus
+models:
+  - id: codex-luna
+    provider: codex-oauth
+    upstream_model: gpt-5.6-luna
+    quality_tier: standard
+    context_window: 1050000
+    capabilities: { protocols: [chat_completions, responses, messages], streaming: true, tools: true, parallel_tools: true, structured_output: true, reasoning: true, vision: true }
+  - id: codex-terra
+    provider: codex-oauth
+    upstream_model: gpt-5.6-terra
+    quality_tier: standard
+    context_window: 1050000
+    capabilities: { protocols: [chat_completions, responses, messages], streaming: true, tools: true, parallel_tools: true, structured_output: true, reasoning: true, vision: true }
+  - id: codex-sol
+    provider: codex-oauth
+    upstream_model: gpt-5.6-sol
+    quality_tier: premium
+    context_window: 1050000
+    capabilities: { protocols: [chat_completions, responses, messages], streaming: true, tools: true, parallel_tools: true, structured_output: true, reasoning: true, vision: true }
+  - id: minimax-m2.1
+    provider: tokligence
+    upstream_model: MiniMax-M2.1
+    quality_tier: economy
+    context_window: 200000
+    capabilities: { protocols: [chat_completions, responses, messages], streaming: true, tools: false, parallel_tools: false, structured_output: false, reasoning: false, vision: false }
+  - id: minimax-m2.5
+    provider: tokligence
+    upstream_model: MiniMax-M2.5
+    quality_tier: standard
+    context_window: 200000
+    capabilities: { protocols: [chat_completions, responses, messages], streaming: true, tools: false, parallel_tools: false, structured_output: false, reasoning: false, vision: false }
+  - id: minimax-m2.7
+    provider: tokligence
+    upstream_model: MiniMax-M2.7
+    quality_tier: standard
+    context_window: 200000
+    capabilities: { protocols: [chat_completions, responses, messages], streaming: true, tools: false, parallel_tools: false, structured_output: false, reasoning: false, vision: false }
 
-  - id: opencode-zen
-    adapter: middleware
-    api_key_env: OPENCODE_API_KEY
-    default_base_url: https://opencode.ai
-    discover_models: true
+profiles:
+  - id: architecture
+    public_model: gateway/architecture
+    intent: architecture
+    max_attempts: 1
+    permit_paygo: false
+    candidates: [codex-sol]
+  - id: execution
+    public_model: gateway/execution
+    intent: execution
+    max_attempts: 1
+    permit_paygo: false
+    candidates: [minimax-m2.7]
+  - id: cheap
+    public_model: gateway/cheap
+    intent: cheap
+    max_attempts: 1
+    permit_paygo: false
+    candidates: [minimax-m2.1]
+
+aliases:
+  - id: claude-opus
+    patterns: ["claude-opus-*", "claude-*-opus*"]
+    target: gateway/architecture
+  - id: claude-sonnet
+    patterns: ["claude-sonnet-*", "claude-*-sonnet*"]
+    target: gateway/execution
+  - id: claude-haiku
+    patterns: ["claude-haiku-*", "claude-*-haiku*"]
+    target: gateway/cheap
+  - id: claude-fable
+    patterns: ["claude-fable-*", "claude-*-fable*"]
+    target: gateway/architecture
+  - id: minimax-m2.7
+    patterns: [minimax-m2.7, m2.7]
+    target: minimax-m2.7
+  - id: minimax-m2.5
+    patterns: [minimax-m2.5, m2.5]
+    target: minimax-m2.5
+  - id: minimax-m2.1
+    patterns: [minimax-m2.1, m2.1]
+    target: minimax-m2.1
 
 routes:
-  - provider: modal
-    prefixes: [glm-5, zai-org/GLM-5]
-  - provider: openrouter
-    prefixes: [openrouter/, or/, free]
-  - provider: opencode-zen
-    prefixes: [opencode-zen/, zen/]
-  - provider: opencode-go
-    prefixes: [opencode-go/, oc/, deepseek-v4, kimi-k2, glm-5., mimo-v2, qwen3]
   - provider: tokligence
     upstream: anthropic
     prefixes: [claude, minimax-m2]
@@ -98,33 +151,6 @@ routes:
     upstream: openai
     prefixes: [gpt]
 
-aliases:
-  - id: claude-opus
-    patterns: ["claude-opus-*", "claude-*-opus*"]
-    provider: codex-oauth
-    target: gpt-5.6-sol
-    fallback: oc/deepseek-v4-pro
-  - id: claude-sonnet
-    patterns: ["claude-sonnet-*", "claude-*-sonnet*"]
-    provider: codex-oauth
-    target: gpt-5.6-terra
-    fallback: oc/kimi-k2.6
-  - id: claude-haiku
-    patterns: ["claude-haiku-*", "claude-*-haiku*"]
-    provider: codex-oauth
-    target: gpt-5.6-luna
-    fallback: oc/minimax-m2.7
-  - id: claude-fable
-    patterns: ["claude-fable-*", "claude-*-fable*"]
-    provider: codex-oauth
-    target: gpt-5.6-sol
-    fallback: oc/deepseek-v4-pro
-  - id: minimax-m2.7
-    patterns: [minimax-m2.7, m2.7]
-    target: MiniMax-M2.7
-  - id: minimax-m2.5
-    patterns: [minimax-m2.5, m2.5]
-    target: MiniMax-M2.5
-  - id: minimax-m2.1
-    patterns: [minimax-m2.1, m2.1]
-    target: MiniMax-M2.1
+budget:
+  monthly_limit_eur: 50
+  local_paygo_limit_eur: 20

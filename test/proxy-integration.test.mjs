@@ -158,7 +158,7 @@ test("the façade routes exact Codex models and preserves Claude effort", async 
   });
   assert.equal(routes.status, 200);
   const routesBody = await routes.json();
-  assert.equal(routesBody.version, 1);
+  assert.equal(routesBody.version, 2);
   assert.equal(routesBody.providers.find((provider) => provider.default).id, "tokligence");
   assert.equal(
     routesBody.providers.find((provider) => provider.id === "codex-oauth").credential_pool.strategy,
@@ -170,6 +170,7 @@ test("the façade routes exact Codex models and preserves Claude effort", async 
   const modelBody = await models.json();
   const sol = modelBody.data.find((model) => model.id === "gpt-5.6-sol");
   assert.equal(sol.provider, "codex-oauth");
+  assert.equal(modelBody.data.some((model) => model.id === "gateway/architecture"), true);
   assert.deepEqual(sol.supported_reasoning_levels, [
     "none", "low", "medium", "high", "xhigh", "max",
   ]);
@@ -178,7 +179,7 @@ test("the façade routes exact Codex models and preserves Claude effort", async 
     method: "POST",
     headers,
     body: JSON.stringify({
-      model: "claude-opus-4-8",
+      model: "gateway/architecture",
       messages: [{ role: "user", content: "hello" }],
       thinking: { type: "adaptive" },
       output_config: { effort: "max" },
@@ -212,9 +213,9 @@ test("the façade routes exact Codex models and preserves Claude effort", async 
       messages: [{ role: "user", content: "hello" }],
     }),
   });
-  assert.equal(unknown.status, 404);
+  assert.equal(unknown.status, 200);
   assert.equal(codexRequests.length, 2);
-  assert.equal(tokligenceRequests.length, 0);
+  assert.equal(tokligenceRequests.length, 1);
 
   const existing = await fetch(`${baseUrl}/v1/messages`, {
     method: "POST",
@@ -225,5 +226,40 @@ test("the façade routes exact Codex models and preserves Claude effort", async 
     }),
   });
   assert.equal(existing.status, 200);
-  assert.equal(tokligenceRequests.length, 1);
+  assert.equal(tokligenceRequests.length, 2);
+});
+
+test("the façade preserves upstream failures without synthesizing success", async (t) => {
+  const gateway = http.createServer(async (req, res) => {
+    await jsonRequest(req);
+    res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "1" });
+    res.end(JSON.stringify({ error: "rate limited" }));
+  });
+  const gatewayPort = await listen(gateway);
+  const child = spawn(process.execPath, ["tgw-proxy.mjs"], {
+    cwd: projectRoot,
+    env: {
+      ...process.env,
+      PROXY_PORT: "0",
+      TGW_HOST: "127.0.0.1",
+      TGW_PORT: String(gatewayPort),
+      TOKLIGENCE_AUTH_SECRET: "public-secret",
+      TOKLIGENCE_ADMIN_SECRET: "admin-secret",
+      CODEX_PROXY_ENABLED: "false",
+      OPENAI_API_KEY: "",
+      OPENROUTER_API_KEY: "",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  t.after(async () => { child.kill("SIGTERM"); await close(gateway); });
+  const port = await waitForProxy(child);
+  const response = await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+    method: "POST",
+    headers: { Authorization: "Bearer sk-ant-public-secret", "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "unrelated-existing-model", messages: [{ role: "user", content: "hello" }] }),
+  });
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.equal(body.error.type, "gateway_upstream_error");
+  assert.doesNotMatch(JSON.stringify(body), /rate limited/);
 });

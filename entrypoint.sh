@@ -64,10 +64,11 @@ echo "Starting gatewayd: $GATEWAYD"
 for i in $(seq 1 30); do
   if wget -q -O- http://127.0.0.1:8081/health > /dev/null 2>&1; then
     echo "Gateway ready after ${i}s"
-    break
+    exec node /app/tgw-proxy.mjs
   fi
   echo "Waiting for gateway... ($i)"
   sleep 1
 done
 
-exec node /app/tgw-proxy.mjs
+echo "ERROR: gatewayd did not become ready" >&2
+exit 1

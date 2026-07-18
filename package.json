@@ -1,7 +1,7 @@
 {
   "type": "module",
   "scripts": {
-    "lint": "node --check tgw-proxy.mjs && node --check gateway-config.mjs && node --check route-config.mjs && node --check compile-config.mjs && node --check test/gateway-config.test.mjs && node --check test/route-config.test.mjs && node --check test/proxy-integration.test.mjs",
+    "lint": "node --check tgw-proxy.mjs && node --check gateway-config.mjs && node --check route-config.mjs && node --check routing-planner.mjs && node --check provider-adapters.mjs && node --check request-executor.mjs && node --check protocol-codecs.mjs && node --check compile-config.mjs && node --check test/gateway-config.test.mjs && node --check test/route-config.test.mjs && node --check test/proxy-integration.test.mjs",
     "test": "node --test"
   },
   "dependencies": {
