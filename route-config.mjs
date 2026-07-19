@@ -245,7 +245,7 @@ export function compileTokligenceIni(config, env = process.env) {
     .flatMap((route) => route.prefixes.map((prefix) => `${prefix}*=>${route.upstream}`))
     .sort((a, b) => b.length - a.length);
   const providerRoutePairs = config.routes.filter((route) => route.provider === provider.id)
-    .flatMap((route) => route.prefixes.map((prefix) => `${prefix}*=${route.upstream}`))
+    .flatMap((route) => route.prefixes.map((prefix) => `${prefix}*=>${route.upstream}`))
     .sort((a, b) => b.length - a.length);
   return ["auth_disabled=true", `auth_secret=${env[config.access.public_secret_env] || ""}`, "log_level=info", "ledger_path=/data/ledger.db", "identity_path=/data/identity.db", "work_mode=auto", "", `anthropic_api_key=${envValue(env, anthropic.api_key_env)}`, `anthropic_base_url=${envValue(env, anthropic.base_url_env, anthropic.default_base_url)}`, "", `openai_api_key=${envValue(env, openai.api_key_env)}`, `openai_base_url=${envValue(env, openai.base_url_env, openai.default_base_url)}`, "", `model_provider_routes=${providerRoutePairs.join(",")}`, `routes=${[...routePairs, "loopback=>loopback"].join(",")}`, "enable_facade=true", "multiport_mode=false", "facade_port=8081", ""].join("\n");
 }

@@ -57,7 +57,8 @@ test("one policy compiles downstream configurations", () => {
   const ini = compileTokligenceIni(config, env);
   assert.match(ini, /openai_api_key=ollama/);
   assert.match(ini, /openai_base_url=https:\/\/ollama\.com\/v1/);
-  assert.match(ini, /routes=.*kimi-k2\.7-code\*=>openai/);
+  assert.match(ini, /model_provider_routes=.*kimi-k2\.7-code\*=>openai/);
+  assert.doesNotMatch(ini, /model_provider_routes=.*kimi-k2\.7-code\*=openai/);
   assert.doesNotMatch(ini, /minimax/i);
   const oauth = compileOAuthProxyYaml(config, env);
   assert.match(oauth, /strategy: round-robin/);
