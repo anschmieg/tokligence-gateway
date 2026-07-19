@@ -10,67 +10,63 @@ import {
   parseRoutingConfig,
   resolveConfiguredAlias,
 } from "../route-config.mjs";
+import { buildRoutePlan } from "../routing-planner.mjs";
 
 const config = parseRoutingConfig(fs.readFileSync("gateway.routes.yaml", "utf8"));
+const enabledEnv = {
+  CODEX_PROXY_ENABLED: "true",
+  CODEX_PROXY_API_KEY: "internal",
+  OLLAMA_API_KEY: "ollama",
+};
 
-test("routing policy preserves current provider prefixes", () => {
-  assert.equal(matchConfiguredProvider(config, "openrouter/free"), "openrouter");
-  assert.equal(matchConfiguredProvider(config, "zen/model"), "opencode-zen");
-  assert.equal(matchConfiguredProvider(config, "oc/kimi-k2.6"), "opencode-go");
-  assert.equal(matchConfiguredProvider(config, "minimax-m2.7"), "tokligence");
-  assert.equal(matchConfiguredProvider(config, "unknown-model"), "tokligence");
+test("v2 policy exposes cataloged Ollama routes and profiles", () => {
+  assert.equal(config.version, 2);
+  assert.equal(resolveConfiguredAlias(config, "claude-opus-4-8"), "gateway/architecture");
+  assert.equal(resolveConfiguredAlias(config, "minimax-m2.7"), "minimax-m2.7");
+  assert.equal(matchConfiguredProvider(config, "ollama/kimi-k2.7-code", enabledEnv), "ollama-cloud");
+  assert.equal(matchConfiguredProvider(config, "unknown-model", enabledEnv), null);
+  assert.equal(config.models.some((model) => model.id.startsWith("minimax-")), false);
 });
 
-test("routing aliases use the most specific matching prefix", () => {
-  assert.equal(resolveConfiguredAlias(config, "claude-opus-4", {}), "oc/deepseek-v4-pro");
-  assert.equal(resolveConfiguredAlias(config, "claude-opus-4", {
-    CODEX_PROXY_ENABLED: "true",
-    CODEX_PROXY_API_KEY: "internal",
-  }), "gpt-5.6-sol");
-  const enabled = { CODEX_PROXY_ENABLED: "true", CODEX_PROXY_API_KEY: "internal" };
-  assert.equal(resolveConfiguredAlias(config, "claude-haiku-4-5-20251001", enabled), "gpt-5.6-luna");
-  assert.equal(resolveConfiguredAlias(config, "claude-sonnet-4-7", enabled), "gpt-5.6-terra");
-  assert.equal(resolveConfiguredAlias(config, "claude-opus-4-8", enabled), "gpt-5.6-sol");
-  assert.equal(resolveConfiguredAlias(config, "claude-fable-5", enabled), "gpt-5.6-sol");
-  assert.equal(resolveConfiguredAlias(config, "claude-sonnet-4.5", enabled), "gpt-5.6-terra");
-  assert.equal(resolveConfiguredAlias(config, "claude-3.5-sonnet", enabled), "gpt-5.6-terra");
-  assert.equal(resolveConfiguredAlias(config, "claude-3-5-haiku-20241022", enabled), "gpt-5.6-luna");
-  assert.equal(resolveConfiguredAlias(config, "claude-4-opus-20250514", enabled), "gpt-5.6-sol");
-  assert.equal(resolveConfiguredAlias(config, "claude-5-fable", enabled), "gpt-5.6-sol");
-  assert.equal(resolveConfiguredAlias(config, "claude-opus", enabled), "claude-opus");
-  assert.equal(resolveConfiguredAlias(config, "claude-opusfoo", enabled), "claude-opusfoo");
-  assert.equal(resolveConfiguredAlias(config, "minimax-m2.7"), "MiniMax-M2.7");
-  assert.equal(resolveConfiguredAlias(config, "unknown-model"), "unknown-model");
+test("planner selects exact cataloged direct models and rejects unknown models", () => {
+  const unavailable = buildRoutePlan(config, { model: "gateway/architecture", protocol: "messages", body: { model: "gateway/architecture", messages: [] } }, {});
+  assert.equal(unavailable.error.status, 503);
+
+  const architecture = buildRoutePlan(config, { model: "gateway/architecture", protocol: "messages", body: { model: "gateway/architecture", messages: [] } }, enabledEnv);
+  assert.equal(architecture.candidates[0].upstreamModel, "gpt-5.6-sol");
+
+  const exact = buildRoutePlan(config, { model: "ollama/gpt-oss-20b", protocol: "messages", body: { model: "ollama/gpt-oss-20b", messages: [] } }, enabledEnv);
+  assert.equal(exact.profile, null);
+  assert.equal(exact.candidates[0].upstreamModel, "gpt-oss:20b");
+
+  const unknown = buildRoutePlan(config, { model: "gpt-5.6-unknown", protocol: "messages", body: { model: "gpt-5.6-unknown", messages: [] } }, enabledEnv);
+  assert.equal(unknown.error.status, 404);
+  assert.equal(unknown.error.code, "unknown_model");
+
+  const internal = buildRoutePlan(config, { model: "ollama-gpt-oss-20b", protocol: "messages", body: { model: "ollama-gpt-oss-20b", messages: [] } }, enabledEnv);
+  assert.equal(internal.error.status, 404);
 });
 
-test("one policy compiles both downstream configurations", () => {
-  const env = {
-    TOKLIGENCE_AUTH_SECRET: "public",
-    TOKLIGENCE_ADMIN_SECRET: "admin",
-    MINIMAX_API_KEY: "minimax",
-    CODEX_PROXY_ENABLED: "true",
-    CODEX_PROXY_API_KEY: "internal",
-  };
+test("planner refuses feature-degrading candidates", () => {
+  const plan = buildRoutePlan(config, { model: "gateway/cheap", protocol: "messages", body: { model: "gateway/cheap", stream: true, tools: [{ name: "x" }], messages: [] } }, enabledEnv);
+  assert.equal(plan.error.status, 503);
+});
+
+test("one policy compiles downstream configurations", () => {
+  const env = { TOKLIGENCE_AUTH_SECRET: "public", TOKLIGENCE_ADMIN_SECRET: "admin", ...enabledEnv };
   const ini = compileTokligenceIni(config, env);
-  assert.match(ini, /anthropic_api_key=minimax/);
-  assert.match(ini, /routes=claude\*=>anthropic,minimax-m2\*=>anthropic,gpt\*=>openai,loopback=>loopback/);
-
+  assert.match(ini, /openai_api_key=ollama/);
+  assert.match(ini, /openai_base_url=https:\/\/ollama\.com\/v1/);
+  assert.match(ini, /model_provider_routes=.*kimi-k2\.7-code\*=>openai/);
+  assert.doesNotMatch(ini, /model_provider_routes=.*kimi-k2\.7-code\*=openai/);
+  assert.doesNotMatch(ini, /minimax/i);
   const oauth = compileOAuthProxyYaml(config, env);
   assert.match(oauth, /strategy: round-robin/);
-  assert.match(oauth, /session-affinity: true/);
   assert.doesNotMatch(oauth, /public/);
-
-  const models = configuredModels(config, env);
-  assert.equal(models.some(({ id }) => id === "gpt-5.6-sol"), true);
+  assert.equal(configuredModels(config, env).some(({ public_model }) => public_model === "ollama/kimi-k2.7-code"), true);
 });
 
 test("invalid policies fail during startup validation", () => {
-  assert.throws(
-    () => parseRoutingConfig("version: 1\naccess:\n  public_secret_env: PUBLIC\n  admin_secret_env: ADMIN\nproviders: []\n"),
-    /must define providers/,
-  );
-  assert.throws(
-    () => parseRoutingConfig("version: 1\naccess:\n  public_secret_env: PUBLIC\n  admin_secret_env: ADMIN\nproviders:\n  - id: x\n    adapter: invalid\n    default: true\n"),
-    /not supported/,
-  );
+  assert.throws(() => parseRoutingConfig("version: 2\naccess:\n  public_secret_env: PUBLIC\n  admin_secret_env: ADMIN\nproviders: []\n"), /providers must not be empty/);
+  assert.throws(() => parseRoutingConfig("version: 2\naccess:\n  public_secret_env: PUBLIC\n  admin_secret_env: ADMIN\nproviders:\n  - id: x\n    adapter: invalid\n    billing_class: subscription\n    protocols: [messages]\n    default: true\nmodels: []\n"), /not supported/);
 });
