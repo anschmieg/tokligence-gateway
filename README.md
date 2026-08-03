@@ -83,6 +83,20 @@ For Claude Code, adaptive thinking and `output_config.effort` are forwarded
 unchanged. The internal adapter translates the explicit `low`, `medium`,
 `high`, `xhigh`, and `max` values to Codex `reasoning.effort`.
 
+## Mistral via Vibe subscription
+
+Add a Mistral provider that uses a Vibe plan API key. Create the key in the Mistral console under **Code → Vibe CLI** so requests consume the subscription's monthly Vibe budget instead of a separately billed developer key.
+
+```dotenv
+MISTRAL_API_KEY=replace-with-vibe-key
+# Optional override; the default is the OpenAI-compatible Mistral endpoint.
+MISTRAL_API_BASE=https://api.mistral.ai/v1
+```
+
+Models can be requested with the `mistral/` prefix or bare Mistral IDs, for example `mistral/mistral-large-latest` or `mistral-large-latest`. The proxy discovers available models from Mistral's `/v1/models` endpoint and falls back to the configured model list when discovery is unavailable.
+
+Streaming is supported on `/v1/chat/completions`. The Anthropic Messages and OpenAI Responses endpoints are translated to Mistral's OpenAI-compatible chat completions and returned in the requested format.
+
 ## Claude Code wrapper
 
 The client can keep using Claude's built-in model classes:

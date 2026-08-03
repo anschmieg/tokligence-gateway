@@ -50,6 +50,9 @@ const OPENROUTER_URL = providerBaseUrl("openrouter");
 const OPENCODE_KEY = providerApiKey("opencode-go");
 const OPENCODE_URL = providerBaseUrl("opencode-go");
 
+const MISTRAL_KEY = providerApiKey("mistral");
+const MISTRAL_URL = providerBaseUrl("mistral");
+
 function loadOAuthAdapterConfig() {
   const provider = providerById(ROUTING, "codex-oauth");
   const enabled = Boolean(provider && providerEnabled(provider));
@@ -227,6 +230,17 @@ async function refreshModelRegistry() {
         path: `${OPENROUTER_URL.pathname.replace(/\/$/, "")}/models`,
         headers: { Authorization: `Bearer ${OPENROUTER_KEY}` },
         prefix: "openrouter/"
+      }));
+    }
+
+    if (MISTRAL_KEY) {
+      refreshes.push(registerModelsFromEndpoint({
+        provider: "mistral",
+        hostname: MISTRAL_URL.hostname,
+        port: MISTRAL_URL.port || 443,
+        path: `${MISTRAL_URL.pathname.replace(/\/$/, "")}/models`,
+        headers: { Authorization: `Bearer ${MISTRAL_KEY}` },
+        prefix: "mistral/"
       }));
     }
 
@@ -736,6 +750,75 @@ function callOpenRouterOpenAI(model, messages, maxTokens) {
   });
 }
 
+function resolveMistralModel(model) {
+  if (!model) return model;
+  if (model.toLowerCase().startsWith("mistral/")) {
+    return model.slice(8);
+  }
+  return model;
+}
+
+function isMistralModel(model) {
+  return modelProvider(model) === "mistral" || matchConfiguredProvider(ROUTING, model) === "mistral";
+}
+
+function callMistralOpenAI(model, messages, maxTokens) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      model: resolveMistralModel(model),
+      messages,
+      stream: false,
+      max_tokens: maxTokens
+    });
+
+    const options = {
+      hostname: MISTRAL_URL.hostname,
+      port: MISTRAL_URL.port || 443,
+      path: `${MISTRAL_URL.pathname.replace(/\/$/, "")}/chat/completions`,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${MISTRAL_KEY}`,
+        "Content-Length": Buffer.byteLength(body)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => {
+        try {
+          const data = JSON.parse(Buffer.concat(chunks).toString());
+          resolve(data);
+        } catch {
+          reject(new Error("Invalid JSON from Mistral"));
+        }
+      });
+    });
+
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+function openAIToAnthropicMessage(data, requestedModel) {
+  const msg = data?.choices?.[0]?.message;
+  const text = msg?.content || "";
+  return {
+    type: "message",
+    id: data.id || `msg_${Date.now()}`,
+    model: requestedModel,
+    role: "assistant",
+    content: text ? [{ type: "text", text }] : [],
+    stop_reason: "end_turn",
+    usage: {
+      input_tokens: data.usage?.prompt_tokens || 0,
+      output_tokens: data.usage?.completion_tokens || 0
+    }
+  };
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
@@ -873,6 +956,35 @@ const server = http.createServer((req, res) => {
         });
 
         upstream.end(proxyBody);
+      } else if (isMistralModel(model)) {
+        const rewritten = resolveMistralModel(model);
+        const proxyBody = Buffer.from(JSON.stringify({ ...parsed, model: rewritten }));
+
+        const forwardHeaders = {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${MISTRAL_KEY}`,
+          "Content-Length": String(proxyBody.length)
+        };
+
+        const options = {
+          hostname: MISTRAL_URL.hostname,
+          port: MISTRAL_URL.port || 443,
+          path: `${MISTRAL_URL.pathname.replace(/\/$/, "")}/chat/completions`,
+          method: "POST",
+          headers: forwardHeaders
+        };
+
+        const upstream = https.request(options, (upRes) => {
+          res.writeHead(upRes.statusCode, upRes.headers);
+          upRes.pipe(res);
+        });
+
+        upstream.on("error", (err) => {
+          res.writeHead(502, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+
+        upstream.end(proxyBody);
       } else if (MINIMAX_BARE_MODELS.test(model)) {
         // MiniMax models: forward to gateway (port 8081)
         const mappedModel = resolveConfiguredAlias(ROUTING, model);
@@ -982,6 +1094,18 @@ const server = http.createServer((req, res) => {
           });
       } else if (isOpenRouterModel(model)) {
         callOpenRouterOpenAI(model, toOpenAIChatMessages(messages), parsed.max_tokens || 4096)
+          .then((data) => {
+            const msg = data.choices?.[0]?.message;
+            let text = msg?.content || "";
+            
+            sendResponsesResult(res, model, text, parsed.stream === true);
+          })
+          .catch((err) => {
+            res.writeHead(502, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: err.message }));
+          });
+      } else if (isMistralModel(model)) {
+        callMistralOpenAI(model, toOpenAIChatMessages(messages), parsed.max_tokens || 4096)
           .then((data) => {
             const msg = data.choices?.[0]?.message;
             let text = msg?.content || "";
@@ -1215,6 +1339,18 @@ const server = http.createServer((req, res) => {
         });
 
         upstream.end(proxyBody);
+      } else if (isMistralModel(model)) {
+        const messages = toOpenAIChatMessages(parsed.messages || []);
+
+        callMistralOpenAI(model, messages, parsed.max_tokens || 4096)
+          .then((data) => {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(openAIToAnthropicMessage(data, model)));
+          })
+          .catch((err) => {
+            res.writeHead(502, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: err.message }));
+          });
       } else if (MINIMAX_BARE_MODELS.test(model)) {
         // MiniMax: forward to gateway
         const mappedModel = MINIMAX_MAP[model.toLowerCase()] || model;
@@ -1292,6 +1428,7 @@ server.listen(PROXY_PORT, "0.0.0.0", () => {
   console.log("  OpenCode MiniMax -> OpenCode Messages (non-streaming)");
   console.log("  other opencode-go/* / oc/* -> OpenCode chat completions (non-streaming)");
   console.log("  openrouter/* / or/* / free -> OpenRouter (streaming OK)");
+  console.log("  mistral/* / mistral-* -> Mistral (streaming OK)");
   console.log(CODEX.enabled
     ? "  claude-* -> Codex OAuth (GPT-5.6 tier mapping)"
     : "  claude-* -> OpenCode Go (Tier mapping, non-streaming)");

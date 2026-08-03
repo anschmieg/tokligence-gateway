@@ -8,6 +8,7 @@ import {
   configuredModels,
   matchConfiguredProvider,
   parseRoutingConfig,
+  providerEnabled,
   resolveConfiguredAlias,
 } from "../route-config.mjs";
 
@@ -19,6 +20,18 @@ test("routing policy preserves current provider prefixes", () => {
   assert.equal(matchConfiguredProvider(config, "oc/kimi-k2.6"), "opencode-go");
   assert.equal(matchConfiguredProvider(config, "minimax-m2.7"), "tokligence");
   assert.equal(matchConfiguredProvider(config, "unknown-model"), "tokligence");
+});
+
+test("Mistral provider is configured and routed", () => {
+  const mistral = config.providers.find((provider) => provider.id === "mistral");
+  assert.equal(mistral.adapter, "middleware");
+  assert.equal(mistral.api_key_env, "MISTRAL_API_KEY");
+  assert.equal(mistral.default_base_url, "https://api.mistral.ai/v1");
+  assert.equal(matchConfiguredProvider(config, "mistral/mistral-large-latest"), "mistral");
+  assert.equal(matchConfiguredProvider(config, "mistral-large-latest"), "mistral");
+  assert.equal(resolveConfiguredAlias(config, "mistral-large-latest"), "mistral-large-latest");
+  assert.equal(providerEnabled(mistral, {}), false);
+  assert.equal(providerEnabled(mistral, { MISTRAL_API_KEY: "x" }), true);
 });
 
 test("routing aliases use the most specific matching prefix", () => {
