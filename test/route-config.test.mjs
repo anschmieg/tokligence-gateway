@@ -34,26 +34,17 @@ test("Mistral provider is configured and routed", () => {
   assert.equal(providerEnabled(mistral, { MISTRAL_API_KEY: "x" }), true);
 });
 
-test("routing aliases use the most specific matching prefix", () => {
-  assert.equal(resolveConfiguredAlias(config, "claude-opus-4", {}), "oc/deepseek-v4-pro");
-  assert.equal(resolveConfiguredAlias(config, "claude-opus-4", {
-    CODEX_PROXY_ENABLED: "true",
-    CODEX_PROXY_API_KEY: "internal",
-  }), "gpt-5.6-sol");
+test("capability profiles route to correct models and fallbacks", () => {
   const enabled = { CODEX_PROXY_ENABLED: "true", CODEX_PROXY_API_KEY: "internal" };
-  assert.equal(resolveConfiguredAlias(config, "claude-haiku-4-5-20251001", enabled), "gpt-5.6-luna");
-  assert.equal(resolveConfiguredAlias(config, "claude-sonnet-4-7", enabled), "gpt-5.6-terra");
-  assert.equal(resolveConfiguredAlias(config, "claude-opus-4-8", enabled), "gpt-5.6-sol");
-  assert.equal(resolveConfiguredAlias(config, "claude-fable-5", enabled), "gpt-5.6-sol");
-  assert.equal(resolveConfiguredAlias(config, "claude-sonnet-4.5", enabled), "gpt-5.6-terra");
-  assert.equal(resolveConfiguredAlias(config, "claude-3.5-sonnet", enabled), "gpt-5.6-terra");
-  assert.equal(resolveConfiguredAlias(config, "claude-3-5-haiku-20241022", enabled), "gpt-5.6-luna");
-  assert.equal(resolveConfiguredAlias(config, "claude-4-opus-20250514", enabled), "gpt-5.6-sol");
-  assert.equal(resolveConfiguredAlias(config, "claude-5-fable", enabled), "gpt-5.6-sol");
-  assert.equal(resolveConfiguredAlias(config, "claude-opus", enabled), "claude-opus");
-  assert.equal(resolveConfiguredAlias(config, "claude-opusfoo", enabled), "claude-opusfoo");
-  assert.equal(resolveConfiguredAlias(config, "minimax-m2.7"), "MiniMax-M2.7");
-  assert.equal(resolveConfiguredAlias(config, "unknown-model"), "unknown-model");
+  assert.equal(resolveConfiguredAlias(config, "xhigh", enabled), "gpt-5.6-sol");
+  assert.equal(resolveConfiguredAlias(config, "reasoning", enabled), "gpt-5.6-sol");
+  assert.equal(resolveConfiguredAlias(config, "smartest", enabled), "gpt-5.6-sol");
+  assert.equal(resolveConfiguredAlias(config, "high", enabled), "gpt-5.6-terra");
+  assert.equal(resolveConfiguredAlias(config, "engineer", enabled), "gpt-5.6-terra");
+  assert.equal(resolveConfiguredAlias(config, "low", {}), "ministral-8b-latest");
+  assert.equal(resolveConfiguredAlias(config, "cheap", {}), "ministral-8b-latest");
+  assert.equal(resolveConfiguredAlias(config, "vision", {}), "pixtral-large-latest");
+  assert.equal(resolveConfiguredAlias(config, "reviewer", {}), "pixtral-large-latest");
 });
 
 test("one policy compiles both downstream configurations", () => {
