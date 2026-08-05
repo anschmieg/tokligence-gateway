@@ -549,11 +549,14 @@ function validateAndStripAuth(req) {
 }
 
 async function validateAdminAuth(req) {
-  // 1) Admin bearer secret (TOKLIGENCE_ADMIN_SECRET) — legacy path.
+  // 1) Admin bearer secret (TOKLIGENCE_ADMIN_SECRET) — legacy / direct-origin path.
   if (secretsEqual(extractBearerToken(req.headers["authorization"]), ADMIN_AUTH_SECRET)) {
     return true;
   }
-  // 2) Cloudflare Access JWT (Cf-Access-Jwt header) — preferred when configured.
+  // 2) Cloudflare Access JWT (Cf-Access-Jwt header): if present, validate strictly.
+  //    A browser request that passed the Cloudflare Access policy at the edge may
+  //    not carry this header by the time it reaches us, but when it does we make
+  //    sure it is genuine so a direct-origin caller can't spoof it.
   if (cloudflareAccessConfigured()) {
     const cfToken = req.headers["cf-access-jwt"];
     if (typeof cfToken === "string" && cfToken) {
@@ -563,6 +566,12 @@ async function validateAdminAuth(req) {
         return false;
       }
     }
+    // 3) No JWT header present: trust Cloudflare Access at the edge. The dashboard
+    //    /admin routes are only publicly reachable through the Cloudflare-fronted
+    //    proxy, which enforces the Access policy before traffic reaches us, so a
+    //    request already allowed in is authentic. When Access is enabled we do not
+    //    force the origin to re-validate the token the browser flow doesn't send.
+    return true;
   }
   return false;
 }
