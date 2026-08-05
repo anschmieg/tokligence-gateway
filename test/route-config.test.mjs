@@ -41,10 +41,19 @@ test("capability profiles route to correct models and fallbacks", () => {
   assert.equal(resolveConfiguredAlias(config, "smartest", enabled), "gpt-5.6-sol");
   assert.equal(resolveConfiguredAlias(config, "high", enabled), "gpt-5.6-terra");
   assert.equal(resolveConfiguredAlias(config, "engineer", enabled), "gpt-5.6-terra");
-  assert.equal(resolveConfiguredAlias(config, "low", {}), "ministral-8b-latest");
-  assert.equal(resolveConfiguredAlias(config, "cheap", {}), "ministral-8b-latest");
-  assert.equal(resolveConfiguredAlias(config, "vision", {}), "pixtral-large-latest");
-  assert.equal(resolveConfiguredAlias(config, "reviewer", {}), "pixtral-large-latest");
+  // Routing is fail-closed: a profile's provider must be enabled, otherwise its
+  // fallback is used. Mistral-backed profiles fall back when Mistral is off.
+  const mistralOff = {};
+  const mistralOn = { MISTRAL_API_KEY: "x" };
+  assert.equal(resolveConfiguredAlias(config, "low", mistralOff), "oc/kimi-k2.6");
+  assert.equal(resolveConfiguredAlias(config, "cheap", mistralOff), "oc/kimi-k2.6");
+  assert.equal(resolveConfiguredAlias(config, "low", mistralOn), "ministral-8b-latest");
+  assert.equal(resolveConfiguredAlias(config, "cheap", mistralOn), "ministral-8b-latest");
+
+  assert.equal(resolveConfiguredAlias(config, "vision", mistralOff), "a-vision-fallback");
+  assert.equal(resolveConfiguredAlias(config, "reviewer", mistralOff), "a-vision-fallback");
+  assert.equal(resolveConfiguredAlias(config, "vision", mistralOn), "pixtral-large-latest");
+  assert.equal(resolveConfiguredAlias(config, "reviewer", mistralOn), "pixtral-large-latest");
 });
 
 test("one policy compiles both downstream configurations", () => {

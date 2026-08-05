@@ -28,7 +28,11 @@ RUN npm ci --omit=dev
 COPY tgw-proxy.mjs ./
 COPY gateway-config.mjs ./
 COPY route-config.mjs compile-config.mjs gateway.routes.yaml ./
+COPY quota.mjs preferences.mjs dashboard.mjs dashboard.html cloudflare-access.mjs ./
+# Routing-preference overrides persist to the mounted /data volume.
+ENV ROUTING_PREFERENCES_PATH=/data/gateway.preferences.yaml
 COPY entrypoint.sh ./
+
 RUN chmod +x entrypoint.sh
 
 EXPOSE 8080

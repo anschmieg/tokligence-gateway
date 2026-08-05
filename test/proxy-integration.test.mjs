@@ -178,7 +178,7 @@ test("the façade routes exact Codex models and preserves Claude effort", async 
     method: "POST",
     headers,
     body: JSON.stringify({
-      model: "claude-opus-4-8",
+      model: "reasoning",
       messages: [{ role: "user", content: "hello" }],
       thinking: { type: "adaptive" },
       output_config: { effort: "max" },

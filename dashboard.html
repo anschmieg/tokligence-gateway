@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tokligence Gateway — Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1117; --panel: #171a23; --panel-2: #1d212e; --line: #2a3040;
+    --text: #e6e8ef; --muted: #8b92a3; --accent: #6ea8fe; --accent-2: #7be0a2;
+    --warn: #f6c065; --danger: #f0767e; --good: #7be0a2;
+    --radius: 12px; --shadow: 0 6px 24px rgba(0,0,0,.35);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: radial-gradient(1200px 600px at 20% -10%, #1a2030, var(--bg)); color: var(--text); min-height: 100vh; }
+  header { display: flex; align-items: center; gap: 14px; padding: 18px 28px; border-bottom: 1px solid var(--line); background: rgba(15,17,23,.6); backdrop-filter: blur(6px); position: sticky; top: 0; z-index: 10; }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: .2px; }
+  header .tag { font-size: 12px; color: var(--muted); }
+  .logo { width: 30px; height: 30px; border-radius: 8px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); display:grid; place-items:center; font-weight:800; color:#0f1117; }
+  main { max-width: 1180px; margin: 0 auto; padding: 24px 28px 72px; }
+  section { margin-top: 28px; }
+  section > h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 0 0 14px; }
+  .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  .toolbar .spacer { flex: 1; }
+  button { cursor: pointer; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); padding: 8px 14px; border-radius: 9px; font-size: 13px; transition: all .15s ease; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #0f1117; font-weight: 600; }
+  button.primary:hover { filter: brightness(1.08); }
+  button.ghost { background: transparent; }
+  button.danger { border-color: var(--danger); color: var(--danger); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 10px; }
+  .card .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .card h3 { margin: 0; font-size: 14px; }
+  .badge { font-size: 11px; padding: 3px 8px; border-radius: 20px; font-weight: 600; }
+  .badge.ok { background: rgba(123,224,162,.14); color: var(--good); }
+  .badge.warn { background: rgba(246,192,101,.16); color: var(--warn); }
+  .badge.off { background: rgba(139,146,163,.16); color: var(--muted); }
+  .badge.err { background: rgba(240,118,126,.16); color: var(--danger); }
+  .metric { font-size: 26px; font-weight: 700; line-height: 1.1; }
+  .metric small { font-size: 13px; color: var(--muted); font-weight: 500; }
+  .sub { color: var(--muted); font-size: 12px; }
+  .bar { height: 8px; border-radius: 20px; background: var(--panel-2); overflow: hidden; }
+  .bar > i { display: block; height: 100%; border-radius: 20px; background: linear-gradient(90deg, var(--accent-2), var(--accent)); }
+  .bar > i.warn { background: linear-gradient(90deg, var(--warn), var(--danger)); }
+  .errnote { color: var(--danger); font-size: 12px; }
+  .detail { font-size: 12px; color: var(--muted); white-space: pre-wrap; word-break: break-word; max-height: 90px; overflow: auto; }
+  .statusline { display:flex; align-items:center; gap:8px; margin-bottom:14px; font-size:13px; color:var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-2); }
+  .dot.err { background: var(--danger); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); font-size: 13px; vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  td select, td input { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font-size: 13px; width: 100%; }
+  .fallback { color: var(--muted); font-size: 12px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .muted { color: var(--muted); }
+  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--panel-2); border: 1px solid var(--accent); color: var(--text); padding: 12px 16px; border-radius: 10px; box-shadow: var(--shadow); font-size: 13px; opacity: 0; transform: translateY(8px); transition: all .25s ease; z-index: 100; }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.error { border-color: var(--danger); }
+  .empty { color: var(--muted); font-size: 13px; padding: 20px; text-align: center; }
+  #auth-password { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 9px; padding: 8px 12px; font-size: 13px; width: 240px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">T</div>
+  <h1>Tokligence Gateway</h1>
+  <span class="tag" id="svc-tag">admin dashboard</span>
+</header>
+
+<main>
+  <div id="auth-wrap" class="panel" style="max-width:420px;margin:40px auto;">
+    <h2 style="margin-top:0;">Admin access</h2>
+    <p class="sub">Enter the gateway admin secret (TOKLIGENCE_ADMIN_SECRET).</p>
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <input id="auth-password" type="password" placeholder="admin secret" autocomplete="off">
+      <button class="primary" id="auth-btn">Unlock</button>
+    </div>
+    <div id="auth-msg" class="sub" style="margin-top:10px;"></div>
+  </div>
+
+  <div id="app" style="display:none;">
+    <div class="statusline"><span class="dot" id="status-dot"></span><span id="status-text">Loading…</span></div>
+
+    <section>
+      <div class="toolbar">
+        <h2 style="margin:0;">Provider quota / usage</h2>
+        <span class="spacer"></span>
+        <button id="q-refresh" class="ghost">Refresh</button>
+      </div>
+      <div class="cards" id="quota-cards"></div>
+    </section>
+
+    <section>
+      <div class="toolbar">
+        <h2 style="margin:0;">Routing preferences</h2>
+        <span class="sub" id="pref-hint">Overrides apply immediately and persist across restarts.</span>
+        <span class="spacer"></span>
+        <button id="pref-bake" class="primary" title="Write current overrides into gateway.routes.yaml (source of truth)">Persist to config</button>
+        <button id="pref-save" class="ghost">Apply now</button>
+        <button id="pref-reset" class="danger ghost">Reset all</button>
+      </div>
+      <div class="panel">
+        <div class="empty" id="pref-empty">No aliases/profiles configured to customize.</div>
+        <div style="display:none;" id="pref-table">
+          <table>
+            <thead><tr>
+              <th>Alias / profile</th>
+              <th style="width:170px;">Provider</th>
+              <th style="width:220px;">Target model</th>
+              <th style="width:220px;">Fallback</th>
+            </tr></thead>
+            <tbody id="pref-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+let token = null;
+const TOAST = document.getElementById("toast");
+const APP = document.getElementById("app");
+const AUTH = document.getElementById("auth-wrap");
+const authInput = document.getElementById("auth-password");
+const authMsg = document.getElementById("auth-msg");
+
+function toast(msg, isError) {
+  TOAST.textContent = msg;
+  TOAST.classList.toggle("error", !!isError);
+  TOAST.classList.add("show");
+  clearTimeout(TOAST._t);
+  TOAST._t = setTimeout(function(){ TOAST.classList.remove("show"); }, 3200);
+}
+
+async function api(path, opts) {
+  opts = opts || {};
+  var headers = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = "Bearer " + token;
+  if (opts.headers) Object.assign(headers, opts.headers);
+  var res = await fetch(path, Object.assign({}, opts, { headers: headers }));
+  if (res.status === 401) { showAuth(); throw new Error("Unauthorized"); }
+  if (!res.ok) {
+    var msg = "Request failed";
+    try { var j = await res.json(); msg = j.error || msg; } catch(e) {}
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+function showAuth() { APP.style.display = "none"; AUTH.style.display = "block"; token = null; }
+function showApp() { AUTH.style.display = "none"; APP.style.display = "block"; }
+
+async function unlock() {
+  token = authInput.value.trim();
+  authMsg.textContent = "";
+  try {
+    await api("/admin/status");
+    authInput.value = "";
+    showApp();
+    init();
+  } catch (e) {
+    token = null;
+    authMsg.textContent = e.message.indexOf("Unauthorized") >= 0 ? "Invalid admin secret." : e.message;
+  }
+}
+
+function authFromUrl() {
+  var m = location.hash.match(/token=([^&]+)/);
+  if (m) {
+    token = decodeURIComponent(m[1]);
+    showApp();
+    init();
+    return;
+  }
+  // If Cloudflare Access is in front, no admin secret is needed — the JWT is
+  // injected automatically. Probe without a token first, fall back to the
+  // password gate when the origin rejects the request.
+  token = null;
+  fetch("/admin/status", { headers: { "Content-Type": "application/json" } })
+    .then(function (res) {
+      if (res.ok) {
+        showApp();
+        init();
+      } else {
+        showAuth();
+      }
+    })
+    .catch(function () {
+      showAuth();
+    });
+}
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+    return { "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c];
+  });
+}
+
+function fmt(n, unit) {
+  var v = Number(n);
+  if (!isFinite(v)) return "—";
+  var out = v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (unit && unit !== "unknown") out += " " + unit;
+  return out;
+}
+
+function quotaCard(q) {
+  var el = document.createElement("div");
+  el.className = "card";
+  var pct = q.percentUsed;
+  var badge, bar = "";
+  if (q.available && pct != null) {
+    badge = '<span class="badge ' + (pct >= 90 ? "warn" : "ok") + '">' + pct + "% used</span>";
+    bar = '<div class="bar"><i class="' + (pct >= 90 ? "warn" : "") + '" style="width:' + Math.min(100, pct) + '%"></i></div>';
+  } else if (q.available) {
+    badge = '<span class="badge ok">reachable</span>';
+  } else if (q.error) {
+    badge = '<span class="badge err">unavailable</span>';
+  } else {
+    badge = '<span class="badge off">no quota source</span>';
+  }
+  var used = q.used == null ? "—" : fmt(q.used, q.unit);
+  var limit = q.limit == null ? "unmetered" : fmt(q.limit, q.unit);
+  var detailLines = [];
+  if (q.detail && typeof q.detail === "object") {
+    Object.keys(q.detail).forEach(function(k){
+      if (/secret|key|token|api_key/i.test(k)) return;
+      var v = q.detail[k];
+      detailLines.push(k + ": " + (typeof v === "string" ? v : JSON.stringify(v)));
+    });
+  }
+  var detailHtml = detailLines.length ? '<div class="detail">' + esc(detailLines.join("\\n")) + "</div>" : "";
+  el.innerHTML =
+    '<div class="top"><h3>' + esc(q.provider) + "</h3>" + badge + "</div>" +
+    '<div class="sub">' + esc(q.account || "") + "</div>" +
+    '<div class="metric">' + used + " <small>/ " + esc(limit) + "</small></div>" +
+    bar +
+    (q.available ? "" : '<div class="errnote">' + esc(q.error || "unavailable") + "</div>") +
+    detailHtml;
+  return el;
+}
+
+async function loadQuota() {
+  var box = document.getElementById("quota-cards");
+  box.innerHTML = '<div class="empty">Probing providers…</div>';
+  try {
+    var res = await api("/admin/quota");
+    box.innerHTML = "";
+    if (!res.data || res.data.length === 0) { box.innerHTML = '<div class="empty">No enabled providers to probe.</div>'; return; }
+    res.data.forEach(function(q){ box.appendChild(quotaCard(q)); });
+  } catch (e) {
+    box.innerHTML = '<div class="empty errnote">' + esc(e.message) + "</div>";
+  }
+}
+
+var aliasRows = [];
+var enabledProviders = [];
+
+function renderPrefs(routing, prefs) {
+  var tableWrap = document.getElementById("pref-table");
+  var tbody = document.getElementById("pref-body");
+  var empty = document.getElementById("pref-empty");
+  enabledProviders = routing.providers.filter(function(p){ return p.configured; }).map(function(p){ return p.id; }).sort();
+  aliasRows = routing.aliases.map(function(alias){
+    var ov = null;
+    (prefs.aliases || []).forEach(function(x){ if (x.id === alias.id) ov = x; });
+    return {
+      id: alias.id,
+      patterns: (alias.patterns || []).join(", "),
+      provider: ov && ov.provider ? ov.provider : (alias.provider || ""),
+      target: ov && ov.target ? ov.target : (alias.target || ""),
+      fallback: ov && ov.fallback != null ? ov.fallback : (alias.fallback || "")
+    };
+  });
+  if (!aliasRows.length) { empty.style.display = "block"; tableWrap.style.display = "none"; return; }
+  empty.style.display = "none";
+  tableWrap.style.display = "block";
+  tbody.innerHTML = "";
+  aliasRows.forEach(function(row, idx){
+    var providerOpts = [""].concat(enabledProviders).map(function(pid){
+      return '<option value="' + esc(pid) + '"' + (row.provider === pid ? " selected" : "") + ">" + (pid ? esc(pid) : "(default)") + "</option>";
+    }).join("");
+    var tr = document.createElement("tr");
+    tr.innerHTML =
+      '<td><div style="font-weight:600;">' + esc(row.id) + '</div><div class="fallback mono">' + esc(row.patterns) + "</div></td>" +
+      '<td><select data-idx="' + idx + '" data-field="provider">' + providerOpts + "</select></td>" +
+      '<td><input data-idx="' + idx + '" data-field="target" value="' + esc(row.target) + '" placeholder="model id" class="mono"></td>' +
+      '<td><input data-idx="' + idx + '" data-field="fallback" value="' + esc(row.fallback) + '" placeholder="fallback" class="mono"></td>';
+    tr.querySelectorAll("[data-field]").forEach(function(el){
+      el.addEventListener("input", function(){ el.dataset.dirty = "1"; });
+    });
+    tbody.appendChild(tr);
+  });
+}
+
+async function savePrefs() {
+  var btn = document.getElementById("pref-save");
+  btn.disabled = true;
+  for (var i = 0; i < aliasRows.length; i++) {
+    var row = aliasRows[i];
+    var override = { provider: row.provider || null, target: row.target, fallback: row.fallback || null };
+    if (!override.target) continue;
+    try { await api("/admin/preferences", { method: "POST", body: JSON.stringify({ id: row.id, override: override }) }); }
+    catch (e) { toast(row.id + ": " + e.message, true); }
+  }
+  btn.disabled = false;
+  toast("Routing preferences saved.");
+  loadPrefs();
+}
+
+async function persistPrefs() {
+  if (!confirm("Write current routing preferences into gateway.routes.yaml permanently? This updates the source-of-truth config for the next restart.")) return;
+  var btn = document.getElementById("pref-bake");
+  btn.disabled = true;
+  // Ensure any unsaved edits are applied first, then bake to the config file.
+  try {
+    await savePrefsSilently();
+    var res = await api("/admin/preferences/bake", { method: "POST" });
+    toast("Baked " + res.written + " override(s) into " + res.file);
+  } catch (e) {
+    toast("Persist failed: " + e.message, true);
+  }
+  btn.disabled = false;
+  loadPrefs();
+}
+
+async function savePrefsSilently() {
+  for (var i = 0; i < aliasRows.length; i++) {
+    var row = aliasRows[i];
+    var override = { provider: row.provider || null, target: row.target, fallback: row.fallback || null };
+    if (!override.target) continue;
+    await api("/admin/preferences", { method: "POST", body: JSON.stringify({ id: row.id, override: override }) });
+  }
+}
+
+async function resetPrefs() {
+  if (!confirm("Reset all routing preferences to the policy defaults?")) return;
+  try { await api("/admin/preferences/reset", { method: "POST" }); toast("Preferences reset."); loadPrefs(); }
+  catch (e) { toast(e.message, true); }
+}
+
+async function loadPrefs() {
+  try {
+    var routes = await api("/admin/routes");
+    var prefs = await api("/admin/preferences");
+    renderPrefs(routes, prefs);
+  } catch (e) { toast("Failed to load preferences: " + e.message, true); }
+}
+
+async function init() {
+  var dot = document.getElementById("status-dot");
+  var txt = document.getElementById("status-text");
+  try {
+    var st = await api("/admin/status");
+    dot.className = "dot";
+    txt.textContent = "Healthy · " + st.providers.length + " enabled provider(s) · " + st.model_count + " models · upstream " + st.upstreams.tokligence;
+  } catch (e) { dot.className = "dot err"; txt.textContent = "Status unavailable"; }
+  document.getElementById("q-refresh").addEventListener("click", loadQuota);
+  document.getElementById("pref-save").addEventListener("click", savePrefs);
+  document.getElementById("pref-bake").addEventListener("click", persistPrefs);
+  document.getElementById("pref-reset").addEventListener("click", resetPrefs);
+  document.getElementById("auth-btn").addEventListener("click", unlock);
+  authInput.addEventListener("keydown", function(e){ if (e.key === "Enter") unlock(); });
+  loadQuota();
+  loadPrefs();
+}
+
+authFromUrl();
+</script>
+</body>
+</html>

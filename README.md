@@ -14,15 +14,51 @@ only to loopback and is never exposed directly to the internet.
 - `GET /v1/models` — unified model registry
 - `GET /v1/providers` — configured provider registry without secrets
 - `GET /admin/routes` — effective routing policy without secrets
+- `GET /admin/status` — dashboard status (providers, model count)
+- `GET /admin/quota` — live per-provider quota/usage (fail-safe, no secrets)
+- `GET /admin/preferences` — current routing-preference overrides
+- `POST /admin/preferences` — set/update a routing-preference override
+- `POST /admin/preferences/clear` — clear one override
+- `POST /admin/preferences/reset` — clear all overrides
+- `GET /dashboard` — admin dashboard UI (visiting `/` redirects here so the access-controlled path is used)
 - `POST /v1/messages` — Anthropic Messages, including streaming and tools
 - `POST /v1/messages/count_tokens` — Anthropic token counting
 - `POST /v1/responses` — OpenAI Responses
 - `POST /v1/chat/completions` — OpenAI Chat Completions
 
 All endpoints except `/health` require the existing gateway bearer token.
-`/admin/*` uses a separate `TOKLIGENCE_ADMIN_SECRET`; the public gateway token
-cannot access administrative routes. `/health` intentionally returns only a
-generic liveness result and exposes no provider state.
+`/admin/*` is protected by **either** a separate `TOKLIGENCE_ADMIN_SECRET`
+shared secret **or** a Cloudflare Access JWT. To use Cloudflare Access, deploy
+this service behind a Cloudflare Access application and set the environment
+variables documented below. The public gateway token cannot access
+administrative routes, and `/health` intentionally returns only a generic
+liveness result that exposes no provider state.
+
+### Cloudflare Access auth (optional)
+
+Instead of (or in addition to) `TOKLIGENCE_ADMIN_SECRET`, you can protect the
+dashboard with Cloudflare Access. Cloudflare sits in front of the gateway,
+validates the user's identity, and sends a signed JWT in the `Cf-Access-Jwt`
+request header. The gateway verifies that JWT against Cloudflare's public
+JWKS.
+
+```dotenv
+# Cloudflare Zero Trust team name (subdomain of your Access dashboard)
+CLOUDFLARE_ACCESS_TEAM=my-company
+# The application Audience Tag shown on the Access application page
+CLOUDFLARE_ACCESS_AUD=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# Optional: override the JWKS URL (defaults to
+#   https://<TEAM>.cloudflareaccess.com/cdn-cgi/access/certs)
+# CLOUDFLARE_ACCESS_JWKS_URL=https://...custom-certs.../certs
+# Optional air-gapped inline certs (JSON JWKS) — takes precedence over the URL
+# CLOUDFLARE_ACCESS_CERTS={"keys":[...]}
+```
+
+When Cloudflare Access is configured, the browser flow needs no admin secret:
+Cloudflare handles identity, injects the JWT, and the dashboard unlocks
+automatically. You can keep `TOKLIGENCE_ADMIN_SECRET` as a fallback for
+operators, or set it to an empty value and rely entirely on Cloudflare Access.
+Both auth methods are checked on every `/admin/*` request.
 
 ## Routing policy
 
@@ -36,6 +72,55 @@ A deployment restart is the single apply operation. There is intentionally no
 partial hot reload: the middleware, Tokligence, and OAuth proxy always start
 from the same policy revision. `GET /admin/routes` shows the effective sanitized
 policy currently in use.
+
+## Dashboard
+
+`GET /dashboard` serves a self-contained admin UI (`/` 302-redirects to it so
+the browser always lands on the Cloudflare-Access-protected path). When Cloudflare
+Access is configured, the dashboard unlocks automatically after Cloudflare
+performs identity check; otherwise enter `TOKLIGENCE_ADMIN_SECRET` (or pass it
+in the URL hash as `#token=<secret>`). The dashboard has two sections:
+
+- **Provider quota / usage** — probes each enabled provider for how much of its
+  quota/balance has been consumed (OpenRouter spend vs. cap, Mistral
+  reachability, MiniMax balance where available) using `quota.mjs`. Providers
+  without a working balance API report themselves as *reachable* or
+  *unavailable* rather than failing the page. No credentials are ever shown.
+- **Routing preferences** — lets you re-target capability profiles / aliases to
+  a different provider + model and set a fallback. Two levels of persistence:
+  - **Apply now** — updates the running process immediately via
+    `preferences.mjs` and writes a sidecar file (default
+    `/data/gateway.preferences.yaml`, overridable with
+    `ROUTING_PREFERENCES_PATH`) so the running instance keeps the overrides.
+  - **Persist to config** — bakes the current overrides into
+    `gateway.routes.yaml` itself (`POST /admin/preferences/bake`), so they
+    become permanent policy that survives a restart and deploy. This is the
+    recommended way to save routing changes; `gateway.routes.yaml` remains the
+    single source of truth. Baking clears the now-redundant runtime overrides.
+
+  `POST /admin/preferences/reset` removes all runtime overrides (it does not
+  edit `gateway.routes.yaml`).
+
+### Dashboard API
+
+All dashboard endpoints use the admin secret and never return credentials:
+
+| Method | Path | Purpose |
+| ------ | ---- | ------- |
+| GET | `/admin/routes` | effective sanitized routing policy |
+| GET | `/admin/status` | providers, model count, preferences file |
+| GET | `/admin/quota` | per-provider quota usage |
+| GET | `/admin/preferences` | current overrides |
+| POST | `/admin/preferences` | body `{ id, override: { provider, target, fallback } }` |
+| POST | `/admin/preferences/clear` | body `{ id }` |
+| POST | `/admin/preferences/reset` | clear all overrides |
+| POST | `/admin/preferences/bake` | write overrides into `gateway.routes.yaml` |
+
+The set endpoints validate that the alias exists and that any explicitly
+referenced provider is currently enabled; invalid writes return `422`. The bake
+endpoint rewrites `gateway.routes.yaml` (a no-op when no overrides exist) and
+returns the number of aliases updated; the file is validated on the next start
+by `compile-config.mjs`.
 
 CLIProxyAPI is used strictly as the OAuth proxy. It owns OAuth login, refresh,
 credential selection, affinity, and retry/cooldown behavior. Add an account with

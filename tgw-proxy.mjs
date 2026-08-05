@@ -24,6 +24,10 @@ import {
   publicRoutingConfig,
   resolveConfiguredAlias,
 } from "./route-config.mjs";
+import { probeAllProviderQuota } from "./quota.mjs";
+import { RoutingPreferences, sanitizedPreferences } from "./preferences.mjs";
+import { DASHBOARD_HTML } from "./dashboard.mjs";
+import { cloudflareAccessConfigured, isValidCloudflareAccessToken } from "./cloudflare-access.mjs";
 
 const PROXY_PORT = Number(process.env.PROXY_PORT || 8080);
 const TGW_HOST   = process.env.TGW_HOST || "127.0.0.1";
@@ -266,8 +270,34 @@ async function refreshModelRegistry() {
 
 seedConfiguredModels();
 
+// ---------------------------------------------------------------------------
+// Dashboard backend: runtime routing-preference overrides + quota probes.
+// Preferences apply immediately in this process and persist to a sidecar file
+// so they survive a restart. Quota probes never echo credentials.
+// ---------------------------------------------------------------------------
+const PREFERENCES = new RoutingPreferences(ROUTING, {
+  file: process.env.ROUTING_PREFERENCES_PATH || "gateway.preferences.yaml",
+  routesPath: ROUTING_CONFIG_PATH,
+  readonly: process.env.ROUTING_PREFERENCES_READONLY === "1",
+});
+
+function quotaContext() {
+  return {
+    openrouterKey: providerApiKey("openrouter"),
+    openrouterBaseUrl: providerBaseUrl("openrouter")?.toString() || "https://openrouter.ai/api/v1",
+    mistralKey: providerApiKey("mistral"),
+    mistralBaseUrl: providerBaseUrl("mistral")?.toString() || "https://api.mistral.ai/v1",
+    opencodeKey: providerApiKey("opencode-go"),
+    opencodeBaseUrl: providerBaseUrl("opencode-go")?.toString() || "https://opencode.ai",
+    minimaxKey: providerApiKey("tokligence"),
+    minimaxBaseUrl: providerBaseUrl("tokligence")?.toString() || "https://api.minimax.io/v1",
+    modalKey: providerApiKey("modal"),
+    modalBaseUrl: providerBaseUrl("modal")?.toString() || "https://api.us-west-2.modal.direct",
+  };
+}
+
 function resolveModel(model) {
-  return resolveConfiguredAlias(ROUTING, model);
+  return PREFERENCES.resolve(model, resolveConfiguredAlias);
 }
 
 function isOpenRouterModel(model) {
@@ -518,8 +548,39 @@ function validateAndStripAuth(req) {
   return true;
 }
 
-function validateAdminAuth(req) {
-  return secretsEqual(extractBearerToken(req.headers["authorization"]), ADMIN_AUTH_SECRET);
+async function validateAdminAuth(req) {
+  // 1) Admin bearer secret (TOKLIGENCE_ADMIN_SECRET) — legacy path.
+  if (secretsEqual(extractBearerToken(req.headers["authorization"]), ADMIN_AUTH_SECRET)) {
+    return true;
+  }
+  // 2) Cloudflare Access JWT (Cf-Access-Jwt header) — preferred when configured.
+  if (cloudflareAccessConfigured()) {
+    const cfToken = req.headers["cf-access-jwt"];
+    if (typeof cfToken === "string" && cfToken) {
+      try {
+        return await isValidCloudflareAccessToken(cfToken);
+      } catch {
+        return false;
+      }
+    }
+  }
+  return false;
+}
+
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      if (chunks.length === 0) return resolve({});
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString()));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    req.on("error", reject);
+  });
 }
 
 const CODEX_FORWARD_HEADERS = [
@@ -832,7 +893,8 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname.startsWith("/admin/")) {
-    if (!validateAdminAuth(req)) {
+    validateAdminAuth(req).then((isAdmin) => {
+    if (!isAdmin) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Unauthorized" }));
       return;
@@ -842,8 +904,131 @@ const server = http.createServer((req, res) => {
       res.end(JSON.stringify(publicRoutingConfig(ROUTING)));
       return;
     }
+
+    // Admin status used by the dashboard.
+    if (req.method === "GET" && url.pathname === "/admin/status") {
+      const enabled = ROUTING.providers.filter((provider) => providerEnabled(provider));
+      const configured = enabled.map((provider) => ({ id: provider.id, adapter: provider.adapter }));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        service: "tgw-proxy",
+        preferences_file: process.env.ROUTING_PREFERENCES_PATH || "gateway.preferences.yaml",
+        preferences_readonly: process.env.ROUTING_PREFERENCES_READONLY === "1",
+        providers: configured,
+        model_count: MODEL_REGISTRY.size,
+        upstreams: { tokligence: `${TGW_HOST}:${TGW_PORT}` },
+      }));
+      return;
+    }
+
+    // Live quota/balance for every enabled provider.
+    if (req.method === "GET" && url.pathname === "/admin/quota") {
+      const enabled = ROUTING.providers.filter((provider) => providerEnabled(provider));
+      probeAllProviderQuota(enabled, quotaContext())
+        .then((data) => {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ object: "list", data }));
+        })
+        .catch((error) => {
+          res.writeHead(502, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: error.message }));
+        });
+      return;
+    }
+
+    // Routing-preference overrides (the "customize routing" part of the UI).
+    if (req.method === "GET" && url.pathname === "/admin/preferences") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(sanitizedPreferences(PREFERENCES)));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/admin/preferences") {
+      readJsonBody(req).then((body) => {
+        const { id, override } = body || {};
+        if (!id || !override) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "expected { id, override }" }));
+          return;
+        }
+        const errors = PREFERENCES.set(id, override);
+        if (errors.length) {
+          res.writeHead(422, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "invalid override", details: errors }));
+          return;
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(sanitizedPreferences(PREFERENCES)));
+      }).catch(() => {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid JSON body" }));
+      });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/admin/preferences/clear") {
+      readJsonBody(req).then((body) => {
+        const id = body?.id;
+        if (!id) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "expected { id }" }));
+          return;
+        }
+        PREFERENCES.clear(id);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(sanitizedPreferences(PREFERENCES)));
+      }).catch(() => {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid JSON body" }));
+      });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/admin/preferences/reset") {
+      PREFERENCES.reset();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(sanitizedPreferences(PREFERENCES)));
+      return;
+    }
+
+    // Permanently write overrides into gateway.routes.yaml (source of truth).
+    if (req.method === "POST" && url.pathname === "/admin/preferences/bake") {
+      try {
+        const summary = PREFERENCES.bakeToRoutes();
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ baked: true, ...summary }));
+      } catch (error) {
+        res.writeHead(422, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: error.message }));
+      }
+      return;
+    }
+
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Not found" }));
+    return;
+    });
+    return;
+  }
+
+  // Dashboard UI (HTML). Admin auth only. The canonical, Cloudflare-Access-protected
+  // path is /dashboard; send visitors from / to it so the browser flow always lands
+  // on an Access-protected URL.
+  if (req.method === "GET" && url.pathname === "/") {
+    res.writeHead(302, { "Location": "/dashboard" });
+    res.end();
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/dashboard") {
+    validateAdminAuth(req).then((isAdmin) => {
+    if (!isAdmin) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Unauthorized" }));
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(DASHBOARD_HTML);
+    });
     return;
   }
 

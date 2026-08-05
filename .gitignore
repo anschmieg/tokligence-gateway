@@ -6,3 +6,4 @@
 .codex/
 .playwright-mcp/
 node_modules/
+gateway.preferences.yaml
