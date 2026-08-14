@@ -28,6 +28,7 @@ import { probeAllProviderQuota } from "./quota.mjs";
 import { RoutingPreferences, sanitizedPreferences } from "./preferences.mjs";
 import { DASHBOARD_HTML } from "./dashboard.mjs";
 import { cloudflareAccessConfigured, isValidCloudflareAccessToken } from "./cloudflare-access.mjs";
+import { modelAllowedByCatalog } from "./model-catalog.mjs";
 
 const PROXY_PORT = Number(process.env.PROXY_PORT || 8080);
 const TGW_HOST   = process.env.TGW_HOST || "127.0.0.1";
@@ -149,6 +150,8 @@ function seedConfiguredModels() {
   MODEL_REGISTRY.clear();
 
   for (const model of configuredModels(ROUTING)) {
+    const provider = providerById(ROUTING, model.provider);
+    if (!modelAllowedByCatalog(provider, model)) continue;
     const codexMetadata = model.provider === "codex-oauth" ? {
       supported_reasoning_levels: CODEX_REASONING_LEVELS,
       supports_reasoning_summaries: true,
@@ -189,12 +192,14 @@ function prefixedModelId(id, prefix) {
 
 async function registerModelsFromEndpoint({ provider, hostname, port, path, headers = {}, prefix = "" }) {
   const data = await fetchJson({ hostname, port, path, method: "GET", headers });
+  const providerConfig = providerById(ROUTING, provider);
   for (const model of data?.data || []) {
-    const id = typeof model === "string" ? model : model.id;
-    if (!id) continue;
+    const candidate = typeof model === "string" ? { id: model } : model;
+    const id = candidate?.id;
+    if (!id || !modelAllowedByCatalog(providerConfig, candidate)) continue;
     registerModel(prefixedModelId(id, prefix), provider, {
-      created: model.created,
-      owned_by: model.owned_by || provider
+      created: candidate.created,
+      owned_by: candidate.owned_by || provider
     });
   }
 }
