@@ -11,7 +11,11 @@ only to loopback and is never exposed directly to the internet.
 ## Public endpoints
 
 - `GET /health` — façade and backend-configuration status
-- `GET /v1/models` — unified model registry
+- `GET /v1/models` — unified model registry, rebuilt live on every request by
+  re-pulling each enabled provider's `/models` endpoint (so the list always
+  reflects the current upstream contents). OpenRouter surfaces free models by
+  default; any paid exceptions must be explicitly allowlisted in the routing
+  catalog.
 - `GET /v1/providers` — configured provider registry without secrets
 - `GET /admin/routes` — effective routing policy without secrets
 - `GET /admin/status` — dashboard status (providers, model count)
@@ -167,6 +171,131 @@ tier-first names such as `claude-sonnet-4.5` and version-first names such as
 For Claude Code, adaptive thinking and `output_config.effort` are forwarded
 unchanged. The internal adapter translates the explicit `low`, `medium`,
 `high`, `xhigh`, and `max` values to Codex `reasoning.effort`.
+
+## Codex client (CLI and desktop app)
+
+Point the official Codex CLI / desktop app at this gateway via a custom
+provider, while keeping your native OpenAI (OAuth) login available side by side.
+
+### Usage at a glance
+
+| Surface | Custom gateway (default) | ChatGPT login |
+| --- | --- | --- |
+| **CLI** | `codex` (gateway is the default) | `codex --openai` |
+| **CLI, explicit** | `codex --gateway` | `codex --profile openai` |
+| **Desktop app** | `codex --gateway app` (already the default) | `codex --openai app` |
+
+### CLI
+
+- `codex "prompt"` starts a session on the **gateway** with the default model
+  (`minimax-m2.7`). Pick any of the 56 gateway models with `codex -m <model>`;
+  `codex --gateway` is the same thing spelled out. For non-interactive use,
+  run `codex exec` instead, e.g. `codex --gateway exec "run the tests"`.
+- `codex --openai "prompt"` runs on **official OpenAI** through your ChatGPT
+  OAuth login. Add `-m` to pick an official model, e.g.
+  `codex --openai -m gpt-5.4`. `codex --profile openai` is the same thing
+  without the wrapper sugar.
+- `codex resume` (or `codex resume <session-id>`) continues a past session;
+  the session uses the provider it was started with.
+- `--openai` and `--gateway` are provided by the local wrapper
+  `~/.local/bin/codex`; they translate to Codex's `--profile openai` and
+  `--profile tokligence`. The same flags also switch the desktop app:
+  `codex --openai app` / `codex --gateway app` (see below).
+
+### Desktop app
+
+The desktop app only reads the top-level values in `~/.codex/config.toml`
+(`--profile` is a CLI-only flag), so it uses the **gateway** out of the box:
+every gateway model appears in the app's model picker.
+
+Switch the desktop app between the two setups with the wrapper:
+
+```sh
+codex --gateway app [PATH]   # desktop app on the gateway (default)
+codex --openai app [PATH]    # desktop app on your ChatGPT login
+```
+
+`PATH` (defaults to the current directory) is the workspace the app opens.
+Because the desktop app is a single instance that keeps the config it was
+launched with, switching closes and relaunches it; open threads in the app are
+not preserved across a switch.
+
+`codex --openai app` launches the app with an alternate config home at
+`~/.cache/codex-gui/openai`: a fresh copy of `~/.codex/config.toml` with the
+three top-level values below swapped to the ChatGPT login (everything else is
+symlinked back to `~/.codex`), so `~/.codex/config.toml` is never modified.
+`codex --gateway app` launches the app normally, i.e. with the gateway
+defaults.
+
+The manual equivalent (no wrapper) is to swap the three top-level lines in
+`~/.codex/config.toml` and restart the app:
+
+```toml
+# ~/.codex/config.toml - gateway (the default)
+model = "minimax-m2.7"
+model_provider = "tokligence"
+model_catalog_json = "/Users/adrian/.codex/tokligence-models.json"
+```
+
+```toml
+# ~/.codex/config.toml - ChatGPT login (desktop app switch)
+model = "gpt-5.6-sol"
+model_provider = "openai"
+model_catalog_json = "/Users/adrian/.codex/models_cache.json"
+```
+
+### Configuration layout
+
+`~/.codex/config.toml` holds the shared base config (provider definitions,
+plugins, desktop settings) and defaults to the gateway. The two switchable CLI
+setups live in per-profile files that Codex layers on top of the base config
+(via `codex --profile <name>`, which loads `$CODEX_HOME/<name>.config.toml`):
+
+```toml
+# ~/.codex/openai.config.toml     - official OpenAI API via OAuth
+model = "gpt-5.6-sol"
+model_provider = "openai"
+model_catalog_json = "/Users/adrian/.codex/models_cache.json"
+model_reasoning_effort = "none"
+service_tier = "default"
+```
+
+```toml
+# ~/.codex/tokligence.config.toml - explicit gateway profile (same as default)
+model = "minimax-m2.7"
+model_provider = "tokligence"
+model_catalog_json = "/Users/adrian/.codex/tokligence-models.json"
+model_reasoning_effort = "none"
+service_tier = "default"
+```
+
+The base `~/.codex/config.toml` sets the same values as the `tokligence`
+profile at top level, plus the provider definition:
+
+```toml
+[model_providers.tokligence]
+name = "Tokligence Gateway"
+base_url = "https://code.nothing.pink/v1"   # OpenAI-compatible endpoint
+env_key = "CODEX_GATEWAY_API_KEY"
+wire_api = "responses"
+```
+
+Current Codex builds reject legacy `[profiles.*]` tables inside `config.toml`
+(`profile = "..."` / `[profiles.tokligence]`); use the per-file profile layout
+above instead.
+
+The deprecated predecessor gateway `ai.nothing.pink` (`nothing-ai` provider,
+`NOTHING_AI_API_KEY`) is still defined in the base config so older sessions
+that used its models (e.g. `opencode/deepseek-v4-flash-free`) can be resumed;
+it is not the default provider.
+
+`tokligence-models.json` is a snapshot of the gateway's `GET /v1/models`
+catalog (`codex debug models` renders it). Regenerate it with:
+
+```sh
+curl -fsS -H "Authorization: Bearer $CODEX_GATEWAY_API_KEY" \
+  https://code.nothing.pink/v1/models
+```
 
 ## Mistral via Vibe subscription
 

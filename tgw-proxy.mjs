@@ -157,7 +157,7 @@ function seedConfiguredModels() {
       supports_reasoning_summaries: true,
       supports_parallel_tool_calls: true,
     } : {};
-    registerModel(model.id, model.provider, { ...model, ...codexMetadata });
+    registerModel(model.id, model.provider, { ...model, ...codexMetadata, source: "config", discoveredBy: undefined });
   }
 }
 
@@ -190,17 +190,41 @@ function prefixedModelId(id, prefix) {
   return `${prefix}${id}`;
 }
 
-async function registerModelsFromEndpoint({ provider, hostname, port, path, headers = {}, prefix = "" }) {
+async function registerModelsFromEndpoint({ provider, hostname, port, path, headers = {}, prefix = "", filter: modelFilter = null }) {
   const data = await fetchJson({ hostname, port, path, method: "GET", headers });
   const providerConfig = providerById(ROUTING, provider);
+  const registered = new Set();
   for (const model of data?.data || []) {
     const candidate = typeof model === "string" ? { id: model } : model;
+    if (modelFilter && !modelFilter(candidate)) continue;
     const id = candidate?.id;
     if (!id || !modelAllowedByCatalog(providerConfig, candidate)) continue;
-    registerModel(prefixedModelId(id, prefix), provider, {
+    const fullId = prefixedModelId(id, prefix);
+    registerModel(fullId, provider, {
       created: candidate.created,
-      owned_by: candidate.owned_by || provider
+      owned_by: candidate.owned_by || provider,
+      discovered: true,
+      discoveredBy: provider,
+      context_length: typeof candidate.context_length === "number" ? candidate.context_length : undefined,
+      context_window: typeof candidate.context_window === "number" ? candidate.context_window : (typeof candidate.context_length === "number" ? candidate.context_length : undefined),
+      pricing: candidate.pricing || undefined,
     });
+    registered.add(fullId.toLowerCase());
+  }
+  return registered;
+}
+
+function pruneStaleDiscovered(provider, keepIds) {
+  // Keep the provider's endpoint-derived model list current: drop discovered
+  // entries that no longer appear upstream. Explicitly configured models
+  // (gateway.routes.yaml) are intentionally kept as a stable base/fallback so
+  // routing aliases keep resolving even when an upstream endpoint omits them.
+  for (const [key, model] of MODEL_REGISTRY) {
+    if (model.provider !== provider) continue;
+    if (model.source === "config") continue;
+    if (!keepIds.has(key)) {
+      MODEL_REGISTRY.delete(key);
+    }
   }
 }
 
@@ -213,54 +237,81 @@ async function refreshModelRegistry() {
 
     if (OPENCODE_KEY) {
       const headers = { Authorization: `Bearer ${OPENCODE_KEY}` };
-      refreshes.push(registerModelsFromEndpoint({
+      refreshes.push({
         provider: "opencode-go",
-        hostname: OPENCODE_URL.hostname,
-        port: OPENCODE_URL.port || 443,
-        path: "/zen/go/v1/models",
-        headers,
-        prefix: "opencode-go/"
-      }));
-      refreshes.push(registerModelsFromEndpoint({
+        promise: registerModelsFromEndpoint({
+          provider: "opencode-go",
+          hostname: OPENCODE_URL.hostname,
+          port: OPENCODE_URL.port || 443,
+          path: "/zen/go/v1/models",
+          headers,
+          prefix: "opencode-go/"
+        }),
+      });
+      refreshes.push({
         provider: "opencode-zen",
-        hostname: OPENCODE_URL.hostname,
-        port: OPENCODE_URL.port || 443,
-        path: "/zen/v1/models",
-        headers,
-        prefix: "opencode-zen/"
-      }));
+        promise: registerModelsFromEndpoint({
+          provider: "opencode-zen",
+          hostname: OPENCODE_URL.hostname,
+          port: OPENCODE_URL.port || 443,
+          path: "/zen/v1/models",
+          headers,
+          prefix: "opencode-zen/"
+        }),
+      });
     }
 
     if (OPENROUTER_KEY) {
-      refreshes.push(registerModelsFromEndpoint({
+      refreshes.push({
         provider: "openrouter",
-        hostname: OPENROUTER_URL.hostname,
-        port: OPENROUTER_URL.port || 443,
-        path: `${OPENROUTER_URL.pathname.replace(/\/$/, "")}/models`,
-        headers: { Authorization: `Bearer ${OPENROUTER_KEY}` },
-        prefix: "openrouter/"
-      }));
+        promise: registerModelsFromEndpoint({
+          provider: "openrouter",
+          hostname: OPENROUTER_URL.hostname,
+          port: OPENROUTER_URL.port || 443,
+          path: `${OPENROUTER_URL.pathname.replace(/\/$/, "")}/models`,
+          headers: { Authorization: `Bearer ${OPENROUTER_KEY}` },
+          prefix: "openrouter/",
+        }),
+      });
     }
 
     if (MISTRAL_KEY) {
-      refreshes.push(registerModelsFromEndpoint({
+      refreshes.push({
         provider: "mistral",
-        hostname: MISTRAL_URL.hostname,
-        port: MISTRAL_URL.port || 443,
-        path: `${MISTRAL_URL.pathname.replace(/\/$/, "")}/models`,
-        headers: { Authorization: `Bearer ${MISTRAL_KEY}` },
-        prefix: "mistral/"
-      }));
+        promise: registerModelsFromEndpoint({
+          provider: "mistral",
+          hostname: MISTRAL_URL.hostname,
+          port: MISTRAL_URL.port || 443,
+          path: `${MISTRAL_URL.pathname.replace(/\/$/, "")}/models`,
+          headers: { Authorization: `Bearer ${MISTRAL_KEY}` },
+          prefix: "mistral/"
+        }),
+      });
     }
 
-    refreshes.push(registerModelsFromEndpoint({
+    refreshes.push({
       provider: "tokligence",
-      hostname: TGW_HOST,
-      port: TGW_PORT,
-      path: "/v1/models"
-    }));
+      promise: registerModelsFromEndpoint({
+        provider: "tokligence",
+        hostname: TGW_HOST,
+        port: TGW_PORT,
+        path: "/v1/models"
+      }),
+    });
 
-    const results = await Promise.allSettled(refreshes);
+    const results = await Promise.allSettled(refreshes.map((r) => r.promise));
+    // Prune entries a provider dropped, so /models always stays current. A
+    // successfully fetched provider endpoint is the source of truth for that
+    // provider's model list, covering both discovered and config-seeded
+    // entries. OpenRouter's keep-set only ever contains free models (paid ones
+    // are filtered out at registration), so paid models are excluded here too.
+    for (let i = 0; i < results.length; i++) {
+      const settled = results[i];
+      if (settled.status === "rejected") continue;
+      const provider = refreshes[i]?.provider;
+      if (provider) pruneStaleDiscovered(provider, settled.value);
+    }
+
     for (const result of results) {
       if (result.status === "rejected") {
         console.warn(`model registry refresh warning: ${result.reason.message}`);
