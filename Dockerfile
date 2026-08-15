@@ -28,7 +28,10 @@ RUN npm ci --omit=dev
 COPY tgw-proxy.mjs ./
 COPY gateway-config.mjs ./
 COPY route-config.mjs compile-config.mjs gateway.routes.yaml ./
-COPY quota.mjs preferences.mjs dashboard.mjs dashboard.html cloudflare-access.mjs model-catalog.mjs ./
+COPY quota.mjs preferences.mjs dashboard.mjs dashboard.html cloudflare-access.mjs model-catalog.mjs copilot-auto.mjs ./
+# Copilot SDK state must live on the mounted data volume; credentials are supplied
+# through COPILOT_GITHUB_TOKEN (or an interactive device login), never baked in.
+ENV COPILOT_AUTO_HOME=/data/copilot-auto
 # Routing-preference overrides persist to the mounted /data volume.
 ENV ROUTING_PREFERENCES_PATH=/data/gateway.preferences.yaml
 COPY entrypoint.sh ./

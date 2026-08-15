@@ -1,10 +1,11 @@
 {
   "type": "module",
   "scripts": {
-    "lint": "node --check tgw-proxy.mjs && node --check gateway-config.mjs && node --check route-config.mjs && node --check compile-config.mjs && node --check quota.mjs && node --check preferences.mjs && node --check dashboard.mjs && node --check cloudflare-access.mjs && node --check test/gateway-config.test.mjs && node --check test/route-config.test.mjs && node --check test/proxy-integration.test.mjs && node --check test/dashboard.test.mjs && node --check test/dashboard-integration.test.mjs && node --check test/cloudflare-access.test.mjs && node --check test/models-endpoint.test.mjs",
+    "lint": "node --check tgw-proxy.mjs && node --check copilot-auto.mjs && node --check gateway-config.mjs && node --check route-config.mjs && node --check compile-config.mjs && node --check quota.mjs && node --check preferences.mjs && node --check dashboard.mjs && node --check cloudflare-access.mjs && node --check test/gateway-config.test.mjs && node --check test/route-config.test.mjs && node --check test/proxy-integration.test.mjs && node --check test/dashboard.test.mjs && node --check test/dashboard-integration.test.mjs && node --check test/cloudflare-access.test.mjs && node --check test/models-endpoint.test.mjs && node --check test/copilot-auto.test.mjs",
     "test": "node --test"
   },
   "dependencies": {
+    "@github/copilot-sdk": "^1.0.8",
     "@tokligence/gateway": "0.4.0",
     "yaml": "^2.8.1"
   }

@@ -131,6 +131,38 @@ credential selection, affinity, and retry/cooldown behavior. Add an account with
 its device-login command; credentials persist under `/data/cliproxy/auth`. The
 public middleware never exposes or modifies OAuth tokens.
 
+## Copilot Auto backend (Student / Free)
+
+`copilot-auto` is an opt-in virtual model for GitHub Copilot Student and Free.
+It uses the official `@github/copilot-sdk`, which starts the official Copilot
+runtime and lets GitHub perform Auto Model Selection. The gateway never calls
+or depends on the undocumented `copilot_internal/v2/token` endpoint.
+
+Enable it only after adding a supported Copilot credential to the service
+runtime (for a headless deployment, use `COPILOT_GITHUB_TOKEN`; keep it in the
+secret manager, never in this repository):
+
+```dotenv
+COPILOT_AUTO_ENABLED=true
+# COPILOT_GITHUB_TOKEN=...   # GitHub OAuth token, fine-grained PAT with
+#                             # Copilot Requests, or GitHub App user token
+```
+
+The SDK's data directory is `/data/copilot-auto`, a persistent volume. It is
+not baked into the image. A request to `model: "copilot-auto"` creates an
+official Auto session. The selected model is observable in the non-streaming
+response header `X-Tokligence-Copilot-Selected-Model`; no OAuth token,
+Copilot-session token, prompt, or Authorization header is logged.
+
+The adapter deliberately starts the SDK in `empty` mode with an empty tool
+allowlist. It supports OpenAI Chat Completions and SSE text streaming, but
+**rejects OpenAI tool declarations with HTTP 400** rather than silently
+stripping them. Tool-call translation and multi-account routing are separate
+follow-ups. The official SDK exposes the Auto route (selected model, candidates,
+and available models) for observability, but does not expose a supported hook
+that replaces GitHub's selection after routing. Do not use request headers or
+prompt text as a model-selection control plane.
+
 ## Codex backend
 
 Enable the embedded adapter and give it a separate internal key:
