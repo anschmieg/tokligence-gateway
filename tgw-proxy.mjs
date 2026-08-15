@@ -8,7 +8,7 @@
 import http from "http";
 import https from "https";
 import path from "node:path";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import {
   CODEX_REASONING_LEVELS,
   codexUpstreamUrl,
@@ -611,6 +611,12 @@ function validateAndStripAuth(req) {
   return true;
 }
 
+function copilotCallerKey(req) {
+  // Never retain or log the bearer secret. This binds a pending external-tool
+  // continuation to an authenticated gateway principal for its short TTL.
+  return createHash("sha256").update(String(req.headers["authorization"] || "")).digest("base64url");
+}
+
 async function validateAdminAuth(req) {
   // 1) Admin bearer secret (TOKLIGENCE_ADMIN_SECRET) — legacy / direct-origin path.
   if (secretsEqual(extractBearerToken(req.headers["authorization"]), ADMIN_AUTH_SECRET)) {
@@ -1164,14 +1170,13 @@ const server = http.createServer((req, res) => {
           res.end(JSON.stringify({ error: "Copilot Auto is not configured" }));
           return;
         }
-        // Do not silently discard OpenAI tool declarations. This adapter runs
-        // the official Copilot runtime with an empty tool allowlist; tool-call
-        // translation is a separate, explicit follow-up.
-        if (parsed.tools || parsed.tool_choice) {
+        if (parsed.tool_choice && parsed.tool_choice !== "auto" && parsed.tool_choice !== "none") {
           res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "copilot-auto does not support OpenAI tool calls yet" }));
+          res.end(JSON.stringify({ error: "copilot-auto supports tool_choice auto or none; forced tool selection is not supported by the official SDK" }));
           return;
         }
+        const copilotTools = parsed.tool_choice === "none" ? [] : parsed.tools;
+        const callerKey = copilotCallerKey(req);
 
         const id = `chatcmpl_${Date.now()}`;
         let streamed = false;
@@ -1204,15 +1209,32 @@ const server = http.createServer((req, res) => {
               })}\n\n`);
             }
 
-            const result = await COPILOT_AUTO.complete({ messages: parsed.messages || [], onDelta });
+            const result = await COPILOT_AUTO.complete({
+              messages: parsed.messages || [],
+              onDelta,
+              tools: copilotTools,
+              toolCount: Array.isArray(copilotTools) ? copilotTools.length : 0,
+              responseFormat: parsed.response_format || null,
+              callerKey,
+            });
             const selected = result.route?.chosenModel;
+            const finishReason = result.toolCalls ? "tool_calls" : "stop";
             if (parsed.stream === true) {
+              if (result.toolCalls) {
+                res.write(`data: ${JSON.stringify({
+                  id,
+                  object: "chat.completion.chunk",
+                  created: Math.floor(Date.now() / 1000),
+                  model: COPILOT_AUTO_MODEL,
+                  choices: [{ index: 0, delta: { tool_calls: result.toolCalls.map((call, index) => ({ index, ...call })) }, finish_reason: null }],
+                })}\n\n`);
+              }
               res.write(`data: ${JSON.stringify({
                 id,
                 object: "chat.completion.chunk",
                 created: Math.floor(Date.now() / 1000),
                 model: COPILOT_AUTO_MODEL,
-                choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+                choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
               })}\n\n`);
               res.end("data: [DONE]\n\n");
               return;
@@ -1226,7 +1248,9 @@ const server = http.createServer((req, res) => {
               object: "chat.completion",
               created: Math.floor(Date.now() / 1000),
               model: COPILOT_AUTO_MODEL,
-              choices: [{ index: 0, message: { role: "assistant", content: result.text }, finish_reason: "stop" }],
+              choices: [{ index: 0, message: result.toolCalls
+                ? { role: "assistant", content: null, tool_calls: result.toolCalls }
+                : { role: "assistant", content: result.text }, finish_reason: finishReason }],
             }));
           } catch (error) {
             console.warn(`copilot-auto request failed: ${error?.name || "Error"}`);
@@ -1234,8 +1258,12 @@ const server = http.createServer((req, res) => {
               res.end();
               return;
             }
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "Copilot Auto unavailable" }));
+            const status = error?.code === "vision_unsupported" ? 422 : 502;
+            const publicError = error?.code === "vision_unsupported"
+              ? "Copilot Auto vision is unavailable for this account"
+              : "Copilot Auto unavailable";
+            res.writeHead(status, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: publicError }));
           }
         })();
         return;
