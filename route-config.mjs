@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { parse, stringify } from "yaml";
 
-const VALID_ADAPTERS = new Set(["tokligence", "oauth-proxy", "middleware"]);
+const VALID_ADAPTERS = new Set(["tokligence", "oauth-proxy", "middleware", "copilot-sdk"]);
 
 function requireString(value, label) {
   if (typeof value !== "string" || !value.trim()) {

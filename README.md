@@ -131,6 +131,56 @@ credential selection, affinity, and retry/cooldown behavior. Add an account with
 its device-login command; credentials persist under `/data/cliproxy/auth`. The
 public middleware never exposes or modifies OAuth tokens.
 
+## Copilot Auto backend (Student / Free)
+
+`copilot-auto` is an opt-in virtual model for GitHub Copilot Student and Free.
+It uses the official `@github/copilot-sdk`, which starts the official Copilot
+runtime and lets GitHub perform Auto Model Selection. The gateway never calls
+or depends on the undocumented `copilot_internal/v2/token` endpoint.
+
+Enable it only after adding a supported Copilot credential to the service
+runtime (for a headless deployment, use `COPILOT_GITHUB_TOKEN`; keep it in the
+secret manager, never in this repository):
+
+```dotenv
+COPILOT_AUTO_ENABLED=true
+# COPILOT_GITHUB_TOKEN=...   # GitHub OAuth token, fine-grained PAT with
+#                             # Copilot Requests, or GitHub App user token
+```
+
+The SDK's data directory is `/data/copilot-auto`, a persistent volume. It is
+not baked into the image. A request to `model: "copilot-auto"` creates an
+official Auto session. The selected model is observable in the non-streaming
+response header `X-Tokligence-Copilot-Selected-Model`; no OAuth token,
+Copilot-session token, prompt, or Authorization header is logged.
+
+The adapter deliberately starts the SDK in `empty` mode: no ambient host tools,
+MCP servers, or workspace discovery. It translates OpenAI function declarations
+to handlerless SDK external tools. A tool call is returned to the OpenAI client;
+the gateway never executes it. A later `role: "tool"` result resumes the same
+short-lived SDK session through the official pending-tool RPC. Pending calls are
+caller-bound, expire after five minutes, and are cleared on shutdown.
+
+Vision accepts bounded `data:image/...;base64` content parts (PNG, JPEG, WebP,
+or GIF; at most four 5 MiB images) and translates them to SDK blob attachments.
+Remote image URLs are rejected rather than fetched, avoiding a gateway SSRF
+boundary. The current official Auto catalog reports no vision capability for this
+account, so vision requests receive an explicit `422` until GitHub makes a
+vision-capable Auto route available.
+
+`response_format: json_object` and `json_schema` use instruction plus server-side
+validation. This is best-effort structured generation, not a provider-enforced
+strict schema guarantee: invalid output is rejected rather than exposed as valid.
+
+Routing events are recorded under `/data/copilot-auto/routing.jsonl`: requested
+alias, GitHub-selected/available/candidate model IDs, routing label, and bounded
+request-shape metadata. The log deliberately excludes prompts, image data/URLs,
+tool arguments/results, raw schemas, credentials, and SDK session identifiers.
+This supports later evidence-based migration from Auto to an explicitly allowed
+model. The official SDK exposes the Auto route for observability, but does not
+expose a supported hook that replaces GitHub's selection after routing. Do not
+use request headers or prompt text as a model-selection control plane.
+
 ## Codex backend
 
 Enable the embedded adapter and give it a separate internal key:

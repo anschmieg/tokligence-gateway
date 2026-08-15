@@ -8,7 +8,7 @@
 import http from "http";
 import https from "https";
 import path from "node:path";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import {
   CODEX_REASONING_LEVELS,
   codexUpstreamUrl,
@@ -29,6 +29,7 @@ import { RoutingPreferences, sanitizedPreferences } from "./preferences.mjs";
 import { DASHBOARD_HTML } from "./dashboard.mjs";
 import { cloudflareAccessConfigured, isValidCloudflareAccessToken } from "./cloudflare-access.mjs";
 import { modelAllowedByCatalog } from "./model-catalog.mjs";
+import { COPILOT_AUTO_MODEL, createCopilotAutoAdapter } from "./copilot-auto.mjs";
 
 const PROXY_PORT = Number(process.env.PROXY_PORT || 8080);
 const TGW_HOST   = process.env.TGW_HOST || "127.0.0.1";
@@ -75,6 +76,12 @@ function loadOAuthAdapterConfig() {
 }
 
 const CODEX = loadOAuthAdapterConfig();
+
+const COPILOT_AUTO_PROVIDER = providerById(ROUTING, "copilot-auto");
+const COPILOT_AUTO_ENABLED = Boolean(COPILOT_AUTO_PROVIDER && providerEnabled(COPILOT_AUTO_PROVIDER));
+const COPILOT_AUTO = COPILOT_AUTO_ENABLED
+  ? createCopilotAutoAdapter({ logger: DEBUG ? console : { info() {} } })
+  : null;
 
 // Auth token prefix stripping: clients send sk-proj-<SECRET> or sk-ant-<SECRET>
 // We validate against TOKLIGENCE_AUTH_SECRET and forward the bare secret to gateway
@@ -602,6 +609,12 @@ function validateAndStripAuth(req) {
   if (!strippedToken) return false;
   req.headers["authorization"] = `Bearer ${strippedToken}`;
   return true;
+}
+
+function copilotCallerKey(req) {
+  // Never retain or log the bearer secret. This binds a pending external-tool
+  // continuation to an authenticated gateway principal for its short TTL.
+  return createHash("sha256").update(String(req.headers["authorization"] || "")).digest("base64url");
 }
 
 async function validateAdminAuth(req) {
@@ -1150,6 +1163,111 @@ const server = http.createServer((req, res) => {
       }
 
       const model = resolveModel(parsed.model);
+
+      if (model === COPILOT_AUTO_MODEL) {
+        if (!COPILOT_AUTO) {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Copilot Auto is not configured" }));
+          return;
+        }
+        if (parsed.tool_choice && parsed.tool_choice !== "auto" && parsed.tool_choice !== "none") {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "copilot-auto supports tool_choice auto or none; forced tool selection is not supported by the official SDK" }));
+          return;
+        }
+        const copilotTools = parsed.tool_choice === "none" ? [] : parsed.tools;
+        const callerKey = copilotCallerKey(req);
+
+        const id = `chatcmpl_${Date.now()}`;
+        let streamed = false;
+        const onDelta = (content) => {
+          if (!streamed) return;
+          res.write(`data: ${JSON.stringify({
+            id,
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: COPILOT_AUTO_MODEL,
+            choices: [{ index: 0, delta: { content }, finish_reason: null }],
+          })}\n\n`);
+        };
+
+        (async () => {
+          try {
+            if (parsed.stream === true) {
+              streamed = true;
+              res.writeHead(200, {
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                Connection: "keep-alive",
+              });
+              res.write(`data: ${JSON.stringify({
+                id,
+                object: "chat.completion.chunk",
+                created: Math.floor(Date.now() / 1000),
+                model: COPILOT_AUTO_MODEL,
+                choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
+              })}\n\n`);
+            }
+
+            const result = await COPILOT_AUTO.complete({
+              messages: parsed.messages || [],
+              onDelta,
+              tools: copilotTools,
+              toolCount: Array.isArray(copilotTools) ? copilotTools.length : 0,
+              responseFormat: parsed.response_format || null,
+              callerKey,
+            });
+            const selected = result.route?.chosenModel;
+            const finishReason = result.toolCalls ? "tool_calls" : "stop";
+            if (parsed.stream === true) {
+              if (result.toolCalls) {
+                res.write(`data: ${JSON.stringify({
+                  id,
+                  object: "chat.completion.chunk",
+                  created: Math.floor(Date.now() / 1000),
+                  model: COPILOT_AUTO_MODEL,
+                  choices: [{ index: 0, delta: { tool_calls: result.toolCalls.map((call, index) => ({ index, ...call })) }, finish_reason: null }],
+                })}\n\n`);
+              }
+              res.write(`data: ${JSON.stringify({
+                id,
+                object: "chat.completion.chunk",
+                created: Math.floor(Date.now() / 1000),
+                model: COPILOT_AUTO_MODEL,
+                choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
+              })}\n\n`);
+              res.end("data: [DONE]\n\n");
+              return;
+            }
+
+            const headers = { "Content-Type": "application/json" };
+            if (selected) headers["X-Tokligence-Copilot-Selected-Model"] = selected;
+            res.writeHead(200, headers);
+            res.end(JSON.stringify({
+              id,
+              object: "chat.completion",
+              created: Math.floor(Date.now() / 1000),
+              model: COPILOT_AUTO_MODEL,
+              choices: [{ index: 0, message: result.toolCalls
+                ? { role: "assistant", content: null, tool_calls: result.toolCalls }
+                : { role: "assistant", content: result.text }, finish_reason: finishReason }],
+            }));
+          } catch (error) {
+            console.warn(`copilot-auto request failed: ${error?.name || "Error"}`);
+            if (res.headersSent) {
+              res.end();
+              return;
+            }
+            const status = error?.code === "vision_unsupported" ? 422 : 502;
+            const publicError = error?.code === "vision_unsupported"
+              ? "Copilot Auto vision is unavailable for this account"
+              : "Copilot Auto unavailable";
+            res.writeHead(status, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: publicError }));
+          }
+        })();
+        return;
+      }
 
       if (handleCodexRoute(req, res, parsed, model)) return;
       

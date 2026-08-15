@@ -42,6 +42,13 @@ providers:
       max_retry_credentials: 2
       max_retry_interval: 30
 
+  - id: copilot-auto
+    adapter: copilot-sdk
+    enabled_env: COPILOT_AUTO_ENABLED
+    models:
+      - id: copilot-auto
+        context_window: 272000
+
   - id: modal
     adapter: middleware
     api_key_env: MODAL_GLM5_API_KEY
