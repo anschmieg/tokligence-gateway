@@ -9,6 +9,8 @@ import http from "http";
 import https from "https";
 import path from "node:path";
 import { createHash, timingSafeEqual } from "node:crypto";
+import { sendChatCompletionResult } from "./openai-stream.mjs";
+import { sanitizeHeaders } from "./sanitize-headers.mjs";
 import {
   CODEX_REASONING_LEVELS,
   codexUpstreamUrl,
@@ -1136,6 +1138,7 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ error: "Unauthorized" }));
     return;
   }
+  sanitizeHeaders(req);
 
   if (req.method === "GET" && url.pathname === "/v1/providers") {
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -1274,8 +1277,12 @@ const server = http.createServer((req, res) => {
       if (isOpenCodeMiniMaxModel(model)) {
         callOpenCodeMessages(model, parsed.messages || [], parsed.max_tokens || 4096)
           .then((data) => {
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify(anthropicToChatCompletion(data, model)));
+            sendChatCompletionResult(
+              res,
+              anthropicToChatCompletion(data, model),
+              model,
+              parsed.stream === true,
+            );
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
@@ -1285,9 +1292,7 @@ const server = http.createServer((req, res) => {
         const messages = toOpenAIChatMessages(parsed.messages || []);
         callOpenCodeGoOpenAI(model, messages, parsed.max_tokens || 4096)
           .then((data) => {
-            // Convert OpenAI chat completions to OpenAI format
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify(data));
+            sendChatCompletionResult(res, data, model, parsed.stream === true);
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
