@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { parse, stringify } from "yaml";
 
-const VALID_ADAPTERS = new Set(["tokligence", "oauth-proxy", "middleware", "copilot-sdk"]);
+const VALID_ADAPTERS = new Set(["tokligence", "oauth-proxy", "middleware", "copilot-sdk", "openai-compatible"]);
 
 function requireString(value, label) {
   if (typeof value !== "string" || !value.trim()) {
@@ -25,7 +25,7 @@ function envEnabled(provider, env) {
 
 export function parseRoutingConfig(source) {
   const raw = parse(source);
-  if (!raw || raw.version !== 1) throw new Error("routing config version must be 1");
+  if (!raw || (raw.version !== 1 && raw.version !== 2)) throw new Error("routing config version must be 1 or 2");
   if (!Array.isArray(raw.providers) || raw.providers.length === 0) {
     throw new Error("routing config must define providers");
   }

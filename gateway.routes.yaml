@@ -1,11 +1,12 @@
 version: 1
 
+# This is the single source of truth for providers, models, aliases, and routing.
+# Secrets stay in Coolify and are referenced here by environment-variable name.
+# Quota-based providers have metadata for smart routing.
 access:
   public_secret_env: TOKLIGENCE_AUTH_SECRET
   admin_secret_env: TOKLIGENCE_ADMIN_SECRET
 
-# This is the single source of truth for providers, models, aliases, and routing.
-# Secrets stay in Coolify and are referenced here by environment-variable name.
 providers:
   - id: tokligence
     adapter: tokligence
@@ -20,6 +21,10 @@ providers:
         base_url_env: OPENAI_API_BASE
         default_base_url: https://api.openai.com/v1
     models: [minimax-m2.1, minimax-m2.5, minimax-m2.7]
+    metadata:
+      cost_class: subscription
+      capabilities: [coding, reasoning]
+      quota_type: subscription
 
   - id: codex-oauth
     adapter: oauth-proxy
@@ -41,6 +46,10 @@ providers:
       request_retry: 1
       max_retry_credentials: 2
       max_retry_interval: 30
+    metadata:
+      cost_class: subscription
+      capabilities: [coding, reasoning, tool_calling]
+      quota_type: subscription
 
   - id: copilot-auto
     adapter: copilot-sdk
@@ -48,47 +57,15 @@ providers:
     models:
       - id: copilot-auto
         context_window: 272000
+    metadata:
+      cost_class: subscription
+      capabilities: [coding, reasoning, tool_calling]
+      quota_type: subscription
 
-  - id: modal
-    adapter: middleware
-    api_key_env: MODAL_GLM5_API_KEY
-    base_url_env: MODAL_GLM5_API_BASE
-    default_base_url: https://api.us-west-2.modal.direct/v1/chat/completions
-    models: [glm-5, glm-5.1, zai-org/GLM-5]
-
-  - id: openrouter
-    adapter: middleware
-    api_key_env: OPENROUTER_API_KEY
-    base_url_env: OPENROUTER_API_BASE
-    default_base_url: https://openrouter.ai/api/v1
-    discover_models: true
-    catalog:
-      zero_price_only: true
-      paid_allowlist:
-        - qwen/qwen3.7-flash
-        - deepseek/deepseek-v4-flash
-        - minimax/minimax-m3
-        - z-ai/glm-5.2
-        - google/gemini-3.6-flash
-
-  - id: opencode-go
-    adapter: middleware
-    api_key_env: OPENCODE_API_KEY
-    default_base_url: https://opencode.ai
-    discover_models: true
-    catalog:
-      visible: false
-
-  - id: opencode-zen
-    adapter: middleware
-    api_key_env: OPENCODE_API_KEY
-    default_base_url: https://opencode.ai
-    discover_models: true
-    catalog:
-      id_suffixes: ["-free"]
-
+  # === NEUE PROVIDER (Quota-basiert) ===
   - id: mistral
     adapter: middleware
+    billing_class: subscription
     api_key_env: MISTRAL_API_KEY
     base_url_env: MISTRAL_API_BASE
     default_base_url: https://api.mistral.ai/v1
@@ -101,6 +78,118 @@ providers:
       - codestral-latest
       - ministral-8b-latest
       - ministral-3b-latest
+    metadata:
+      cost_class: subscription
+      capabilities: [coding, reasoning, tool_calling]
+      quota_type: subscription
+
+  - id: google-ai-studio
+    adapter: middleware
+    billing_class: subscription
+    base_url: https://ai-studio.google.com/v1
+    api_key_env: GOOGLE_AI_STUDIO_API_KEY
+    base_url_env: GOOGLE_AI_STUDIO_API_BASE
+    protocols: [chat_completions]
+    models:
+      - gemini-3.1-pro-latest
+      - gemini-3-flash-latest
+      - gemini-2.5-pro-preview
+    metadata:
+      cost_class: subscription
+      capabilities: [text, vision, tool_calling]
+      quota_type: subscription
+
+  # === KOSTENLOS (FREE TIER) ===
+  - id: nvidia
+    adapter: middleware
+    billing_class: free
+    base_url: https://api.build.nvidia.com/v1
+    api_key_env: NVIDIA_API_KEY
+    base_url_env: NVIDIA_API_BASE
+    protocols: [chat_completions]
+    models:
+      - nvidia/nemotron-3-ultra-550b-a55b
+      - nvidia/nemotron-3-super-120b-a12b
+      - nvidia/glm-5.2
+      - poolside/laguna-xs-2.1
+    metadata:
+      cost_class: free
+      capabilities: [coding, reasoning, tool_calling]
+      quota_type: free_tier
+
+  - id: nous
+    adapter: middleware
+    billing_class: free
+    base_url: https://api.nousresearch.com/v1
+    api_key_env: NOUS_API_KEY
+    base_url_env: NOUS_API_BASE
+    protocols: [chat_completions]
+    models:
+      - nousresearch/laguna-xs-2.1
+      - nousresearch/laguna-s-2.1
+      - stepfun/step-3.7-flash
+    metadata:
+      cost_class: free
+      capabilities: [coding, tool_calling]
+      quota_type: free_tier
+
+  # === PAYG (GÜNSTIG) ===
+  - id: openrouter
+    adapter: middleware
+    billing_class: payg
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    base_url_env: OPENROUTER_API_BASE
+    protocols: [chat_completions]
+    discover_models: true
+    catalog:
+      zero_price_only: true
+      paid_allowlist:
+        - deepseek/deepseek-v4-flash-0731
+        - qwen/qwen3-coder-480b
+        - qwen/qwen3-coder-30b
+        - z-ai/glm-5.3
+        - google/gemini-3.6-flash
+    metadata:
+      cost_class: payg
+      capabilities: [coding, reasoning, tool_calling, vision]
+      quota_type: payg
+
+  # === LEGACY ===
+  - id: modal
+    adapter: middleware
+    api_key_env: MODAL_GLM5_API_KEY
+    base_url_env: MODAL_GLM5_API_BASE
+    default_base_url: https://api.us-west-2.modal.direct/v1/chat/completions
+    models: [glm-5, glm-5.1, zai-org/GLM-5]
+    metadata:
+      cost_class: payg
+      capabilities: [coding, reasoning]
+      quota_type: payg
+
+  - id: opencode-go
+    adapter: middleware
+    api_key_env: OPENCODE_API_KEY
+    default_base_url: https://opencode.ai
+    discover_models: true
+    catalog:
+      visible: false
+    metadata:
+      cost_class: free
+      capabilities: [coding, reasoning]
+      quota_type: free_tier
+
+  - id: opencode-zen
+    adapter: middleware
+    api_key_env: OPENCODE_API_KEY
+    default_base_url: https://opencode.ai
+    discover_models: true
+    catalog:
+      id_suffixes: ["-free"]
+    metadata:
+      cost_class: free
+      capabilities: [coding, reasoning]
+      quota_type: free_tier
 
 routes:
   - provider: modal
@@ -113,6 +202,12 @@ routes:
     prefixes: [opencode-go/, oc/, deepseek-v4, kimi-k2, glm-5., mimo-v2, qwen3]
   - provider: mistral
     prefixes: [mistral/, mistral-]
+  - provider: google-ai-studio
+    prefixes: [gemini-, google/]
+  - provider: nvidia
+    prefixes: [nvidia/, nemotron-, poolside/]
+  - provider: nous
+    prefixes: [nousresearch/, laguna-, stepfun/]
   - provider: tokligence
     upstream: anthropic
     prefixes: [claude, minimax-m2]
