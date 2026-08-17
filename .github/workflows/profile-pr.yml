@@ -3,7 +3,7 @@ name: One-shot agent profile patch
 on:
   pull_request:
     branches: [main]
-    types: [opened]
+    types: [opened, synchronize]
 
 permissions:
   contents: write
@@ -32,13 +32,14 @@ jobs:
           ' .github/workflows/apply-agent-profiles.yml > /tmp/apply-agent-profiles.py
           test -s /tmp/apply-agent-profiles.py
           python3 /tmp/apply-agent-profiles.py
+          python3 scripts/docker-profile-fix.py
       - run: npm run lint
       - run: npm test
       - name: Commit tested implementation
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm .github/workflows/apply-agent-profiles.yml .github/workflows/profile-pr.yml
-          git add route-config.mjs routing-planner.mjs provider-adapters.mjs tgw-proxy.mjs gateway.routes.yaml package.json test/agent-profile.test.mjs test/agent-profile-integration.test.mjs
+          git rm .github/workflows/apply-agent-profiles.yml .github/workflows/profile-pr.yml scripts/docker-profile-fix.py
+          git add Dockerfile route-config.mjs routing-planner.mjs provider-adapters.mjs tgw-proxy.mjs gateway.routes.yaml package.json test/agent-profile.test.mjs test/agent-profile-integration.test.mjs
           git commit -m "feat: add simple ordered agent routing profiles"
           git push origin HEAD:feat/simple-agent-profiles
