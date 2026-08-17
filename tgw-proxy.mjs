@@ -23,6 +23,7 @@ import {
   matchConfiguredProvider,
   providerById,
   providerEnabled,
+  profileByModel,
   publicRoutingConfig,
   resolveConfiguredAlias,
 } from "./route-config.mjs";
@@ -32,6 +33,8 @@ import { DASHBOARD_HTML } from "./dashboard.mjs";
 import { cloudflareAccessConfigured, isValidCloudflareAccessToken } from "./cloudflare-access.mjs";
 import { modelAllowedByCatalog } from "./model-catalog.mjs";
 import { COPILOT_AUTO_MODEL, createCopilotAutoAdapter } from "./copilot-auto.mjs";
+import { buildRoutePlan } from "./routing-planner.mjs";
+import { executeRoutePlan } from "./request-executor.mjs";
 
 const PROXY_PORT = Number(process.env.PROXY_PORT || 8080);
 const TGW_HOST   = process.env.TGW_HOST || "127.0.0.1";
@@ -39,6 +42,7 @@ const TGW_PORT   = Number(process.env.TGW_PORT || 8081);
 const DEBUG = process.env.TGW_DEBUG === "1";
 const ROUTING_CONFIG_PATH = path.resolve(process.env.ROUTING_CONFIG_PATH || "gateway.routes.yaml");
 const ROUTING = loadRoutingConfig(ROUTING_CONFIG_PATH);
+const PROFILE_RUNTIME_STATE = { cooldowns: new Map() };
 
 function providerApiKey(id) {
   const provider = providerById(ROUTING, id);
@@ -363,6 +367,39 @@ function quotaContext() {
 
 function resolveModel(model) {
   return PREFERENCES.resolve(model, resolveConfiguredAlias);
+}
+
+function handleProfileRequest(req, res, parsed, protocol) {
+  const profile = profileByModel(ROUTING, parsed?.model);
+  if (!profile) return false;
+  const plan = buildRoutePlan(
+    ROUTING,
+    { model: parsed.model, protocol, body: parsed },
+    process.env,
+    PROFILE_RUNTIME_STATE,
+  );
+  if (plan.error) {
+    res.writeHead(plan.error.status, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: plan.error }));
+    return true;
+  }
+  executeRoutePlan({
+    plan,
+    req,
+    res,
+    path: req.url,
+    body: parsed,
+    env: process.env,
+    runtimeState: PROFILE_RUNTIME_STATE,
+  }).catch((error) => {
+    if (res.headersSent) {
+      res.destroy(error);
+      return;
+    }
+    res.writeHead(502, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Profile routing failed" }));
+  });
+  return true;
 }
 
 function isOpenRouterModel(model) {
@@ -1164,6 +1201,8 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ error: "Invalid JSON" }));
         return;
       }
+
+      if (handleProfileRequest(req, res, parsed, "chat_completions")) return;
 
       const model = resolveModel(parsed.model);
 

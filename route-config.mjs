@@ -72,6 +72,28 @@ export function parseRoutingConfig(source) {
     };
   });
 
+  const profiles = Object.entries(raw.profiles || {}).map(([profileId, value], index) => {
+    const id = requireString(profileId, `profiles[${index}].id`);
+    if (!Array.isArray(value?.candidates) || value.candidates.length === 0) {
+      throw new Error(`profile ${id}.candidates must not be empty`);
+    }
+    const candidates = value.candidates.map((candidate, candidateIndex) => {
+      const provider = requireString(candidate?.provider, `profile ${id}.candidates[${candidateIndex}].provider`);
+      if (!providerIds.has(provider)) throw new Error(`profile ${id} references unknown provider: ${provider}`);
+      return {
+        provider,
+        model: requireString(candidate?.model, `profile ${id}.candidates[${candidateIndex}].model`),
+      };
+    });
+    const max_attempts = value?.max_attempts == null ? candidates.length : Number(value.max_attempts);
+    if (!Number.isSafeInteger(max_attempts) || max_attempts < 1 || max_attempts > candidates.length) {
+      throw new Error(`profile ${id}.max_attempts must be between 1 and ${candidates.length}`);
+    }
+    return { id, candidates, max_attempts };
+  });
+  const profileIds = new Set(profiles.map(({ id }) => id.toLowerCase()));
+  if (profileIds.size !== profiles.length) throw new Error("profile IDs must be unique case-insensitively");
+
   if (!Array.isArray(raw.aliases)) throw new Error("routing config aliases must be a list");
   const aliases = raw.aliases.map((value, index) => {
     const id = requireString(value?.id, `aliases[${index}].id`);
@@ -90,7 +112,7 @@ export function parseRoutingConfig(source) {
     };
   });
 
-  return { version: 1, access, providers, routes, aliases };
+  return { version: 1, access, providers, routes, profiles, aliases };
 }
 
 export function loadRoutingConfig(path) {
@@ -110,6 +132,11 @@ export function enabledProviders(config, env = process.env) {
 
 export function providerById(config, id) {
   return config.providers.find((provider) => provider.id === id) || null;
+}
+
+export function profileByModel(config, model) {
+  if (!model) return null;
+  return (config.profiles || []).find(({ id }) => id.toLowerCase() === String(model).toLowerCase()) || null;
 }
 
 export function configuredModels(config, env = process.env) {
@@ -229,6 +256,7 @@ export function publicRoutingConfig(config, env = process.env) {
       credential_pool: provider.credential_pool || undefined,
     })),
     routes: config.routes,
+    profiles: config.profiles,
     aliases: config.aliases,
   };
 }

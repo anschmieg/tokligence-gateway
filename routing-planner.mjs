@@ -1,16 +1,5 @@
-import {
-  modelById,
-  profileByModel,
-  providerById,
-  providerEnabled,
-  resolveConfiguredAlias,
-} from "./route-config.mjs";
-import { inspectRequestFeatures, supportsFeatures } from "./protocol-codecs.mjs";
-
-function physicalModel(config, value, { allowInternal = false } = {}) {
-  if (allowInternal) return modelById(config, value) || null;
-  return config.models.find((model) => model.direct_access && model.public_model.toLowerCase() === String(value).toLowerCase()) || null;
-}
+import { profileByModel, providerById, providerEnabled } from "./route-config.mjs";
+import { inspectRequestFeatures } from "./protocol-codecs.mjs";
 
 function circuitOpen(runtimeState, provider, model, protocol) {
   const until = runtimeState?.cooldowns?.get(`${provider}:${model}:${protocol}`) || 0;
@@ -19,34 +8,36 @@ function circuitOpen(runtimeState, provider, model, protocol) {
 
 export function buildRoutePlan(config, { model, protocol, body }, env = process.env, runtimeState = {}) {
   if (!model) return { error: { status: 400, code: "missing_model", message: "model is required" } };
-  const requestedModel = model;
-  const routeReference = resolveConfiguredAlias(config, model);
-  const profile = profileByModel(config, routeReference);
-  const required = inspectRequestFeatures(protocol, body);
-  const resolvedByAlias = routeReference !== model;
-  const references = profile ? profile.candidates : [routeReference];
-  const candidates = [];
+  const profile = profileByModel(config, model);
+  if (!profile) return { error: { status: 404, code: "unknown_profile", message: "Routing profile is not configured" } };
 
-  for (const reference of references) {
-    const physical = physicalModel(config, reference, { allowInternal: Boolean(profile || resolvedByAlias) });
-    if (!physical) continue;
-    const provider = providerById(config, physical.provider);
+  const required = inspectRequestFeatures(protocol, body);
+  const candidates = [];
+  for (const reference of profile.candidates) {
+    const provider = providerById(config, reference.provider);
     if (!provider || !providerEnabled(provider, env)) continue;
-    if (!provider.protocols.includes(protocol)) continue;
-    if (provider.billing_class === "paygo" && (!profile?.permit_paygo || runtimeState?.paygoExhausted)) continue;
-    if (!supportsFeatures(physical.capabilities, required)) continue;
-    if (circuitOpen(runtimeState, provider.id, physical.id, protocol)) continue;
-    candidates.push({ provider, model: physical, upstreamModel: physical.upstream_model, protocol, native: true });
+    const protocols = Array.isArray(provider.protocols) && provider.protocols.length
+      ? provider.protocols
+      : ["chat_completions"];
+    if (!protocols.includes(protocol)) continue;
+    if (circuitOpen(runtimeState, provider.id, reference.model, protocol)) continue;
+    candidates.push({
+      provider,
+      model: { id: reference.model },
+      upstreamModel: reference.model,
+      protocol,
+      native: true,
+    });
   }
-  const limited = candidates.slice(0, profile?.max_attempts || 1);
-  if (!limited.length && !profile && !physicalModel(config, routeReference, { allowInternal: resolvedByAlias })) {
-    return { error: { status: 404, code: "unknown_model", message: "Model is not configured" } };
+
+  const limited = candidates.slice(0, profile.max_attempts);
+  if (!limited.length) {
+    return { error: { status: 503, code: "no_compatible_route", message: "No eligible provider can serve this profile" } };
   }
-  if (!limited.length) return { error: { status: 503, code: "no_compatible_route", message: "No eligible provider can serve this request" } };
   return {
-    requestedModel,
-    publicModel: profile?.public_model || requestedModel,
-    profile: profile?.id || null,
+    requestedModel: model,
+    publicModel: profile.id,
+    profile: profile.id,
     required,
     deadline: Date.now() + Number(env.GATEWAY_REQUEST_TIMEOUT_MS || 120000),
     maxAttempts: limited.length,
