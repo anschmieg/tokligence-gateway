@@ -68,6 +68,20 @@ export const ROUTING_PROFILES = {
     },
   },
 
+  // === CRON (Für Cron-Jobs: Quota-schonend, schnell, zuverlässig)
+  cron: {
+    name: "Cron (Quota-Safe)",
+    providers: [
+      { id: "nvidia", models: ["nemotron-3-super-120b-a12b", "glm-5.2"], weight: 100, billing_class: "free" },
+      { id: "nous", models: ["laguna-xs-2.1"], weight: 90, billing_class: "free" },
+      { id: "openrouter", models: ["deepseek/deepseek-v4-flash-0731"], weight: 80, billing_class: "payg" },
+      { id: "google-ai-studio", models: ["gemini-3-flash-latest"], weight: 70, billing_class: "subscription" },
+    ],
+    fallback_strategy: "weighted_random",
+    max_retries: 3,
+    capabilities: ["text", "tool_calling"],
+  },
+
   // === FALLBACK (Notfall: Wenn alles andere rate-limited)
   fallback: {
     name: "Fallback (Any)",
