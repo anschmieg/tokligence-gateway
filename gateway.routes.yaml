@@ -219,7 +219,6 @@ routes:
     upstream: openai
     prefixes: [gpt]
   - provider: openrouter
-    prefixes: []
     catch_all: true
 
 profiles:
