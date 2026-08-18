@@ -139,6 +139,7 @@ providers:
     adapter: middleware
     billing_class: payg
     base_url: https://openrouter.ai/api/v1
+    default_base_url: https://openrouter.ai/api/v1
     api_key_env: OPENROUTER_API_KEY
     base_url_env: OPENROUTER_API_BASE
     protocols: [chat_completions]
