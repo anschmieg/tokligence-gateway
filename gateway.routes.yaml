@@ -175,9 +175,9 @@ providers:
     adapter: middleware
     api_key_env: OPENCODE_API_KEY
     default_base_url: https://opencode.ai
-    discover_models: true
-    catalog:
-      visible: false
+    discover_models: false
+    models:
+      - deepseek-v4-flash-free
     metadata:
       cost_class: free
       capabilities: [coding, reasoning]
@@ -199,11 +199,11 @@ routes:
   - provider: modal
     prefixes: [glm-5, zai-org/GLM-5]
   - provider: openrouter
-    prefixes: [openrouter/, or/, free]
+    prefixes: [openrouter/, or/, free, deepseek-v4, deepseek/]
   - provider: opencode-zen
     prefixes: [opencode-zen/, zen/]
   - provider: opencode-go
-    prefixes: [opencode-go/, oc/, deepseek-v4, kimi-k2, glm-5., mimo-v2, qwen3]
+    prefixes: [opencode-go/, oc/, kimi-k2, glm-5., mimo-v2, qwen3]
   - provider: mistral
     prefixes: [mistral/, mistral-]
   - provider: google-ai-studio
@@ -218,6 +218,9 @@ routes:
   - provider: tokligence
     upstream: openai
     prefixes: [gpt]
+  - provider: openrouter
+    prefixes: []
+    catch_all: true
 
 profiles:
   agent-default:
