@@ -144,7 +144,7 @@ providers:
     protocols: [chat_completions]
     discover_models: true
     catalog:
-      zero_price_only: true
+      zero_price_only: false
       paid_allowlist:
         - deepseek/deepseek-v4-flash-0731
         - deepseek/deepseek-v4-flash
