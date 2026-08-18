@@ -143,6 +143,9 @@ providers:
     base_url_env: OPENROUTER_API_BASE
     protocols: [chat_completions]
     discover_models: true
+    models:
+      - deepseek/deepseek-v4-flash
+      - deepseek/deepseek-v4-pro
     catalog:
       zero_price_only: false
       paid_allowlist:
