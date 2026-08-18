@@ -403,13 +403,12 @@ function handleProfileRequest(req, res, parsed, protocol) {
 }
 
 function isOpenRouterModel(model) {
-  return modelProvider(model) === "openrouter" || matchConfiguredProvider(ROUTING, model) === "openrouter";
+  return matchConfiguredProvider(ROUTING, model) === "openrouter";
 }
 
 function isOpenCodeModel(model) {
-  const provider = modelProvider(model);
-  const configured = matchConfiguredProvider(ROUTING, model);
-  return provider === "opencode-go" || provider === "opencode-zen" || configured === "opencode-go" || configured === "opencode-zen";
+  const provider = matchConfiguredProvider(ROUTING, model);
+  return provider === "opencode-go" || provider === "opencode-zen";
 }
 
 function isOpenCodeMiniMaxModel(model) {
@@ -451,7 +450,7 @@ function resolveOpenCodeModel(model) {
 
 function getOpenCodeMessagesPath(model) {
   if (!model) return "/zen/go/v1/messages";
-  const provider = modelProvider(model);
+  const provider = matchConfiguredProvider(ROUTING, model);
   const lower = model.toLowerCase();
   if (provider === "opencode-zen" || lower.startsWith("opencode-zen/") || lower.startsWith("zen/")) {
     return "/zen/v1/messages";
@@ -461,7 +460,7 @@ function getOpenCodeMessagesPath(model) {
 
 function getOpenCodeChatCompletionsPath(model) {
   if (!model) return "/zen/go/v1/chat/completions";
-  const provider = modelProvider(model);
+  const provider = matchConfiguredProvider(ROUTING, model);
   const lower = model.toLowerCase();
   if (provider === "opencode-zen" || lower.startsWith("opencode-zen/") || lower.startsWith("zen/")) {
     return "/zen/v1/chat/completions";
@@ -937,7 +936,7 @@ function resolveMistralModel(model) {
 }
 
 function isMistralModel(model) {
-  return modelProvider(model) === "mistral" || matchConfiguredProvider(ROUTING, model) === "mistral";
+  return matchConfiguredProvider(ROUTING, model) === "mistral";
 }
 
 function callMistralOpenAI(model, messages, maxTokens) {
@@ -1836,14 +1835,19 @@ server.listen(PROXY_PORT, "0.0.0.0", () => {
   const address = server.address();
   const listeningPort = typeof address === "object" && address ? address.port : PROXY_PORT;
   console.log(`tgw-proxy :${listeningPort} -> tgw ${TGW_HOST}:${TGW_PORT}`);
-  console.log("  glm-5 / zai-org/* -> Modal (always non-streaming)");
-  console.log("  OpenCode MiniMax -> OpenCode Messages (non-streaming)");
-  console.log("  other opencode-go/* / oc/* -> OpenCode chat completions (non-streaming)");
-  console.log("  openrouter/* / or/* / free -> OpenRouter (streaming OK)");
-  console.log("  mistral/* / mistral-* -> Mistral (streaming OK)");
+  
+  // Generate dynamic routing info from config
+  const routeInfo = [];
+  for (const route of ROUTING.routes) {
+    const provider = providerById(ROUTING, route.provider);
+    const upstream = route.upstream ? providerById(ROUTING, route.upstream) : null;
+    const target = upstream ? `${route.provider} (via ${upstream.id})` : route.provider;
+    const prefixes = route.prefixes.join(" / ");
+    const streaming = provider?.metadata?.capabilities?.includes("tool_calling") ? " (streaming OK)" : " (non-streaming)";
+    routeInfo.push(`  ${prefixes} -> ${target}${streaming}`);
+  }
+  console.log(routeInfo.join("\n"));
   console.log(CODEX.enabled
-    ? "  claude-* -> Codex OAuth (GPT-5.6 tier mapping)"
-    : "  claude-* -> OpenCode Go (Tier mapping, non-streaming)");
-  console.log("  bare minimax-* -> Gateway (MiniMax, streaming OK)");
-  console.log(`  codex-oauth -> ${CODEX.enabled ? "private Codex backend" : "disabled"}`);
+    ? `  codex-oauth -> private Codex backend`
+    : `  codex-oauth -> disabled`);
 });
