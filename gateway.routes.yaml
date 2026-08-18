@@ -219,7 +219,7 @@ routes:
     upstream: openai
     prefixes: [gpt]
   - provider: openrouter
-    catch_all: true
+    prefixes: ["*"]
 
 profiles:
   agent-default:
