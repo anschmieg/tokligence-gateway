@@ -69,6 +69,7 @@ providers:
         - deepseek/deepseek-v4-flash
         - minimax/minimax-m3
         - z-ai/glm-5.2
+        - z-ai/glm-5.3-flash
         - google/gemini-3.6-flash
 
   - id: opencode-go
@@ -166,6 +167,9 @@ aliases:
     fallback: tokligence
 
   # Legacy / Direct Model Aliases
+  - id: la-glm-5.3-flash
+    patterns: [glm-5.3-flash]
+    target: openrouter/z-ai/glm-5.3-flash
   - id: la-minimax-m2.7
     patterns: [minimax-m2.7, m2.7]
     target: MiniMax-M2.7
