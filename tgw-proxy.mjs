@@ -98,6 +98,17 @@ const AUTH_PREFIXES = ["sk-proj-", "sk-ant-"];
 const MINIMAX_BARE_MODELS = /^minimax-m2/i;
 const MINIMAX_MODEL_FRAGMENT = /(^|\/)minimax-m2/i;
 
+const MINIMAX_MAP = {
+  "claude-sonnet": "MiniMax-M2.7",
+  "claude-haiku": "MiniMax-M2.1",
+  "minimax-m2.7": "MiniMax-M2.7",
+  "minimax-m2.5": "MiniMax-M2.5",
+  "minimax-m2.1": "MiniMax-M2.1",
+  "m2.7": "MiniMax-M2.7",
+  "m2.5": "MiniMax-M2.5",
+  "m2.1": "MiniMax-M2.1",
+};
+
 const MODEL_REGISTRY = new Map();
 let modelRegistryRefresh = null;
 
