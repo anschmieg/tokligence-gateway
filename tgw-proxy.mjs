@@ -914,6 +914,7 @@ async function handleClineChatCompletion(req, res, parsed, model) {
       const text = await readBoundedUpstreamError(upstream);
       const classified = classifyClineUpstreamError(status, text);
       try { recordObservedEvent("cline-oauth", model, classified.code); } catch {}
+      console.error(`[cline] upstream ${status} code=${classified.code} body=${text.slice(0,1200)}`);
       sendClineError(res, new ClineAdapterError(classified.message, classified));
       return;
     }
