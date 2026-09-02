@@ -69,10 +69,30 @@ test("quota probes return normalized shapes and fail safe", async () => {
   const minimax = await probeProviderQuota({ id: "tokligence" }, {});
   assert.equal(minimax.provider, "tokligence");
   assert.equal(minimax.available, true);
+  assert.equal(minimax.limit, null);
+  assert.equal(minimax.limitKind, "external");
+  assert.notEqual(minimax.limitLabel, "unmetered");
   assert.match(minimax.detail.note, /dashboard balance probing/);
 });
 
-test("probeAllProviderQuota never rejects and covers enabled providers", async () => {
+test("OpenRouter free tier remains explicitly unmetered", async (t) => {
+  const server = await import("node:http").then(({ default: http }) => http.createServer((req, res) => {
+    assert.equal(req.url, "/api/v1/key");
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ data: { usage: 1.25, limit: 0, is_free_tier: true } }));
+  }));
+  server.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.once("listening", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const result = await probeOpenRouter("key", `http://127.0.0.1:${server.address().port}/api/v1`);
+  assert.equal(result.available, true);
+  assert.equal(result.limit, null);
+  assert.equal(result.limitKind, "unmetered");
+  assert.equal(result.limitLabel, "unmetered");
+  assert.equal(result.detail.is_free_tier, true);
+});
+
   const res = await probeAllProviderQuota(
     [{ id: "openrouter", adapter: "middleware" }, { id: "mistral", adapter: "middleware" }],
     { openrouterKey: "", mistralKey: "" },
@@ -89,17 +109,26 @@ test("quota probes show informational cards for providers without quota endpoint
   const cline = probeClineOauth();
   assert.equal(cline.provider, "cline-oauth");
   assert.equal(cline.available, true);
+  assert.equal(cline.limit, null);
+  assert.equal(cline.limitKind, "external");
+  assert.equal(cline.limitLabel, "metered upstream");
   assert.match(cline.detail.note, /no aggregate quota endpoint/);
   assert.equal(cline.error, undefined);
 
   const codex = probeCodexOauth();
   assert.equal(codex.provider, "codex-oauth");
   assert.equal(codex.available, true);
+  assert.equal(codex.limit, null);
+  assert.equal(codex.limitKind, "external");
+  assert.equal(codex.limitLabel, "metered upstream");
   assert.match(codex.detail.note, /CLIProxy credential pool/);
   assert.equal(codex.error, undefined);
 
   const generic = await probeProviderQuota({ id: "nvidia" }, {});
   assert.equal(generic.available, true);
+  assert.equal(generic.limit, null);
+  assert.equal(generic.limitKind, "external");
+  assert.equal(generic.limitLabel, "metered upstream");
   assert.match(generic.detail.note, /managed upstream/);
   assert.equal(generic.error, undefined);
 });

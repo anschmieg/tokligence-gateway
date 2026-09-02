@@ -11,7 +11,9 @@
 //     available: boolean,      // false when the provider can't report quota
 //     source: "api"|"unavailable",
 //     used?: number,           // consumed amount in `unit`
-//     limit?: number | null,   // total quota in `unit` (null = unmetered/infinite)
+//     limit?: number | null,   // total quota in `unit` when finite; null when not numeric
+//     limitKind?: string,      // "finite" | "unmetered" | "unknown" | "external" | "balance"
+//     limitLabel?: string,     // UI-safe display for non-finite limits
 //     unit: string,            // "USD" | "credits" | "tokens" | "requests" | "unknown"
 //     currency?: "USD",
 //     percentUsed?: number,    // 0-100 when limit is finite and > 0
@@ -82,17 +84,26 @@ function unavailable(provider, account, reason, detail = {}) {
   };
 }
 
+function limitKindFor(fields, limit) {
+  if (fields.limitKind) return fields.limitKind;
+  if (Number.isFinite(limit) && limit > 0) return "finite";
+  return "unknown";
+}
+
 function ok(provider, fields, detail = {}) {
   const unit = fields.unit || "unknown";
   const used = fields.used;
   const limit = fields.limit;
+  const normalizedLimit = limit == null ? null : limit === Infinity ? null : Number(limit);
   return {
     provider,
     account: fields.account || provider,
     available: true,
     source: "api",
     used: used == null ? null : Number(used),
-    limit: limit == null ? null : limit === Infinity ? null : Number(limit),
+    limit: normalizedLimit,
+    limitKind: limitKindFor(fields, normalizedLimit),
+    ...(fields.limitLabel ? { limitLabel: fields.limitLabel } : {}),
     unit,
     ...(fields.currency ? { currency: fields.currency } : {}),
     percentUsed: percentUsed(used, limit),
@@ -107,6 +118,8 @@ function informational(provider, account, note, detail = {}) {
     account,
     used: null,
     limit: null,
+    limitKind: "external",
+    limitLabel: "metered upstream",
     unit: "unknown",
   }, { reachable: true, note, ...detail });
 }
@@ -141,6 +154,8 @@ export async function probeOpenRouter(apiKey, baseUrl = "https://openrouter.ai/a
       account: "API key",
       used: usage,
       limit,
+      limitKind: limit == null ? "unmetered" : "finite",
+      limitLabel: limit == null ? "unmetered" : undefined,
       unit: "USD",
       currency: "USD",
     }, detail);
@@ -152,9 +167,9 @@ export async function probeOpenRouter(apiKey, baseUrl = "https://openrouter.ai/a
 // ---------------------------------------------------------------------------
 // Mistral — https://api.mistral.ai/v1
 // `GET /me` returns account identity but NOT remaining Vibe subscription budget,
-// so we treat it as a connectivity check and report quota as unmetered unless a
-// future Mistral usage endpoint is added. `available` is true so the dashboard
-// can show the account is reachable even without a numeric cap.
+// so we treat it as a connectivity check and label the limit as managed
+// upstream unless a future Mistral usage endpoint is added. `available` is true
+// so the dashboard can show the account is reachable even without a numeric cap.
 // ---------------------------------------------------------------------------
 export async function probeMistral(apiKey, baseUrl = "https://api.mistral.ai/v1") {
   if (!apiKey) return unavailable("mistral", "Mistral", "no API key configured");
@@ -256,11 +271,20 @@ export async function probeMiniMax(apiKey, baseUrl = "https://api.minimax.io/v1"
         account: "MiniMax account",
         used: null,
         limit: null,
+        limitKind: "balance",
+        limitLabel: "balance only",
         unit: currency === "unknown" ? "credits" : currency,
         ...(currency !== "unknown" ? { currency } : {}),
       }, { balance_remaining: balance, reachable: true });
     }
-    return ok("tokligence", { account: "MiniMax account", used: null, limit: null, unit: "unknown" }, { reachable: true });
+    return ok("tokligence", {
+      account: "MiniMax account",
+      used: null,
+      limit: null,
+      limitKind: "unknown",
+      limitLabel: "metering unknown",
+      unit: "unknown",
+    }, { reachable: true });
   } catch (error) {
     return unavailable("tokligence", "MiniMax", error.message);
   }
@@ -268,7 +292,7 @@ export async function probeMiniMax(apiKey, baseUrl = "https://api.minimax.io/v1"
 
 // ---------------------------------------------------------------------------
 // Modal adapter — Modal bills by active apps/GPU usage; there is no simple
-// per-key balance API. Reported unmetered.
+// per-key balance API. Show that metering is external instead of unmetered.
 // ---------------------------------------------------------------------------
 export async function probeModal(apiKey, baseUrl = "https://api.us-west-2.modal.direct") {
   if (!apiKey) return unavailable("modal", "Modal", "no API key configured");
@@ -276,6 +300,8 @@ export async function probeModal(apiKey, baseUrl = "https://api.us-west-2.modal.
     account: "Modal (by usage)",
     used: null,
     limit: null,
+    limitKind: "external",
+    limitLabel: "metered by Modal",
     unit: "unknown",
   }, { reachable: true, note: "Modal bills per second of compute; no balance endpoint" });
 }

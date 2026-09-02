@@ -251,6 +251,14 @@ function fmt(n, unit) {
   return out;
 }
 
+function limitLabel(q) {
+  if (q.limit != null) return fmt(q.limit, q.unit);
+  if (q.limitLabel) return q.limitLabel;
+  if (q.detail && q.detail.balance_remaining != null) return "balance tracked";
+  if (q.detail && q.detail.note) return "managed upstream";
+  return q.available ? "not reported" : "—";
+}
+
 function quotaCard(q) {
   var el = document.createElement("div");
   el.className = "card";
@@ -267,7 +275,7 @@ function quotaCard(q) {
     badge = '<span class="badge off">no quota source</span>';
   }
   var used = q.used == null ? "—" : fmt(q.used, q.unit);
-  var limit = q.limit == null ? "unmetered" : fmt(q.limit, q.unit);
+  var limit = limitLabel(q);
   var detailLines = [];
   if (q.detail && typeof q.detail === "object") {
     Object.keys(q.detail).forEach(function(k){
