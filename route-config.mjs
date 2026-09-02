@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { parse, stringify } from "yaml";
 
-const VALID_ADAPTERS = new Set(["tokligence", "oauth-proxy", "middleware", "copilot-sdk", "openai-compatible"]);
+const VALID_ADAPTERS = new Set(["tokligence", "oauth-proxy", "middleware", "copilot-sdk", "openai-compatible", "cline-oauth"]);
 
 function requireString(value, label) {
   if (typeof value !== "string" || !value.trim()) {
@@ -15,6 +15,52 @@ function normalizeModel(model, label) {
   return {
     ...model,
     id: requireString(model?.id, `${label}.id`),
+  };
+}
+
+function optionalBoundedInteger(value, label, fallback, minimum, maximum) {
+  if (value == null) return fallback;
+  const number = Number(value);
+  if (!Number.isSafeInteger(number) || number < minimum || number > maximum) {
+    throw new Error(`${label} must be between ${minimum} and ${maximum}`);
+  }
+  return number;
+}
+
+function normalizeClineOAuthProvider(provider, index) {
+  const label = `providers[${index}]`;
+  return {
+    ...provider,
+    default_base_url: provider.default_base_url
+      ? requireString(provider.default_base_url, `${label}.default_base_url`)
+      : "https://api.cline.bot",
+    default_workos_base_url: provider.default_workos_base_url
+      ? requireString(provider.default_workos_base_url, `${label}.default_workos_base_url`)
+      : "https://api.workos.com",
+    credentials_path: provider.credentials_path
+      ? requireString(provider.credentials_path, `${label}.credentials_path`)
+      : "/data/cline-oauth/credentials.json",
+    model_cache_ttl_ms: optionalBoundedInteger(
+      provider.model_cache_ttl_ms,
+      `${label}.model_cache_ttl_ms`,
+      300000,
+      0,
+      300000,
+    ),
+    request_timeout_ms: optionalBoundedInteger(
+      provider.request_timeout_ms,
+      `${label}.request_timeout_ms`,
+      30000,
+      1,
+      120000,
+    ),
+    refresh_buffer_ms: optionalBoundedInteger(
+      provider.refresh_buffer_ms,
+      `${label}.refresh_buffer_ms`,
+      300000,
+      0,
+      3600000,
+    ),
   };
 }
 
@@ -41,8 +87,11 @@ export function parseRoutingConfig(source) {
     if (!VALID_ADAPTERS.has(adapter)) {
       throw new Error(`providers[${index}].adapter is not supported: ${adapter}`);
     }
+    const normalizedProvider = adapter === "cline-oauth"
+      ? normalizeClineOAuthProvider(provider, index)
+      : provider;
     return {
-      ...provider,
+      ...normalizedProvider,
       id,
       adapter,
       default: provider.default === true,

@@ -35,6 +35,11 @@ import { modelAllowedByCatalog } from "./model-catalog.mjs";
 import { COPILOT_AUTO_MODEL, createCopilotAutoAdapter } from "./copilot-auto.mjs";
 import { buildRoutePlan } from "./routing-planner.mjs";
 import { executeRoutePlan } from "./request-executor.mjs";
+import {
+  ClineAdapterError,
+  ClineOAuthAdapter,
+  classifyClineUpstreamError,
+} from "./cline-oauth.mjs";
 
 const PROXY_PORT = Number(process.env.PROXY_PORT || 8080);
 const TGW_HOST   = process.env.TGW_HOST || "127.0.0.1";
@@ -82,6 +87,11 @@ function loadOAuthAdapterConfig() {
 }
 
 const CODEX = loadOAuthAdapterConfig();
+
+const CLINE_OAUTH_PROVIDER = ROUTING.providers.find(({ adapter }) => adapter === "cline-oauth") || null;
+const CLINE_OAUTH = CLINE_OAUTH_PROVIDER && providerEnabled(CLINE_OAUTH_PROVIDER)
+  ? new ClineOAuthAdapter({ provider: CLINE_OAUTH_PROVIDER, env: process.env })
+  : null;
 
 const COPILOT_AUTO_PROVIDER = providerById(ROUTING, "copilot-auto");
 const COPILOT_AUTO_ENABLED = Boolean(COPILOT_AUTO_PROVIDER && providerEnabled(COPILOT_AUTO_PROVIDER));
@@ -238,6 +248,22 @@ async function registerModelsFromEndpoint({ provider, hostname, port, path, head
   return registered;
 }
 
+async function registerClineFreeModels() {
+  const models = await CLINE_OAUTH.discoverFreeModels();
+  const registered = new Set();
+  for (const model of models) {
+    registerModel(model.id, CLINE_OAUTH_PROVIDER.id, {
+      ...model,
+      owned_by: CLINE_OAUTH_PROVIDER.id,
+      discovered: true,
+      discoveredBy: CLINE_OAUTH_PROVIDER.id,
+      supports_parallel_tool_calls: true,
+    });
+    registered.add(model.id.toLowerCase());
+  }
+  return registered;
+}
+
 function pruneStaleDiscovered(provider, keepIds) {
   // Keep the provider's endpoint-derived model list current: drop discovered
   // entries that no longer appear upstream. Explicitly configured models
@@ -245,7 +271,7 @@ function pruneStaleDiscovered(provider, keepIds) {
   // routing aliases keep resolving even when an upstream endpoint omits them.
   for (const [key, model] of MODEL_REGISTRY) {
     if (model.provider !== provider) continue;
-    if (model.source === "config") continue;
+    if (model.source === "config" && provider !== CLINE_OAUTH_PROVIDER?.id) continue;
     if (!keepIds.has(key)) {
       MODEL_REGISTRY.delete(key);
     }
@@ -310,6 +336,13 @@ async function refreshModelRegistry() {
           headers: { Authorization: `Bearer ${MISTRAL_KEY}` },
           prefix: "mistral/"
         }),
+      });
+    }
+
+    if (CLINE_OAUTH) {
+      refreshes.push({
+        provider: CLINE_OAUTH_PROVIDER.id,
+        promise: registerClineFreeModels(),
       });
     }
 
@@ -770,6 +803,74 @@ function handleCodexRoute(req, res, parsed, model) {
   return false;
 }
 
+function isClineModel(model) {
+  return typeof model === "string" && /^cline\//i.test(model);
+}
+
+function sendClineError(res, error) {
+  const known = error instanceof ClineAdapterError;
+  const status = known ? error.status : 502;
+  const code = known ? error.code : "cline_upstream_error";
+  const message = known ? error.message : "Cline upstream request failed";
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ error: { code, message, type: "cline_oauth_error" } }));
+}
+
+function readBoundedUpstreamError(response, limit = 16 * 1024) {
+  return new Promise((resolve) => {
+    const chunks = [];
+    let remaining = limit;
+    response.on("data", (chunk) => {
+      if (remaining <= 0) return;
+      chunks.push(chunk.subarray(0, remaining));
+      remaining -= chunk.length;
+    });
+    response.once("end", () => resolve(Buffer.concat(chunks).toString()));
+    response.once("error", () => resolve(Buffer.concat(chunks).toString()));
+    response.resume();
+  });
+}
+
+async function handleClineChatCompletion(req, res, parsed, model) {
+  if (!CLINE_OAUTH) {
+    sendClineError(res, new ClineAdapterError("Cline OAuth is not configured", {
+      status: 503,
+      code: "cline_not_configured",
+    }));
+    return;
+  }
+  const aborter = new AbortController();
+  const abort = () => aborter.abort();
+  req.once("aborted", abort);
+  res.once("close", () => { if (!res.writableEnded) abort(); });
+  try {
+    const upstream = await CLINE_OAUTH.createChatCompletion(
+      { ...parsed, model },
+      { signal: aborter.signal },
+    );
+    const status = upstream.statusCode || 502;
+    if (status < 200 || status >= 300) {
+      const text = await readBoundedUpstreamError(upstream);
+      const classified = classifyClineUpstreamError(status, text);
+      sendClineError(res, new ClineAdapterError(classified.message, classified));
+      return;
+    }
+    res.writeHead(status, upstream.headers);
+    upstream.pipe(res);
+  } catch (error) {
+    if (!res.headersSent && !res.writableEnded) sendClineError(res, error);
+  } finally {
+    req.off("aborted", abort);
+  }
+}
+
+function rejectUnsupportedClineProtocol(res) {
+  sendClineError(res, new ClineAdapterError("Cline free models support only OpenAI Chat Completions", {
+    status: 400,
+    code: "cline_chat_completions_only",
+  }));
+}
+
 function providerSummary() {
   const config = publicRoutingConfig(ROUTING);
   return { object: "list", data: config.providers };
@@ -1020,7 +1121,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname.startsWith("/admin/")) {
-    validateAdminAuth(req).then((isAdmin) => {
+    validateAdminAuth(req).then(async (isAdmin) => {
     if (!isAdmin) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Unauthorized" }));
@@ -1029,6 +1130,41 @@ const server = http.createServer((req, res) => {
     if (req.method === "GET" && url.pathname === "/admin/routes") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(publicRoutingConfig(ROUTING)));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/admin/cline/oauth/start") {
+      if (!CLINE_OAUTH) {
+        sendClineError(res, new ClineAdapterError("Cline OAuth is not configured", {
+          status: 503,
+          code: "cline_not_configured",
+        }));
+        return;
+      }
+      try {
+        const state = await CLINE_OAUTH.startOAuth();
+        res.writeHead(202, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(state));
+      } catch (error) {
+        sendClineError(res, error);
+      }
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/admin/cline/oauth/status") {
+      if (!CLINE_OAUTH) {
+        sendClineError(res, new ClineAdapterError("Cline OAuth is not configured", {
+          status: 503,
+          code: "cline_not_configured",
+        }));
+        return;
+      }
+      try {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(await CLINE_OAUTH.oauthStatus()));
+      } catch (error) {
+        sendClineError(res, error);
+      }
       return;
     }
 
@@ -1215,6 +1351,11 @@ const server = http.createServer((req, res) => {
       if (handleProfileRequest(req, res, parsed, "chat_completions")) return;
 
       const model = resolveModel(parsed.model);
+
+      if (isClineModel(model)) {
+        handleClineChatCompletion(req, res, parsed, model);
+        return;
+      }
 
       if (model === COPILOT_AUTO_MODEL) {
         if (!COPILOT_AUTO) {
@@ -1472,6 +1613,11 @@ const server = http.createServer((req, res) => {
       const model = resolveModel(parsed.model);
       const messages = responsesPayloadToMessages(parsed);
 
+      if (isClineModel(model)) {
+        rejectUnsupportedClineProtocol(res);
+        return;
+      }
+
       if (handleCodexRoute(req, res, parsed, model)) return;
       if (DEBUG) {
         console.error(`responses request model=${model} stream=${parsed.stream === true} messages=${JSON.stringify(messages).slice(0, 1000)}`);
@@ -1633,6 +1779,11 @@ const server = http.createServer((req, res) => {
       }
 
       const model = resolveModel(parsed.model);
+
+      if (isClineModel(model)) {
+        rejectUnsupportedClineProtocol(res);
+        return;
+      }
 
       if (handleCodexRoute(req, res, parsed, model)) return;
 
