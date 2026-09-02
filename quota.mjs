@@ -24,14 +24,16 @@
 // that does not expose a balance/usage API, or whose call fails, reports
 // `available: false` with a short reason rather than taking the dashboard down.
 
+import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 
 const MAX_RESPONSE_BYTES = 64 * 1024;
 
-function fetchJson({ method = "GET", hostname, port, path, headers = {}, timeout = 12000 }) {
+function fetchJson({ method = "GET", protocol = "https:", hostname, port, path, headers = {}, timeout = 12000 }) {
   return new Promise((resolve, reject) => {
-    const req = httpsRequest(
-      { method, hostname, port, path, headers, timeout },
+    const request = protocol === "http:" ? httpRequest : httpsRequest;
+    const req = request(
+      { method, protocol, hostname, port, path, headers, timeout },
       (res) => {
         const chunks = [];
         res.on("data", (chunk) => {
@@ -99,9 +101,19 @@ function ok(provider, fields, detail = {}) {
   };
 }
 
+
+function informational(provider, account, note, detail = {}) {
+  return ok(provider, {
+    account,
+    used: null,
+    limit: null,
+    unit: "unknown",
+  }, { reachable: true, note, ...detail });
+}
+
 function baseUrlParts(baseUrl) {
   const url = new URL(baseUrl);
-  return { hostname: url.hostname, port: url.port ? Number(url.port) : undefined, pathname: url.pathname.replace(/\/+$/, "") };
+  return { protocol: url.protocol, hostname: url.hostname, port: url.port ? Number(url.port) : undefined, pathname: url.pathname.replace(/\/+$/, "") };
 }
 
 // ---------------------------------------------------------------------------
@@ -112,13 +124,13 @@ function baseUrlParts(baseUrl) {
 export async function probeOpenRouter(apiKey, baseUrl = "https://openrouter.ai/api/v1") {
   if (!apiKey) return unavailable("openrouter", "OpenRouter", "no API key configured");
   try {
-    const { hostname, port, pathname } = baseUrlParts(baseUrl);
+    const { protocol, hostname, port, pathname } = baseUrlParts(baseUrl);
     const data = await fetchJson({
-      hostname, port,
+      protocol, hostname, port,
       path: `${pathname}/key`,
       headers: { Authorization: `Bearer ${apiKey}` },
     });
-    const info = data?.data || {};
+    const info = data?.body?.data || data?.data || {};
     const usage = Number(info.usage) || 0;
     const limitRaw = Number(info.limit) || 0;
     const limit = limitRaw > 0 ? limitRaw : null; // limit 0 => free-tier / unmetered
@@ -147,20 +159,19 @@ export async function probeOpenRouter(apiKey, baseUrl = "https://openrouter.ai/a
 export async function probeMistral(apiKey, baseUrl = "https://api.mistral.ai/v1") {
   if (!apiKey) return unavailable("mistral", "Mistral", "no API key configured");
   try {
-    const { hostname, port, pathname } = baseUrlParts(baseUrl);
-    const data = await fetchJson({
-      hostname, port,
-      path: `${pathname}/me`,
+    const { protocol, hostname, port, pathname } = baseUrlParts(baseUrl);
+    // Mistral's public API does not expose subscription quota. /models is a
+    // stable authenticated connectivity check; /me returns 404 on current API.
+    await fetchJson({
+      protocol, hostname, port,
+      path: `${pathname}/models`,
       headers: { Authorization: `Bearer ${apiKey}` },
     });
-    const account = data?.name || data?.id || "Mistral account";
-    // Vibe/plan usage is not exposed through this endpoint.
-    return ok("mistral", {
-      account,
-      used: null,
-      limit: null, // no numeric cap reported
-      unit: "unknown",
-    }, { reachable: true, note: "Mistral does not expose remaining plan budget via its public API" });
+    return informational(
+      "mistral",
+      "Mistral account",
+      "Mistral does not expose remaining Vibe/subscription budget via its public API",
+    );
   } catch (error) {
     return unavailable("mistral", "Mistral", error.message);
   }
@@ -174,21 +185,21 @@ export async function probeMistral(apiKey, baseUrl = "https://api.mistral.ai/v1"
 async function probeOpenCodeFamily(providerId, label, apiKey, baseUrl = "https://opencode.ai") {
   if (!apiKey) return unavailable(providerId, label, "no API key configured");
   const headers = { Authorization: `Bearer ${apiKey}` };
-  const { hostname, port, pathname } = baseUrlParts(baseUrl);
+  const { protocol, hostname, port, pathname } = baseUrlParts(baseUrl);
   // Try usage first (best source), then identity. Combine failures safely.
   let usageData = null;
   try {
-    const res = await fetchJson({ hostname, port, path: `${pathname}/zen/usage`, headers });
+    const res = await fetchJson({ protocol, hostname, port, path: `${pathname}/zen/usage`, headers });
     usageData = res?.body ?? res?.data;
   } catch {
     usageData = null;
   }
   if (!usageData) {
     try {
-      const res = await fetchJson({ hostname, port, path: `${pathname}/zen/v1/me`, headers });
+      const res = await fetchJson({ protocol, hostname, port, path: `${pathname}/zen/v1/me`, headers });
       usageData = { me: res?.body };
     } catch {
-      return unavailable(providerId, label, "usage endpoint unavailable");
+      return informational(providerId, label, "OpenCode does not expose quota through the configured API endpoint");
     }
   }
   const u = usageData?.data ?? usageData?.usage ?? usageData?.me ?? usageData;
@@ -224,14 +235,15 @@ export function probeOpenCodeZen(apiKey, baseUrl = "https://opencode.ai") {
 export async function probeMiniMax(apiKey, baseUrl = "https://api.minimax.io/v1") {
   if (!apiKey) return unavailable("tokligence", "MiniMax", "no API key configured");
   try {
-    const { hostname, port, pathname } = baseUrlParts(baseUrl);
+    const { protocol, hostname, port, pathname } = baseUrlParts(baseUrl);
     const data = await fetchJson({
-      hostname, port,
+      protocol, hostname, port,
       path: `${pathname}/account/balance`,
       headers: { Authorization: `Bearer ${apiKey}` },
     });
-    const balance = data?.data?.balance ?? data?.balance;
-    const walletCurrency = data?.data?.currency ?? data?.wallet_currency ?? "USD";
+    const payload = data?.body ?? data;
+    const balance = payload?.data?.balance ?? payload?.balance;
+    const walletCurrency = payload?.data?.currency ?? payload?.wallet_currency ?? "USD";
     const currency = ["USD", "EUR", "CNY", "GBP"].includes(walletCurrency) ? walletCurrency : "unknown";
     if (Number.isFinite(balance)) {
       return ok("tokligence", {
@@ -266,16 +278,51 @@ export async function probeModal(apiKey, baseUrl = "https://api.us-west-2.modal.
 // codex-oauth — credential pool; no per-account quota probe through the proxy.
 // ---------------------------------------------------------------------------
 export function probeCodexOauth() {
-  return {
-    provider: "codex-oauth",
-    account: "Codex OAuth (credential pool)",
-    available: false,
-    source: "unavailable",
-    unit: "unknown",
-    detail: { note: "quota is managed by the embedded CLIProxy credential pool" },
-    updatedAt: new Date().toISOString(),
-    error: "no quota endpoint for OAuth credential pool",
-  };
+  return informational(
+    "codex-oauth",
+    "Codex OAuth credential pool",
+    "Quota is managed by the embedded CLIProxy credential pool; no separate gateway quota endpoint",
+  );
+}
+
+export function probeClineOauth() {
+  return informational(
+    "cline-oauth",
+    "Cline OAuth account",
+    "Cline free-model limits are enforced by Cline upstream per model/account; no aggregate quota endpoint",
+  );
+}
+
+export function probeCopilotAuto() {
+  return informational(
+    "copilot-auto",
+    "Copilot subscription",
+    "GitHub Copilot subscription quota is managed upstream; no quota endpoint is exposed to the gateway",
+  );
+}
+
+export function probeGoogleAiStudio() {
+  return informational(
+    "google-ai-studio",
+    "Google AI Studio",
+    "Google AI Studio usage is managed upstream; no quota probe is configured",
+  );
+}
+
+export function probeNvidia() {
+  return informational(
+    "nvidia",
+    "NVIDIA NIM",
+    "NVIDIA NIM free-tier quota is managed upstream; no quota probe is configured",
+  );
+}
+
+export function probeNous() {
+  return informational(
+    "nous",
+    "Nous Research",
+    "Nous free-tier quota is managed upstream; no quota probe is configured",
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -299,8 +346,18 @@ export async function probeProviderQuota(provider, context = {}) {
       return probeModal(context.modalKey, context.modalBaseUrl);
     case "codex-oauth":
       return probeCodexOauth(provider);
+    case "cline-oauth":
+      return probeClineOauth(provider);
+    case "copilot-auto":
+      return probeCopilotAuto(provider);
+    case "google-ai-studio":
+      return probeGoogleAiStudio(provider);
+    case "nvidia":
+      return probeNvidia(provider);
+    case "nous":
+      return probeNous(provider);
     default:
-      return unavailable(id, id, "no quota probe for this provider");
+      return informational(id, id, "No quota probe is configured for this provider");
   }
 }
 

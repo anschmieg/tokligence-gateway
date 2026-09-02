@@ -9,8 +9,12 @@ import { RoutingPreferences } from "../preferences.mjs";
 import { loadRoutingConfig } from "../route-config.mjs";
 import {
   probeAllProviderQuota,
+  probeClineOauth,
+  probeCodexOauth,
   probeMistral,
+  probeOpenCodeGo,
   probeOpenRouter,
+  probeProviderQuota,
 } from "../quota.mjs";
 
 const config = parseRoutingConfig(fs.readFileSync("gateway.routes.yaml", "utf8"));
@@ -78,6 +82,40 @@ test("probeAllProviderQuota never rejects and covers enabled providers", async (
   assert.deepEqual(res.filter((q) => q.available), []);
 });
 
+
+
+test("quota probes show informational cards for providers without quota endpoints", async () => {
+  const cline = probeClineOauth();
+  assert.equal(cline.provider, "cline-oauth");
+  assert.equal(cline.available, true);
+  assert.match(cline.detail.note, /no aggregate quota endpoint/);
+  assert.equal(cline.error, undefined);
+
+  const codex = probeCodexOauth();
+  assert.equal(codex.provider, "codex-oauth");
+  assert.equal(codex.available, true);
+  assert.match(codex.detail.note, /CLIProxy credential pool/);
+  assert.equal(codex.error, undefined);
+
+  const generic = await probeProviderQuota({ id: "nvidia" }, {});
+  assert.equal(generic.available, true);
+  assert.match(generic.detail.note, /managed upstream/);
+  assert.equal(generic.error, undefined);
+});
+
+test("OpenCode unavailable usage endpoints render as informational, not errors", async (t) => {
+  const server = await import("node:http").then(({ default: http }) => http.createServer((req, res) => {
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "not found" }));
+  }));
+  server.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.once("listening", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const result = await probeOpenCodeGo("key", `http://127.0.0.1:${server.address().port}`);
+  assert.equal(result.available, true);
+  assert.equal(result.error, undefined);
+  assert.match(result.detail.note, /does not expose quota/);
+});
 
 test("bakeToRoutes persists overrides into gateway.routes.yaml", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tgw-bake-"));
