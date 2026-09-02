@@ -2076,7 +2076,7 @@ const server = http.createServer((req, res) => {
         { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers },
         (upRes) => {
           res.writeHead(upRes.statusCode, upRes.headers);
-          pipeAndRecordUsage("opencode-go", model, upRes, res);
+          upRes.pipe(res);
         }
       );
 
