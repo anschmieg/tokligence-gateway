@@ -233,7 +233,13 @@ export function probeOpenCodeZen(apiKey, baseUrl = "https://opencode.ai") {
 // never fail the dashboard if the shape is unexpected.
 // ---------------------------------------------------------------------------
 export async function probeMiniMax(apiKey, baseUrl = "https://api.minimax.io/v1") {
-  if (!apiKey) return unavailable("tokligence", "MiniMax", "no API key configured");
+  if (!apiKey) {
+    return informational(
+      "tokligence",
+      "Embedded Tokligence gateway",
+      "Inner gateway quota is managed by its configured upstream credentials; no MiniMax API key is configured for dashboard balance probing",
+    );
+  }
   try {
     const { protocol, hostname, port, pathname } = baseUrlParts(baseUrl);
     const data = await fetchJson({

@@ -66,9 +66,10 @@ test("quota probes return normalized shapes and fail safe", async () => {
   assert.equal(or.available, false);
   assert.equal(or.source, "unavailable");
 
-  const mistral = await probeMistral("", "https://api.mistral.ai/v1");
-  assert.equal(mistral.available, false);
-  assert.equal(mistral.error, "no API key configured");
+  const minimax = await probeProviderQuota({ id: "tokligence" }, {});
+  assert.equal(minimax.provider, "tokligence");
+  assert.equal(minimax.available, true);
+  assert.match(minimax.detail.note, /dashboard balance probing/);
 });
 
 test("probeAllProviderQuota never rejects and covers enabled providers", async () => {
