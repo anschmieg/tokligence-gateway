@@ -93,6 +93,7 @@ test("OpenRouter free tier remains explicitly unmetered", async (t) => {
   assert.equal(result.detail.is_free_tier, true);
 });
 
+test("probeAllProviderQuota never rejects and covers enabled providers", async () => {
   const res = await probeAllProviderQuota(
     [{ id: "openrouter", adapter: "middleware" }, { id: "mistral", adapter: "middleware" }],
     { openrouterKey: "", mistralKey: "" },
@@ -213,6 +214,8 @@ test("dashboard exposes Cline OAuth controls without token fields", () => {
   assert.match(html, /admin\/cline\/oauth\/logout/);
   assert.match(html, /Connect Cline/);
   assert.match(html, /Clear credentials/);
+  assert.match(html, /limitLabel\(q\)/);
+  assert.doesNotMatch(html, /q\.limit\s*==\s*null\s*\?\s*["']unmetered["']/);
   assert.doesNotMatch(html, /accessToken|refreshToken|device_code/);
 });
 
