@@ -253,6 +253,7 @@ export class ClineOAuthAdapter {
   #refreshInFlight = null;
   #oauthState = { status: "idle" };
   #oauthCompletion = null;
+  #oauthGeneration = 0;
   #configuredModels;
   #modelCache;
   #modelCacheExpiresAt = 0;
@@ -374,6 +375,7 @@ export class ClineOAuthAdapter {
     }
     const expiresInSeconds = boundedNumber(payload.expires_in, DEFAULT_DEVICE_EXPIRES_SECONDS, 0.001, 3600);
     const pollIntervalSeconds = boundedNumber(payload.interval, DEFAULT_POLL_INTERVAL_SECONDS, 0.001, 300);
+    const generation = ++this.#oauthGeneration;
     this.#oauthState = {
       status: "pending",
       verificationUrl,
@@ -384,11 +386,12 @@ export class ClineOAuthAdapter {
       deviceCode,
       expiresAtMs: this.#now() + expiresInSeconds * 1000,
       pollIntervalSeconds,
+      generation,
     });
     return this.#publicOAuthState();
   }
 
-  async #completeOAuth({ deviceCode, expiresAtMs, pollIntervalSeconds }) {
+  async #completeOAuth({ deviceCode, expiresAtMs, pollIntervalSeconds, generation }) {
     let intervalSeconds = pollIntervalSeconds;
     try {
       while (this.#now() <= expiresAtMs) {
@@ -414,6 +417,9 @@ export class ClineOAuthAdapter {
             throw requestError(502, "cline_device_tokens_invalid", "WorkOS returned invalid device credentials");
           }
           const registered = await this.#clineJsonRequest("/api/v1/auth/register", { accessToken, refreshToken });
+          if (generation !== this.#oauthGeneration) {
+            return this.#publicOAuthState();
+          }
           await this.#persistCredentials(parseCredentialPayload(registered));
           this.#oauthState = { status: "authenticated", expiresAt: this.#credentials.expiresAt };
           return this.#publicOAuthState();
@@ -460,6 +466,23 @@ export class ClineOAuthAdapter {
     return credentials
       ? { status: "authenticated", expires_at: credentials.expiresAt }
       : { status: "login_required" };
+  }
+
+
+  async logout() {
+    this.#oauthGeneration += 1;
+    this.#oauthCompletion = null;
+    this.#oauthState = { status: "login_required" };
+    this.#credentials = null;
+    this.#refreshInFlight = null;
+    try {
+      await unlink(this.#credentialsPath);
+    } catch (error) {
+      if (error?.code !== "ENOENT") {
+        throw requestError(500, "cline_logout_failed", "Cline credentials could not be cleared");
+      }
+    }
+    return this.#publicOAuthState();
   }
 
   async discoverFreeModels() {

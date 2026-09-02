@@ -1168,6 +1168,23 @@ const server = http.createServer((req, res) => {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/admin/cline/oauth/logout") {
+      if (!CLINE_OAUTH) {
+        sendClineError(res, new ClineAdapterError("Cline OAuth is not configured", {
+          status: 503,
+          code: "cline_not_configured",
+        }));
+        return;
+      }
+      try {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(await CLINE_OAUTH.logout()));
+      } catch (error) {
+        sendClineError(res, error);
+      }
+      return;
+    }
+
     // Admin status used by the dashboard.
     if (req.method === "GET" && url.pathname === "/admin/status") {
       const enabled = ROUTING.providers.filter((provider) => providerEnabled(provider));

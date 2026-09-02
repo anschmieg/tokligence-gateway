@@ -298,6 +298,75 @@ test("model discovery exposes only free models, caches transient failures, and r
   assert.deepEqual((await adapter.discoverFreeModels()).map(({ id }) => id), ["cline/z-ai/first"]);
 });
 
+
+test("logout clears stored credentials and prevents a pending device login from persisting", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "cline-logout-test-"));
+  const credentialsPath = path.join(directory, "credentials.json");
+  let authenticate;
+  let registerCalled = false;
+  const api = http.createServer(async (req, res) => {
+    await requestBody(req);
+    res.setHeader("Content-Type", "application/json");
+    if (req.url === "/user_management/authorize/device") {
+      res.end(JSON.stringify({
+        device_code: "logout-device-secret",
+        user_code: "WXYZ-1234",
+        verification_uri_complete: "https://signin.example.test/device?code=WXYZ-1234",
+        expires_in: 300,
+        interval: 60,
+      }));
+      return;
+    }
+    if (req.url === "/user_management/authenticate") {
+      await new Promise((resolve) => { authenticate = resolve; });
+      res.end(JSON.stringify({ access_token: "workos-after-logout", refresh_token: "workos-refresh-after-logout" }));
+      return;
+    }
+    if (req.url === "/api/v1/auth/register") {
+      registerCalled = true;
+      res.end(JSON.stringify(clineCredentials(
+        "cline-after-logout",
+        "cline-refresh-after-logout",
+        new Date(Date.now() + 60 * 60_000).toISOString(),
+      )));
+      return;
+    }
+    res.writeHead(404).end(JSON.stringify({ error: "not found" }));
+  });
+  const port = await listen(api);
+  t.after(() => close(api));
+
+  const sleeps = [];
+  const adapter = new ClineOAuthAdapter({
+    provider: {
+      api_base_url: `http://127.0.0.1:${port}`,
+      workos_base_url: `http://127.0.0.1:${port}`,
+      credentials_path: credentialsPath,
+      request_timeout_ms: 1000,
+      models: [],
+    },
+    sleep: async (milliseconds) => {
+      sleeps.push(milliseconds);
+      return new Promise((resolve) => setTimeout(resolve, 5));
+    },
+  });
+
+  const started = await adapter.startOAuth();
+  assert.equal(started.status, "pending");
+  for (let i = 0; i < 20 && typeof authenticate !== "function"; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  assert.equal(typeof authenticate, "function");
+  assert.deepEqual(await adapter.logout(), { status: "login_required" });
+  authenticate();
+  for (let i = 0; i < 20 && !registerCalled; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  assert.equal(registerCalled, true);
+  await assert.rejects(readFile(credentialsPath, "utf8"), { code: "ENOENT" });
+  assert.deepEqual(await adapter.oauthStatus(), { status: "login_required" });
+});
+
 test("safe Cline upstream classifications preserve meaningful statuses without raw upstream bodies", () => {
   assert.deepEqual(classifyClineUpstreamError(401, "token invalid access-secret"), {
     status: 401,

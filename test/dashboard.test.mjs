@@ -136,3 +136,15 @@ test("bakeToRoutes clears a provider/fallback when override sets them null", () 
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test("dashboard exposes Cline OAuth controls without token fields", () => {
+  const html = fs.readFileSync("dashboard.html", "utf8");
+  assert.match(html, /Cline OAuth/);
+  assert.match(html, /admin\/cline\/oauth\/start/);
+  assert.match(html, /admin\/cline\/oauth\/status/);
+  assert.match(html, /admin\/cline\/oauth\/logout/);
+  assert.match(html, /Connect Cline/);
+  assert.match(html, /Clear credentials/);
+  assert.doesNotMatch(html, /accessToken|refreshToken|device_code/);
+});
+
