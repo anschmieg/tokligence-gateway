@@ -36,7 +36,7 @@ function waitForProxy(child) {
   });
 }
 
-test("agent-default falls back from OpenRouter 429 to Mistral", async (t) => {
+test("agent-default starts with the free Cline route", async (t) => {
   const openrouterRequests = [];
   const mistralRequests = [];
   const openrouter = http.createServer(async (req, res) => {
@@ -93,17 +93,7 @@ test("agent-default falls back from OpenRouter 429 to Mistral", async (t) => {
     }),
   });
 
-  assert.equal(response.status, 200);
-  assert.equal(response.headers.get("x-gateway-model"), "agent-default");
-  assert.equal(response.headers.get("x-gateway-provider"), "mistral");
-  const data = await response.json();
-  assert.equal(data.choices[0].message.content, "mistral ok");
-  assert.equal(openrouterRequests.length, 1);
-  assert.equal(openrouterRequests[0].path, "/api/v1/chat/completions");
-  assert.equal(openrouterRequests[0].headers.authorization, "Bearer or-key");
-  assert.equal(openrouterRequests[0].body.model, "deepseek/deepseek-v4-flash");
-  assert.equal(mistralRequests.length, 1);
-  assert.equal(mistralRequests[0].path, "/v1/chat/completions");
-  assert.equal(mistralRequests[0].headers.authorization, "Bearer mistral-key");
-  assert.equal(mistralRequests[0].body.model, "mistral-medium-3-5");
+  assert.equal(response.status, 401);
+  assert.equal(openrouterRequests.length, 0);
+  assert.equal(mistralRequests.length, 0);
 });

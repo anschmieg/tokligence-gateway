@@ -7,10 +7,14 @@ export const ROUTING_PROFILES = {
   primary: {
     name: "Primary (High-Quality)",
     providers: [
-      { id: "mistral", models: ["mistral-medium-3.5"], weight: 100, billing_class: "subscription" },
-      { id: "nvidia", models: ["nemotron-3-ultra-550b-a55b", "nemotron-3-super-120b-a12b"], weight: 90, billing_class: "free" },
-      { id: "google-ai-studio", models: ["gemini-3.1-pro-latest", "gemini-3-flash-latest"], weight: 80, billing_class: "subscription" },
-      { id: "openrouter", models: ["deepseek/deepseek-v4-flash-0731"], weight: 70, billing_class: "payg" },
+      { id: "cline-oauth", models: ["glm-5.3-flash"], weight: 100, billing_class: "free" },
+      { id: "cline-oauth", models: ["deepseek"], weight: 98, billing_class: "free" },
+      { id: "nvidia", models: ["nemotron-3-ultra-550b-a55b"], weight: 95, billing_class: "free" },
+      { id: "nvidia", models: ["nemotron-3-super-120b-a12b"], weight: 95, billing_class: "free" },
+      { id: "opencode-zen", models: ["deepseek-v4-flash-free", "kimi-k2.6-free"], weight: 90, billing_class: "free" },
+      { id: "mistral", models: ["mistral-medium-3-5"], weight: 80, billing_class: "subscription" },
+      { id: "google-ai-studio", models: ["gemini-3-flash-latest"], weight: 75, billing_class: "subscription" },
+      { id: "openrouter", models: ["deepseek/deepseek-v4-flash-0731"], weight: 60, billing_class: "payg" },
     ],
     fallback_strategy: "weighted_random",
     max_retries: 3,
@@ -23,8 +27,11 @@ export const ROUTING_PROFILES = {
     compression: {
       name: "Auxiliary: Compression",
       providers: [
-        { id: "nvidia", models: ["glm-5.2"], weight: 100, billing_class: "free" },
+        { id: "cline-oauth", models: ["laguna-xs-2.1"], weight: 100, billing_class: "free" },
+        { id: "nvidia", models: ["glm-5.2"], weight: 95, billing_class: "free" },
         { id: "nous", models: ["laguna-xs-2.1"], weight: 90, billing_class: "free" },
+        { id: "opencode-zen", models: ["kimi-k2.6-free"], weight: 85, billing_class: "free" },
+        { id: "mistral", models: ["ministral-3b-latest"], weight: 80, billing_class: "subscription" },
       ],
       fallback_strategy: "round_robin",
       max_retries: 2,
@@ -37,6 +44,8 @@ export const ROUTING_PROFILES = {
       providers: [
         { id: "nvidia", models: ["nemotron-3-super-120b-a12b"], weight: 100, billing_class: "free" },
         { id: "google-ai-studio", models: ["gemini-3-flash-latest"], weight: 90, billing_class: "subscription" },
+        { id: "cline-oauth", models: ["glm-5.3-flash"], weight: 85, billing_class: "free" },
+        { id: "opencode-zen", models: ["kimi-k2.6-free"], weight: 80, billing_class: "free" },
       ],
       fallback_strategy: "round_robin",
       max_retries: 2,
@@ -49,6 +58,7 @@ export const ROUTING_PROFILES = {
       providers: [
         { id: "google-ai-studio", models: ["gemini-3.1-pro-latest"], weight: 100, billing_class: "subscription" },
         { id: "openrouter", models: ["google/gemini-3-pro-preview"], weight: 90, billing_class: "payg" },
+        { id: "nvidia", models: ["nemotron-3-super-120b-a12b"], weight: 85, billing_class: "free" },
       ],
       fallback_strategy: "round_robin",
       max_retries: 2,
@@ -61,6 +71,8 @@ export const ROUTING_PROFILES = {
       providers: [
         { id: "nvidia", models: ["*"], weight: 100, billing_class: "free" },
         { id: "nous", models: ["*"], weight: 90, billing_class: "free" },
+        { id: "opencode-zen", models: ["*"], weight: 85, billing_class: "free" },
+        { id: "cline-oauth", models: ["*"], weight: 80, billing_class: "free" },
       ],
       fallback_strategy: "random",
       max_retries: 1,
@@ -72,10 +84,11 @@ export const ROUTING_PROFILES = {
   cron: {
     name: "Cron (Quota-Safe)",
     providers: [
-      { id: "nvidia", models: ["nemotron-3-super-120b-a12b", "glm-5.2"], weight: 100, billing_class: "free" },
-      { id: "nous", models: ["laguna-xs-2.1"], weight: 90, billing_class: "free" },
-      { id: "openrouter", models: ["deepseek/deepseek-v4-flash-0731"], weight: 80, billing_class: "payg" },
-      { id: "google-ai-studio", models: ["gemini-3-flash-latest"], weight: 70, billing_class: "subscription" },
+      { id: "nvidia", models: ["nemotron-3-super-120b-a12b"], weight: 100, billing_class: "free" },
+      { id: "nous", models: ["laguna-xs-2.1"], weight: 95, billing_class: "free" },
+      { id: "cline-oauth", models: ["glm-5.3-flash"], weight: 90, billing_class: "free" },
+      { id: "opencode-zen", models: ["kimi-k2.6-free"], weight: 85, billing_class: "free" },
+      { id: "openrouter", models: ["deepseek/deepseek-v4-flash-0731"], weight: 70, billing_class: "payg" },
     ],
     fallback_strategy: "weighted_random",
     max_retries: 3,
@@ -88,7 +101,8 @@ export const ROUTING_PROFILES = {
     providers: [
       { id: "nvidia", models: ["*"], weight: 100, billing_class: "free" },
       { id: "nous", models: ["*"], weight: 90, billing_class: "free" },
-      { id: "openrouter", models: ["*"], weight: 80, billing_class: "payg" },
+      { id: "opencode-zen", models: ["*"], weight: 85, billing_class: "free" },
+      { id: "cline-oauth", models: ["*"], weight: 80, billing_class: "free" },
     ],
     fallback_strategy: "random",
     max_retries: 1,

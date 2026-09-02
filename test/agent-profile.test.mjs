@@ -15,12 +15,15 @@ const env = {
 
 test("agent profiles preserve deterministic candidate order", () => {
   assert.deepEqual(profileByModel(config, "agent-default").candidates, [
-    { provider: "openrouter", model: "deepseek/deepseek-v4-flash" },
+    { provider: "cline-oauth", model: "cline/glm-5.3-flash" },
+    { provider: "opencode-zen", model: "opencode-zen/kimi-k2.6-free" },
+    { provider: "nvidia", model: "nvidia/nemotron-3-super-120b-a12b" },
     { provider: "mistral", model: "mistral-medium-3-5" },
-    { provider: "openrouter", model: "z-ai/glm-5.2" },
+    { provider: "google-ai-studio", model: "gemini-3-flash-latest" },
     { provider: "codex-oauth", model: "gpt-5.6-terra" },
+    { provider: "openrouter", model: "deepseek/deepseek-v4-flash-0731" },
   ]);
-  assert.equal(profileByModel(config, "AGENTIC-WORKER").candidates[0].provider, "mistral");
+  assert.equal(profileByModel(config, "AGENTIC-WORKER").candidates[0].provider, "cline-oauth");
 });
 
 test("route planner builds the ordered fallback chain", () => {
@@ -31,16 +34,16 @@ test("route planner builds the ordered fallback chain", () => {
   }, env, { cooldowns: new Map() });
   assert.equal(plan.error, undefined);
   assert.deepEqual(plan.candidates.map(({ provider, upstreamModel }) => [provider.id, upstreamModel]), [
-    ["openrouter", "deepseek/deepseek-v4-flash"],
+    ["cline-oauth", "cline/glm-5.3-flash"],
     ["mistral", "mistral-medium-3-5"],
-    ["openrouter", "z-ai/glm-5.2"],
     ["codex-oauth", "gpt-5.6-terra"],
+    ["openrouter", "deepseek/deepseek-v4-flash-0731"],
   ]);
 });
 
 test("route planner skips a candidate while its circuit is open", () => {
   const cooldowns = new Map([[
-    "openrouter:deepseek/deepseek-v4-flash:chat_completions",
+    "cline-oauth:cline/glm-5.3-flash:chat_completions",
     Date.now() + 60_000,
   ]]);
   const plan = buildRoutePlan(config, {
