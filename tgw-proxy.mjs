@@ -39,7 +39,6 @@ import { executeRoutePlan } from "./request-executor.mjs";
 import {
   ClineAdapterError,
   ClineOAuthAdapter,
-  classifyClineUpstreamError,
 } from "./cline-oauth.mjs";
 
 const PROXY_PORT = Number(process.env.PROXY_PORT || 8080);
@@ -443,15 +442,24 @@ function resolveModel(model) {
   return PREFERENCES.resolve(model, resolveConfiguredAlias);
 }
 
+function sendClineError(res, error) {
+  const known = error instanceof ClineAdapterError;
+  const status = known ? error.status : 502;
+  const code = known ? error.code : "cline_upstream_error";
+  const message = known ? error.message : "Cline upstream request failed";
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ error: { code, message, type: "cline_oauth_error" } }));
+}
+
 function handleProfileRequest(req, res, parsed, protocol) {
   const profile = profileByModel(ROUTING, parsed?.model);
-  if (!profile) return false;
   const plan = buildRoutePlan(
     ROUTING,
     { model: parsed.model, protocol, body: parsed },
     process.env,
     PROFILE_RUNTIME_STATE,
   );
+  if (!profile && !plan) return false;
   if (plan.error) {
     res.writeHead(plan.error.status, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: plan.error }));
@@ -465,6 +473,7 @@ function handleProfileRequest(req, res, parsed, protocol) {
     body: parsed,
     env: process.env,
     runtimeState: PROFILE_RUNTIME_STATE,
+    adapters: { [CLINE_OAUTH_PROVIDER?.id]: CLINE_OAUTH },
   }).catch((error) => {
     if (res.headersSent) {
       res.destroy(error);
@@ -833,34 +842,6 @@ function handleCodexRoute(req, res, parsed, model) {
   return false;
 }
 
-function isClineModel(model) {
-  return typeof model === "string" && /^cline\//i.test(model);
-}
-
-function sendClineError(res, error) {
-  const known = error instanceof ClineAdapterError;
-  const status = known ? error.status : 502;
-  const code = known ? error.code : "cline_upstream_error";
-  const message = known ? error.message : "Cline upstream request failed";
-  res.writeHead(status, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ error: { code, message, type: "cline_oauth_error" } }));
-}
-
-function readBoundedUpstreamError(response, limit = 16 * 1024) {
-  return new Promise((resolve) => {
-    const chunks = [];
-    let remaining = limit;
-    response.on("data", (chunk) => {
-      if (remaining <= 0) return;
-      chunks.push(chunk.subarray(0, remaining));
-      remaining -= chunk.length;
-    });
-    response.once("end", () => resolve(Buffer.concat(chunks).toString()));
-    response.once("error", () => resolve(Buffer.concat(chunks).toString()));
-    response.resume();
-  });
-}
-
 function recordUsageFromResponseChunks(provider, model, headers, chunks) {
   const text = Buffer.concat(chunks).toString();
   const contentType = String(headers?.["content-type"] || headers?.["Content-Type"] || "");
@@ -890,82 +871,6 @@ function pipeAndRecordUsage(provider, model, upstream, res) {
     res.end();
   });
   upstream.once("error", () => res.end());
-}
-
-async function handleClineChatCompletion(req, res, parsed, model) {
-  if (!CLINE_OAUTH) {
-    sendClineError(res, new ClineAdapterError("Cline OAuth is not configured", {
-      status: 503,
-      code: "cline_not_configured",
-    }));
-    return;
-  }
-  const aborter = new AbortController();
-  const abort = () => aborter.abort();
-  req.once("aborted", abort);
-  res.once("close", () => { if (!res.writableEnded) abort(); });
-  // Cline's free models emit reasoning that counts toward max_tokens; tiny
-  // budgets (e.g. 16) starve the actual content and upstream returns
-  // {"error":"empty response content"}. Bump to a safe floor transparently.
-  const CLINE_MIN_TOKENS = 64;
-  const normalized = { ...parsed, model };
-  if (typeof normalized.max_tokens === "number" && normalized.max_tokens < CLINE_MIN_TOKENS) {
-    normalized.max_tokens = CLINE_MIN_TOKENS;
-  }
-  if (typeof normalized.max_completion_tokens === "number" && normalized.max_completion_tokens < CLINE_MIN_TOKENS) {
-    normalized.max_completion_tokens = CLINE_MIN_TOKENS;
-  }
-  try {
-    const upstream = await CLINE_OAUTH.createChatCompletion(
-      normalized,
-      { signal: aborter.signal },
-    );
-    const status = upstream.statusCode || 502;
-    if (status < 200 || status >= 300) {
-      const text = await readBoundedUpstreamError(upstream);
-      const classified = classifyClineUpstreamError(status, text);
-      try { recordObservedEvent("cline-oauth", model, classified.code); } catch {}
-      // classified upstream error already recorded
-      sendClineError(res, new ClineAdapterError(classified.message, classified));
-      return;
-    }
-    const isStream = parsed && parsed.stream === true;
-    if (!isStream) {
-      const text = await readBoundedUpstreamError(upstream).catch(() => "");
-      // Cline wraps non-stream JSON as {success:true, data:{...}} — unwrap for OpenAI clients
-      try {
-        const j = JSON.parse(text);
-        const inner = j && j.data ? j.data : j;
-        const body = JSON.stringify(inner);
-        res.writeHead(status, { "Content-Type": "application/json" });
-        res.end(body);
-        try { recordUsageFromResponseChunks("cline-oauth", model, { "content-type": "application/json" }, [Buffer.from(body)]); } catch {}
-      } catch {
-        res.writeHead(status, upstream.headers);
-        res.end(text);
-      }
-      return;
-    }
-    res.writeHead(status, upstream.headers);
-    // Preserve streaming while best-effort recording observed usage
-    try {
-      const chunks = [];
-      upstream.on("data", (c) => { if (chunks.reduce((s,x)=>s+x.length,0)<1024*1024) chunks.push(c); });
-      upstream.once("end", () => { try { recordUsageFromResponseChunks("cline-oauth", model, upstream.headers, chunks); } catch {} });
-    } catch {}
-    upstream.pipe(res);
-  } catch (error) {
-    if (!res.headersSent && !res.writableEnded) sendClineError(res, error);
-  } finally {
-    req.off("aborted", abort);
-  }
-}
-
-function rejectUnsupportedClineProtocol(res) {
-  sendClineError(res, new ClineAdapterError("Cline free models support only OpenAI Chat Completions", {
-    status: 400,
-    code: "cline_chat_completions_only",
-  }));
 }
 
 function providerSummary() {
@@ -1466,11 +1371,6 @@ const server = http.createServer((req, res) => {
 
       const model = resolveModel(parsed.model);
 
-      if (isClineModel(model)) {
-        handleClineChatCompletion(req, res, parsed, model);
-        return;
-      }
-
       if (model === COPILOT_AUTO_MODEL) {
         if (!COPILOT_AUTO) {
           res.writeHead(503, { "Content-Type": "application/json" });
@@ -1729,10 +1629,7 @@ const server = http.createServer((req, res) => {
       const model = resolveModel(parsed.model);
       const messages = responsesPayloadToMessages(parsed);
 
-      if (isClineModel(model)) {
-        rejectUnsupportedClineProtocol(res);
-        return;
-      }
+      if (handleProfileRequest(req, res, parsed, "responses")) return;
 
       if (handleCodexRoute(req, res, parsed, model)) return;
       if (DEBUG) {
@@ -1902,10 +1799,7 @@ const server = http.createServer((req, res) => {
 
       const model = resolveModel(parsed.model);
 
-      if (isClineModel(model)) {
-        rejectUnsupportedClineProtocol(res);
-        return;
-      }
+      if (handleProfileRequest(req, res, parsed, "messages")) return;
 
       if (handleCodexRoute(req, res, parsed, model)) return;
 

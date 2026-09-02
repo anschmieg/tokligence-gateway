@@ -11,6 +11,7 @@ import {
 import http from "node:http";
 import https from "node:https";
 import path from "node:path";
+import { Readable } from "node:stream";
 
 export const CLINE_WORKOS_CLIENT_ID = "client_01K3A541FN8TA3EPPHTD2325AR";
 
@@ -23,6 +24,7 @@ const DEFAULT_MODEL_CACHE_TTL_MS = 5 * 60_000;
 const DEFAULT_DEVICE_EXPIRES_SECONDS = 300;
 const DEFAULT_POLL_INTERVAL_SECONDS = 5;
 const MAX_ERROR_BODY_BYTES = 16 * 1024;
+const CLINE_MIN_TOKENS = 64;
 
 function nonEmptyString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -145,6 +147,29 @@ async function responseErrorText(response) {
 
 function requestError(status, code, message) {
   return new ClineAdapterError(message, { status, code });
+}
+
+function normalizedResponse(body, response) {
+  const output = Buffer.from(body);
+  const stream = Readable.from([output]);
+  stream.statusCode = response.statusCode;
+  stream.headers = {
+    ...response.headers,
+    "content-type": "application/json",
+    "content-length": String(output.length),
+  };
+  return stream;
+}
+
+async function nodeResponseText(response) {
+  const chunks = [];
+  let remaining = MAX_ERROR_BODY_BYTES;
+  for await (const chunk of response) {
+    if (remaining <= 0) continue;
+    chunks.push(chunk.subarray(0, remaining));
+    remaining -= chunk.length;
+  }
+  return Buffer.concat(chunks).toString();
 }
 
 export class ClineAdapterError extends Error {
@@ -549,18 +574,43 @@ export class ClineOAuthAdapter {
     if (!allowed) {
       throw requestError(404, "cline_model_retired", "The requested Cline free model is no longer available");
     }
-    const payload = { ...body, model: upstreamModelId(requested) };
+    const payload = {
+      ...body,
+      model: upstreamModelId(requested),
+    };
+    if (typeof payload.max_tokens === "number" && payload.max_tokens < CLINE_MIN_TOKENS) {
+      payload.max_tokens = CLINE_MIN_TOKENS;
+    }
+    if (typeof payload.max_completion_tokens === "number" && payload.max_completion_tokens < CLINE_MIN_TOKENS) {
+      payload.max_completion_tokens = CLINE_MIN_TOKENS;
+    }
     const headers = {
       ...requestHeaders(),
       Authorization: `Bearer ${workosTokenPrefix(credentials.accessToken)}`,
     };
     try {
-      return await nodePostJson(
+      const response = await nodePostJson(
         endpoint(this.#apiBaseUrl, "/api/v1/chat/completions"),
         payload,
         headers,
         signal,
       );
+      if (response.statusCode && (response.statusCode < 200 || response.statusCode >= 300)) {
+        const classified = classifyClineUpstreamError(response.statusCode, await nodeResponseText(response));
+        throw new ClineAdapterError(classified.message, classified);
+      }
+      if (body?.stream === true || !response.statusCode) {
+        return response;
+      }
+      const text = await nodeResponseText(response);
+      try {
+        const parsed = JSON.parse(text);
+        const normalized = parsed && parsed.data ? parsed.data : parsed;
+        const normalizedBody = Buffer.from(JSON.stringify(normalized));
+        return normalizedResponse(normalizedBody, response);
+      } catch {
+        return normalizedResponse(Buffer.from(text), response);
+      }
     } catch (error) {
       if (error instanceof ClineAdapterError) throw error;
       throw requestError(502, "cline_upstream_unavailable", "Cline upstream is unavailable");

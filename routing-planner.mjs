@@ -1,4 +1,4 @@
-import { profileByModel, providerById, providerEnabled } from "./route-config.mjs";
+import { matchConfiguredProvider, profileByModel, providerById, providerEnabled } from "./route-config.mjs";
 import { inspectRequestFeatures } from "./protocol-codecs.mjs";
 
 function circuitOpen(runtimeState, provider, model, protocol) {
@@ -9,7 +9,23 @@ function circuitOpen(runtimeState, provider, model, protocol) {
 export function buildRoutePlan(config, { model, protocol, body }, env = process.env, runtimeState = {}) {
   if (!model) return { error: { status: 400, code: "missing_model", message: "model is required" } };
   const profile = profileByModel(config, model);
-  if (!profile) return { error: { status: 404, code: "unknown_profile", message: "Routing profile is not configured" } };
+  if (!profile) {
+    const providerId = matchConfiguredProvider(config, model);
+    const provider = providerById(config, providerId);
+    if (!provider || provider.adapter !== "cline-oauth") return null;
+    if (!(provider.protocols || ["chat_completions"]).includes(protocol)) {
+      return { error: { status: 400, code: "cline_chat_completions_only", message: "Cline free models support only OpenAI Chat Completions" } };
+    }
+    return {
+      requestedModel: model,
+      publicModel: model,
+      profile: null,
+      required: inspectRequestFeatures(protocol, body),
+      deadline: Date.now() + Number(env.GATEWAY_REQUEST_TIMEOUT_MS || 120000),
+      maxAttempts: 1,
+      candidates: [{ provider, model: { id: model }, upstreamModel: model, protocol, native: true }],
+    };
+  }
 
   const required = inspectRequestFeatures(protocol, body);
   const candidates = [];

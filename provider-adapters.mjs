@@ -34,7 +34,13 @@ function requestUrl(candidate, path, env) {
   return target;
 }
 
-export function startAttempt({ candidate, req, path, body, env = process.env, signal }) {
+export function startAttempt({ candidate, req, path, body, env = process.env, signal, adapters = {} }) {
+  if (candidate.provider.adapter === "cline-oauth") {
+    const adapter = adapters[candidate.provider.id];
+    if (!adapter) throw new Error("Cline OAuth adapter is not configured");
+    return adapter.createChatCompletion(JSON.parse(body.toString()), { signal })
+      .then((response) => ({ response, upstream: response, target: null }));
+  }
   const target = requestUrl(candidate, path, env);
   const client = target.protocol === "https:" ? https : http;
   const headers = { "content-type": "application/json", "content-length": String(body.length), ...candidate.provider.headers };

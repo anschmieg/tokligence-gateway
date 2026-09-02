@@ -183,8 +183,14 @@ test("refresh rotation is persisted before inference with exact bearer and truth
       return;
     }
     if (req.url === "/api/v1/chat/completions") {
-      res.writeHead(200, { "Content-Type": "text/event-stream", "X-Upstream": "preserved" });
-      res.end("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n");
+      const request = JSON.parse(body);
+      if (request.stream === false) {
+        res.writeHead(200, { "Content-Type": "application/json", "X-Upstream": "preserved" });
+        res.end(JSON.stringify({ success: true, data: { choices: [{ message: { content: "ok" } }] } }));
+      } else {
+        res.writeHead(200, { "Content-Type": "text/event-stream", "X-Upstream": "preserved" });
+        res.end("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n");
+      }
       return;
     }
     res.writeHead(404).end();
@@ -206,6 +212,7 @@ test("refresh rotation is persisted before inference with exact bearer and truth
     model: "cline/z-ai/glm-free",
     messages: [{ role: "user", content: "hello" }],
     stream: true,
+    max_tokens: 16,
     tools: [{ type: "function", function: { name: "weather", parameters: { type: "object" } } }],
     parallel_tool_calls: true,
   };
@@ -214,7 +221,9 @@ test("refresh rotation is persisted before inference with exact bearer and truth
   assert.equal(first.headers["x-upstream"], "preserved");
   assert.match(await responseText(first), /data: \[DONE\]/);
   const second = await adapter.createChatCompletion({ ...payload, stream: false });
-  await responseText(second);
+  assert.deepEqual(JSON.parse(await responseText(second)), {
+    choices: [{ message: { content: "ok" } }],
+  });
 
   const refresh = requests.find(({ path: requestPath }) => requestPath === "/api/v1/auth/refresh");
   assert.deepEqual(JSON.parse(refresh.body), {
@@ -235,7 +244,7 @@ test("refresh rotation is persisted before inference with exact bearer and truth
   assert.equal(inferenceRequests[0].headers["x-core-version"], "unknown");
   assert.match(inferenceRequests[0].headers["x-task-id"], /^[0-9a-f-]{36}$/);
   assert.notEqual(inferenceRequests[0].headers["x-task-id"], inferenceRequests[1].headers["x-task-id"]);
-  assert.deepEqual(JSON.parse(inferenceRequests[0].body), { ...payload, model: "z-ai/glm-free" });
+  assert.deepEqual(JSON.parse(inferenceRequests[0].body), { ...payload, model: "z-ai/glm-free", max_tokens: 64 });
 
   const persisted = JSON.parse(await readFile(credentialsPath, "utf8"));
   assert.equal(persisted.accessToken, "rotated-cline-access");
