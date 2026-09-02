@@ -904,9 +904,20 @@ async function handleClineChatCompletion(req, res, parsed, model) {
   const abort = () => aborter.abort();
   req.once("aborted", abort);
   res.once("close", () => { if (!res.writableEnded) abort(); });
+  // Cline's free models emit reasoning that counts toward max_tokens; tiny
+  // budgets (e.g. 16) starve the actual content and upstream returns
+  // {"error":"empty response content"}. Bump to a safe floor transparently.
+  const CLINE_MIN_TOKENS = 64;
+  const normalized = { ...parsed, model };
+  if (typeof normalized.max_tokens === "number" && normalized.max_tokens < CLINE_MIN_TOKENS) {
+    normalized.max_tokens = CLINE_MIN_TOKENS;
+  }
+  if (typeof normalized.max_completion_tokens === "number" && normalized.max_completion_tokens < CLINE_MIN_TOKENS) {
+    normalized.max_completion_tokens = CLINE_MIN_TOKENS;
+  }
   try {
     const upstream = await CLINE_OAUTH.createChatCompletion(
-      { ...parsed, model },
+      normalized,
       { signal: aborter.signal },
     );
     const status = upstream.statusCode || 502;
