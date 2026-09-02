@@ -914,8 +914,25 @@ async function handleClineChatCompletion(req, res, parsed, model) {
       const text = await readBoundedUpstreamError(upstream);
       const classified = classifyClineUpstreamError(status, text);
       try { recordObservedEvent("cline-oauth", model, classified.code); } catch {}
-      console.error(`[cline] upstream ${status} code=${classified.code} body=${text.slice(0,1200)}`);
+      // classified upstream error already recorded
       sendClineError(res, new ClineAdapterError(classified.message, classified));
+      return;
+    }
+    const isStream = parsed && parsed.stream === true;
+    if (!isStream) {
+      const text = await readBoundedUpstreamError(upstream).catch(() => "");
+      // Cline wraps non-stream JSON as {success:true, data:{...}} — unwrap for OpenAI clients
+      try {
+        const j = JSON.parse(text);
+        const inner = j && j.data ? j.data : j;
+        const body = JSON.stringify(inner);
+        res.writeHead(status, { "Content-Type": "application/json" });
+        res.end(body);
+        try { recordUsageFromResponseChunks("cline-oauth", model, { "content-type": "application/json" }, [Buffer.from(body)]); } catch {}
+      } catch {
+        res.writeHead(status, upstream.headers);
+        res.end(text);
+      }
       return;
     }
     res.writeHead(status, upstream.headers);
