@@ -166,7 +166,7 @@ providers:
       - deepseek/deepseek-v4-flash
       - deepseek/deepseek-v4-pro
     catalog:
-      zero_price_only: false
+      zero_price_only: true
       paid_allowlist:
         - deepseek/deepseek-v4-flash-0731
         - deepseek/deepseek-v4-flash

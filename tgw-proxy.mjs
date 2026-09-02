@@ -28,6 +28,7 @@ import {
   resolveConfiguredAlias,
 } from "./route-config.mjs";
 import { probeAllProviderQuota } from "./quota.mjs";
+import { createObservedUsageStore } from "./usage-observer.mjs";
 import { RoutingPreferences, sanitizedPreferences } from "./preferences.mjs";
 import { DASHBOARD_HTML } from "./dashboard.mjs";
 import { cloudflareAccessConfigured, isValidCloudflareAccessToken } from "./cloudflare-access.mjs";
@@ -393,19 +394,48 @@ const PREFERENCES = new RoutingPreferences(ROUTING, {
   routesPath: ROUTING_CONFIG_PATH,
   readonly: process.env.ROUTING_PREFERENCES_READONLY === "1",
 });
+const OBSERVED_USAGE = createObservedUsageStore();
+
+function topLevelOrUpstreamApiKey(id, upstream = "anthropic") {
+  const provider = providerById(ROUTING, id);
+  const envName = provider?.api_key_env || provider?.upstreams?.[upstream]?.api_key_env;
+  return envName ? process.env[envName] : null;
+}
+
+function topLevelOrUpstreamBaseUrl(id, upstream = "anthropic") {
+  return providerBaseUrl(id)?.toString()
+    || providerById(ROUTING, id)?.upstreams?.[upstream]?.default_base_url
+    || null;
+}
+
+function recordObservedUsage(provider, model, data) {
+  OBSERVED_USAGE.recordUsage(provider, model, data);
+}
+
+function recordModelObservedUsage(model, data) {
+  const provider = matchConfiguredProvider(ROUTING, model) || modelProvider(model);
+  if (provider) recordObservedUsage(provider, model, data);
+}
+
+function recordObservedEvent(provider, model, code) {
+  OBSERVED_USAGE.recordEvent(provider, model, code);
+}
 
 function quotaContext() {
   return {
     openrouterKey: providerApiKey("openrouter"),
     openrouterBaseUrl: providerBaseUrl("openrouter")?.toString() || "https://openrouter.ai/api/v1",
     mistralKey: providerApiKey("mistral"),
+    mistralAdminApiKey: process.env.MISTRAL_ADMIN_API_KEY,
     mistralBaseUrl: providerBaseUrl("mistral")?.toString() || "https://api.mistral.ai/v1",
     opencodeKey: providerApiKey("opencode-go"),
     opencodeBaseUrl: providerBaseUrl("opencode-go")?.toString() || "https://opencode.ai",
-    minimaxKey: providerApiKey("tokligence"),
-    minimaxBaseUrl: providerBaseUrl("tokligence")?.toString() || "https://api.minimax.io/v1",
+    minimaxKey: topLevelOrUpstreamApiKey("tokligence", "anthropic"),
+    minimaxBaseUrl: process.env.MINIMAX_TOKEN_PLAN_BASE_URL || "https://www.minimax.io",
     modalKey: providerApiKey("modal"),
     modalBaseUrl: providerBaseUrl("modal")?.toString() || "https://api.us-west-2.modal.direct",
+    clineOAuth: CLINE_OAUTH,
+    observedUsageByProvider: OBSERVED_USAGE.snapshotByProvider(),
   };
 }
 
@@ -831,6 +861,37 @@ function readBoundedUpstreamError(response, limit = 16 * 1024) {
   });
 }
 
+function recordUsageFromResponseChunks(provider, model, headers, chunks) {
+  const text = Buffer.concat(chunks).toString();
+  const contentType = String(headers?.["content-type"] || headers?.["Content-Type"] || "");
+  if (contentType.includes("text/event-stream") || text.includes("data:")) {
+    for (const line of text.split(/\r?\n/)) {
+      const match = line.match(/^data:\s*(.+)$/);
+      if (!match || match[1] === "[DONE]") continue;
+      try {
+        recordObservedUsage(provider, model, JSON.parse(match[1]));
+      } catch {}
+    }
+    return;
+  }
+  try {
+    recordObservedUsage(provider, model, JSON.parse(text));
+  } catch {}
+}
+
+function pipeAndRecordUsage(provider, model, upstream, res) {
+  const chunks = [];
+  upstream.on("data", (chunk) => {
+    if (chunks.reduce((sum, current) => sum + current.length, 0) < 1024 * 1024) chunks.push(chunk);
+    res.write(chunk);
+  });
+  upstream.once("end", () => {
+    recordUsageFromResponseChunks(provider, model, upstream.headers, chunks);
+    res.end();
+  });
+  upstream.once("error", () => res.end());
+}
+
 async function handleClineChatCompletion(req, res, parsed, model) {
   if (!CLINE_OAUTH) {
     sendClineError(res, new ClineAdapterError("Cline OAuth is not configured", {
@@ -852,10 +913,17 @@ async function handleClineChatCompletion(req, res, parsed, model) {
     if (status < 200 || status >= 300) {
       const text = await readBoundedUpstreamError(upstream);
       const classified = classifyClineUpstreamError(status, text);
+      try { recordObservedEvent("cline-oauth", model, classified.code); } catch {}
       sendClineError(res, new ClineAdapterError(classified.message, classified));
       return;
     }
     res.writeHead(status, upstream.headers);
+    // Preserve streaming while best-effort recording observed usage
+    try {
+      const chunks = [];
+      upstream.on("data", (c) => { if (chunks.reduce((s,x)=>s+x.length,0)<1024*1024) chunks.push(c); });
+      upstream.once("end", () => { try { recordUsageFromResponseChunks("cline-oauth", model, upstream.headers, chunks); } catch {} });
+    } catch {}
     upstream.pipe(res);
   } catch (error) {
     if (!res.headersSent && !res.writableEnded) sendClineError(res, error);
@@ -1490,6 +1558,7 @@ const server = http.createServer((req, res) => {
               model,
               parsed.stream === true,
             );
+            recordModelObservedUsage(model, data);
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
@@ -1500,6 +1569,7 @@ const server = http.createServer((req, res) => {
         callOpenCodeGoOpenAI(model, messages, parsed.max_tokens || 4096)
           .then((data) => {
             sendChatCompletionResult(res, data, model, parsed.stream === true);
+            recordModelObservedUsage(model, data);
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
@@ -1527,7 +1597,7 @@ const server = http.createServer((req, res) => {
 
         const upstream = https.request(options, (upRes) => {
           res.writeHead(upRes.statusCode, upRes.headers);
-          upRes.pipe(res);
+          pipeAndRecordUsage("opencode-go", model, upRes, res);
         });
 
         upstream.on("error", (err) => {
@@ -1556,7 +1626,7 @@ const server = http.createServer((req, res) => {
 
         const upstream = https.request(options, (upRes) => {
           res.writeHead(upRes.statusCode, upRes.headers);
-          upRes.pipe(res);
+          pipeAndRecordUsage("opencode-go", model, upRes, res);
         });
 
         upstream.on("error", (err) => {
@@ -1577,7 +1647,7 @@ const server = http.createServer((req, res) => {
           { host: TGW_HOST, port: TGW_PORT, path: "/v1/chat/completions", method: "POST", headers },
           (upRes) => {
             res.writeHead(upRes.statusCode, upRes.headers);
-            upRes.pipe(res);
+            pipeAndRecordUsage("opencode-go", model, upRes, res);
           }
         );
 
@@ -1598,7 +1668,7 @@ const server = http.createServer((req, res) => {
           { host: TGW_HOST, port: TGW_PORT, path: "/v1/chat/completions", method: "POST", headers },
           (upRes) => {
             res.writeHead(upRes.statusCode, upRes.headers);
-            upRes.pipe(res);
+            pipeAndRecordUsage("opencode-go", model, upRes, res);
           }
         );
         upstream.on("error", (err) => {
@@ -1651,6 +1721,7 @@ const server = http.createServer((req, res) => {
             let text = msg?.content || msg?.reasoning_content || "";
             
             sendResponsesResult(res, model, text, parsed.stream === true);
+            recordModelObservedUsage(model, data);
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
@@ -1672,6 +1743,7 @@ const server = http.createServer((req, res) => {
             let text = msg?.content || "";
             
             sendResponsesResult(res, model, text, parsed.stream === true);
+            recordModelObservedUsage(model, data);
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
@@ -1684,6 +1756,7 @@ const server = http.createServer((req, res) => {
             let text = msg?.content || "";
             
             sendResponsesResult(res, model, text, parsed.stream === true);
+            recordModelObservedUsage(model, data);
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
@@ -1696,6 +1769,7 @@ const server = http.createServer((req, res) => {
             let text = msg?.content || "";
             
             sendResponsesResult(res, model, text, parsed.stream === true);
+            recordModelObservedUsage(model, data);
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
@@ -1726,6 +1800,7 @@ const server = http.createServer((req, res) => {
                 const resp = JSON.parse(data);
                 const output = resp.content?.[0]?.text || resp.content?.[0]?.thinking || "";
                 sendResponsesResult(res, model, output, parsed.stream === true);
+                recordModelObservedUsage(model, resp);
               } catch {
                 res.writeHead(upRes.statusCode, upRes.headers);
                 res.end(data);
@@ -1763,6 +1838,7 @@ const server = http.createServer((req, res) => {
                 // Translate back to Responses API format
                 const output = resp.content?.[0]?.text || resp.content?.[0]?.thinking || "";
                 sendResponsesResult(res, model, output, parsed.stream === true);
+                recordModelObservedUsage(model, resp);
               } catch {
                 res.writeHead(upRes.statusCode, upRes.headers);
                 res.end(data);
@@ -1851,6 +1927,7 @@ const server = http.createServer((req, res) => {
 
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify(response));
+            recordModelObservedUsage(model, data);
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
@@ -1861,6 +1938,7 @@ const server = http.createServer((req, res) => {
           .then((data) => {
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify(anthropicToMessage(data, model)));
+            recordModelObservedUsage(model, data);
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
@@ -1889,6 +1967,7 @@ const server = http.createServer((req, res) => {
 
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify(response));
+            recordModelObservedUsage(model, data);
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
@@ -1920,7 +1999,7 @@ const server = http.createServer((req, res) => {
 
         const upstream = https.request(options, (upRes) => {
           res.writeHead(upRes.statusCode, upRes.headers);
-          upRes.pipe(res);
+          pipeAndRecordUsage("opencode-go", model, upRes, res);
         });
 
         upstream.on("error", (err) => {
@@ -1936,6 +2015,7 @@ const server = http.createServer((req, res) => {
           .then((data) => {
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify(openAIToAnthropicMessage(data, model)));
+            recordModelObservedUsage(model, data);
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
@@ -1952,7 +2032,7 @@ const server = http.createServer((req, res) => {
           { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers },
           (upRes) => {
             res.writeHead(upRes.statusCode, upRes.headers);
-            upRes.pipe(res);
+            pipeAndRecordUsage("opencode-go", model, upRes, res);
           }
         );
 
@@ -1972,7 +2052,7 @@ const server = http.createServer((req, res) => {
           { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers },
           (upRes) => {
             res.writeHead(upRes.statusCode, upRes.headers);
-            upRes.pipe(res);
+            pipeAndRecordUsage("opencode-go", model, upRes, res);
           }
         );
 
@@ -1996,7 +2076,7 @@ const server = http.createServer((req, res) => {
         { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers },
         (upRes) => {
           res.writeHead(upRes.statusCode, upRes.headers);
-          upRes.pipe(res);
+          pipeAndRecordUsage("opencode-go", model, upRes, res);
         }
       );
 

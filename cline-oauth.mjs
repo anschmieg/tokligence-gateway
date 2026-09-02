@@ -485,6 +485,40 @@ export class ClineOAuthAdapter {
     return this.#publicOAuthState();
   }
 
+  async #authorizedClineGet(pathname) {
+    const credentials = await this.#validCredentials();
+    const response = await this.#fetchWithTimeout(endpoint(this.#apiBaseUrl, pathname), {
+      method: "GET",
+      headers: {
+        ...requestHeaders(),
+        Authorization: `Bearer ${workosTokenPrefix(credentials.accessToken)}`,
+      },
+    });
+    const payload = await responseJson(response, "Cline API");
+    if (!response.ok) {
+      const classified = classifyClineUpstreamError(response.status, JSON.stringify(payload).slice(0, MAX_ERROR_BODY_BYTES));
+      throw new ClineAdapterError(classified.message, classified);
+    }
+    return payload?.success === true && Object.hasOwn(payload, "data") ? payload.data : payload;
+  }
+
+  async accountUsage() {
+    const user = await this.#authorizedClineGet("/api/v1/users/me");
+    const userId = nonEmptyString(user?.id) || nonEmptyString(user?.uid) || nonEmptyString(user?.userId);
+    if (!userId) throw requestError(502, "cline_account_invalid", "Cline account response did not include a user id");
+    const [balance, usage, payments] = await Promise.all([
+      this.#authorizedClineGet(`/api/v1/users/${encodeURIComponent(userId)}/balance`),
+      this.#authorizedClineGet(`/api/v1/users/${encodeURIComponent(userId)}/usages`).catch(() => null),
+      this.#authorizedClineGet(`/api/v1/users/${encodeURIComponent(userId)}/payments`).catch(() => null),
+    ]);
+    return {
+      user: { ...user, id: userId },
+      balance,
+      usageTransactions: Array.isArray(usage?.items) ? usage.items : [],
+      paymentTransactions: Array.isArray(payments?.paymentTransactions) ? payments.paymentTransactions : [],
+    };
+  }
+
   async discoverFreeModels() {
     if (this.#modelCacheExpiresAt > this.#now()) return this.#modelCache.map((model) => ({ ...model }));
     if (this.#modelRefreshInFlight) return this.#modelRefreshInFlight;

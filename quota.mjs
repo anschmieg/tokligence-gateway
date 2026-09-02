@@ -1,30 +1,8 @@
 // quota.mjs — per-provider quota / account-balance probes for the dashboard.
 //
-// The gateway routes requests to many independent providers, each of which has
-// its own billing/quota model (subscriptions, credit balances, monthly caps).
-// This module knows how to ask each provider for how much of its quota has
-// already been consumed and normalises every answer into a single shape:
-//
-//   {
-//     provider: string,        // provider id
-//     account: string,         // human label for the account whose quota is shown
-//     available: boolean,      // false when the provider can't report quota
-//     source: "api"|"unavailable",
-//     used?: number,           // consumed amount in `unit`
-//     limit?: number | null,   // total quota in `unit` when finite; null when not numeric
-//     limitKind?: string,      // "finite" | "unmetered" | "unknown" | "external" | "balance"
-//     limitLabel?: string,     // UI-safe display for non-finite limits
-//     unit: string,            // "USD" | "credits" | "tokens" | "requests" | "unknown"
-//     currency?: "USD",
-//     percentUsed?: number,    // 0-100 when limit is finite and > 0
-//     detail?: object,         // provider-specific extras, never secrets
-//     updatedAt: string,       // ISO timestamp
-//     error?: string,          // human-safe reason quota is unavailable
-//   }
-//
-// Probes are fail-safe: no real credentials are ever echoed back. A provider
-// that does not expose a balance/usage API, or whose call fails, reports
-// `available: false` with a short reason rather than taking the dashboard down.
+// Probes are fail-safe and never echo credentials. When a provider has no
+// authoritative quota API, the dashboard reports that honestly instead of
+// inventing limits.
 
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -38,11 +16,11 @@ function fetchJson({ method = "GET", protocol = "https:", hostname, port, path, 
       { method, protocol, hostname, port, path, headers, timeout },
       (res) => {
         const chunks = [];
+        let size = 0;
         res.on("data", (chunk) => {
           chunks.push(chunk);
-          if (Buffer.concat(chunks).length > MAX_RESPONSE_BYTES) {
-            req.destroy(new Error("provider response too large"));
-          }
+          size += chunk.length;
+          if (size > MAX_RESPONSE_BYTES) req.destroy(new Error("provider response too large"));
         });
         res.on("end", () => {
           const text = Buffer.concat(chunks).toString();
@@ -64,11 +42,23 @@ function fetchJson({ method = "GET", protocol = "https:", hostname, port, path, 
   });
 }
 
+function numberOrNull(value) {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function firstNumber(...values) {
+  for (const value of values) {
+    const n = numberOrNull(value);
+    if (n != null) return n;
+  }
+  return null;
+}
+
 function percentUsed(used, limit) {
   if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) return null;
-  const pct = (used / limit) * 100;
-  // Round away from zero to a sensible precision so 12.3456% -> 12.35
-  return Math.round(pct * 100) / 100;
+  return Math.round((used / limit) * 10000) / 100;
 }
 
 function unavailable(provider, account, reason, detail = {}) {
@@ -90,51 +80,65 @@ function limitKindFor(fields, limit) {
   return "unknown";
 }
 
+function attachObserved(detail, observedUsage) {
+  if (!observedUsage) return detail;
+  return { ...detail, observed_usage: observedUsage };
+}
+
 function ok(provider, fields, detail = {}) {
   const unit = fields.unit || "unknown";
-  const used = fields.used;
+  const used = fields.used == null ? null : Number(fields.used);
   const limit = fields.limit;
   const normalizedLimit = limit == null ? null : limit === Infinity ? null : Number(limit);
   return {
     provider,
     account: fields.account || provider,
     available: true,
-    source: "api",
-    used: used == null ? null : Number(used),
+    source: fields.source || "api",
+    used,
     limit: normalizedLimit,
     limitKind: limitKindFor(fields, normalizedLimit),
     ...(fields.limitLabel ? { limitLabel: fields.limitLabel } : {}),
     unit,
     ...(fields.currency ? { currency: fields.currency } : {}),
-    percentUsed: percentUsed(used, limit),
+    percentUsed: percentUsed(used, normalizedLimit),
     detail,
     updatedAt: new Date().toISOString(),
   };
 }
 
-
-function informational(provider, account, note, detail = {}) {
-  return ok(provider, {
+function noQuotaSource(provider, account, note, detail = {}) {
+  return {
+    provider,
     account,
+    available: false,
+    source: "unreported",
     used: null,
     limit: null,
-    limitKind: "external",
-    limitLabel: "metered upstream",
+    limitKind: "unreported",
+    limitLabel: "not reported",
     unit: "unknown",
-  }, { reachable: true, note, ...detail });
+    detail: { note, ...detail },
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 function baseUrlParts(baseUrl) {
   const url = new URL(baseUrl);
-  return { protocol: url.protocol, hostname: url.hostname, port: url.port ? Number(url.port) : undefined, pathname: url.pathname.replace(/\/+$/, "") };
+  return {
+    protocol: url.protocol,
+    hostname: url.hostname,
+    port: url.port ? Number(url.port) : undefined,
+    pathname: url.pathname.replace(/\/+$/, ""),
+  };
 }
 
-// ---------------------------------------------------------------------------
-// OpenRouter — https://openrouter.ai/api/v1
-// Gets the API key's current usage and limit (USD). `limit` is the configured
-// spend cap; `is_free_tier` keys report ``limit: 0`` (unmetered).
-// ---------------------------------------------------------------------------
-export async function probeOpenRouter(apiKey, baseUrl = "https://openrouter.ai/api/v1") {
+function monthYear(now = new Date()) {
+  return { month: now.getUTCMonth() + 1, year: now.getUTCFullYear() };
+}
+
+// OpenRouter — authoritative key usage and limit.
+export async function probeOpenRouter(apiKey, baseUrl = "https://openrouter.ai/api/v1", options = {}) {
   if (!apiKey) return unavailable("openrouter", "OpenRouter", "no API key configured");
   try {
     const { protocol, hostname, port, pathname } = baseUrlParts(baseUrl);
@@ -143,13 +147,15 @@ export async function probeOpenRouter(apiKey, baseUrl = "https://openrouter.ai/a
       path: `${pathname}/key`,
       headers: { Authorization: `Bearer ${apiKey}` },
     });
-    const info = data?.body?.data || data?.data || {};
-    const usage = Number(info.usage) || 0;
-    const limitRaw = Number(info.limit) || 0;
-    const limit = limitRaw > 0 ? limitRaw : null; // limit 0 => free-tier / unmetered
-    const credits = info.credits ?? info.balance;
+    const info = data?.body?.data || data?.body || {};
+    const usage = firstNumber(info.usage, info.used) ?? 0;
+    const limitRaw = firstNumber(info.limit, info.usage_limit);
+    const limit = limitRaw && limitRaw > 0 ? limitRaw : null;
+    const limitRemaining = firstNumber(info.limit_remaining, info.remaining, info.remaining_credits);
+    const credits = firstNumber(info.credits, info.balance);
     const detail = { is_free_tier: Boolean(info.is_free_tier) };
-    if (Number.isFinite(credits)) detail.credits_remaining = Number(credits);
+    if (limitRemaining != null) detail.limit_remaining = limitRemaining;
+    if (credits != null) detail.credits_remaining = credits;
     return ok("openrouter", {
       account: "API key",
       used: usage,
@@ -158,238 +164,267 @@ export async function probeOpenRouter(apiKey, baseUrl = "https://openrouter.ai/a
       limitLabel: limit == null ? "unmetered" : undefined,
       unit: "USD",
       currency: "USD",
-    }, detail);
+    }, attachObserved(detail, options.observedUsage));
   } catch (error) {
-    return unavailable("openrouter", "OpenRouter", error.message);
+    return unavailable("openrouter", "OpenRouter", error.message, attachObserved({}, options.observedUsage));
   }
 }
 
-// ---------------------------------------------------------------------------
-// Mistral — https://api.mistral.ai/v1
-// `GET /me` returns account identity but NOT remaining Vibe subscription budget,
-// so we treat it as a connectivity check and label the limit as managed
-// upstream unless a future Mistral usage endpoint is added. `available` is true
-// so the dashboard can show the account is reachable even without a numeric cap.
-// ---------------------------------------------------------------------------
-export async function probeMistral(apiKey, baseUrl = "https://api.mistral.ai/v1") {
-  if (!apiKey) return unavailable("mistral", "Mistral", "no API key configured");
+// Mistral — authoritative usage requires a separate Admin API key.
+export async function probeMistral(apiKey, baseUrl = "https://api.mistral.ai/v1", options = {}) {
+  const observed = options.observedUsage;
+  const adminApiKey = options.adminApiKey;
+  if (adminApiKey) {
+    try {
+      const { protocol, hostname, port, pathname } = baseUrlParts(baseUrl);
+      const adminBase = pathname.endsWith("/admin") ? pathname : `${pathname}/admin`;
+      const { month, year } = monthYear(options.now || new Date());
+      const headers = { "x-api-key": adminApiKey };
+      const [usageRes, spendRes] = await Promise.all([
+        fetchJson({ protocol, hostname, port, path: `${adminBase}/usage?month=${month}&year=${year}`, headers }),
+        fetchJson({ protocol, hostname, port, path: `${adminBase}/spend-limit`, headers }),
+      ]);
+      const usage = usageRes.body?.data ?? usageRes.body;
+      const spend = spendRes.body?.data ?? spendRes.body;
+      const used = firstNumber(usage?.total, usage?.amount, usage?.used, usage?.usage, usage?.total_cost) ?? 0;
+      const limit = firstNumber(spend?.limit, spend?.amount, spend?.monthly_limit, spend?.value);
+      const currency = usage?.currency || spend?.currency || "USD";
+      return ok("mistral", {
+        account: "Mistral account",
+        used,
+        limit,
+        limitKind: limit == null ? "unknown" : "finite",
+        limitLabel: limit == null ? "spend limit unknown" : undefined,
+        unit: currency,
+        ...(currency === "USD" ? { currency: "USD" } : {}),
+      }, attachObserved({ month, year }, observed));
+    } catch (error) {
+      return unavailable("mistral", "Mistral Admin API", error.message, attachObserved({ admin_api: true }, observed));
+    }
+  }
+
+  if (!apiKey) return unavailable("mistral", "Mistral", "no API key configured", attachObserved({}, observed));
   try {
     const { protocol, hostname, port, pathname } = baseUrlParts(baseUrl);
-    // Mistral's public API does not expose subscription quota. /models is a
-    // stable authenticated connectivity check; /me returns 404 on current API.
     await fetchJson({
       protocol, hostname, port,
       path: `${pathname}/models`,
       headers: { Authorization: `Bearer ${apiKey}` },
     });
-    return informational(
+    return noQuotaSource(
       "mistral",
       "Mistral account",
-      "Mistral does not expose remaining Vibe/subscription budget via its public API",
+      "Mistral usage needs MISTRAL_ADMIN_API_KEY; model API key can only prove reachability",
+      attachObserved({ reachable: true, admin_api_required: true }, observed),
     );
   } catch (error) {
-    return unavailable("mistral", "Mistral", error.message);
+    return unavailable("mistral", "Mistral", error.message, attachObserved({}, observed));
   }
 }
 
-// ---------------------------------------------------------------------------
-// OpenCode Go / Zen — https://opencode.ai
-// Subscription quota lives under /zen/usage and /zen/v1/me (token/credit caps).
-// Shapes vary; we cast defensively and degrade gracefully.
-// ---------------------------------------------------------------------------
-async function probeOpenCodeFamily(providerId, label, apiKey, baseUrl = "https://opencode.ai") {
-  if (!apiKey) return unavailable(providerId, label, "no API key configured");
-  const headers = { Authorization: `Bearer ${apiKey}` };
-  const { protocol, hostname, port, pathname } = baseUrlParts(baseUrl);
-  // Try usage first (best source), then identity. Combine failures safely.
-  let usageData = null;
-  try {
-    const res = await fetchJson({ protocol, hostname, port, path: `${pathname}/zen/usage`, headers });
-    usageData = res?.body ?? res?.data;
-  } catch {
-    usageData = null;
-  }
-  if (!usageData) {
-    try {
-      const res = await fetchJson({ protocol, hostname, port, path: `${pathname}/zen/v1/me`, headers });
-      usageData = { me: res?.body };
-    } catch {
-      return informational(providerId, label, "OpenCode does not expose quota through the configured API endpoint");
-    }
-  }
-  const u = usageData?.data ?? usageData?.usage ?? usageData?.me ?? usageData;
-  const used = numberOrNull(u?.used_tokens ?? u?.tokens_used ?? u?.usage);
-  const limit = numberOrNull(u?.quota ?? u?.token_limit ?? u?.limit ?? u?.resets?.limit);
-  return ok(providerId, {
-    account: (u?.email || u?.name || label),
-    used,
-    limit,
-    unit: "unknown",
-  }, { reachable: true, resets: u?.resets || u?.reset_at || null });
+// OpenCode Go / Zen — no documented usage API. Go has documented hard caps.
+async function probeOpenCodeFamily(providerId, label, apiKey, baseUrl = "https://opencode.ai", options = {}) {
+  if (!apiKey) return unavailable(providerId, label, "no API key configured", attachObserved({}, options.observedUsage));
+  const limits = providerId === "opencode-go"
+    ? { five_hour_usd: 12, weekly_usd: 30, monthly_usd: 60 }
+    : undefined;
+  return noQuotaSource(
+    providerId,
+    label,
+    providerId === "opencode-go"
+      ? "OpenCode Go usage is console-only; documented caps are static and gateway-observed spend is tracked separately"
+      : "OpenCode Zen balance/usage is console-only; gateway-observed spend is tracked separately",
+    attachObserved({ ...(limits ? { documented_limits: limits } : {}) }, options.observedUsage),
+  );
 }
 
-function numberOrNull(value) {
-  if (value == null || value === "") return null;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
+export function probeOpenCodeGo(apiKey, baseUrl = "https://opencode.ai", options = {}) {
+  return probeOpenCodeFamily("opencode-go", "OpenCode Go", apiKey, baseUrl, options);
 }
 
-export function probeOpenCodeGo(apiKey, baseUrl = "https://opencode.ai") {
-  return probeOpenCodeFamily("opencode-go", "OpenCode Go", apiKey, baseUrl);
+export function probeOpenCodeZen(apiKey, baseUrl = "https://opencode.ai", options = {}) {
+  return probeOpenCodeFamily("opencode-zen", "OpenCode Zen", apiKey, baseUrl, options);
 }
 
-export function probeOpenCodeZen(apiKey, baseUrl = "https://opencode.ai") {
-  return probeOpenCodeFamily("opencode-zen", "OpenCode Zen", apiKey, baseUrl);
-}
-
-// ---------------------------------------------------------------------------
-// MiniMax (routed through the Tokligence adapter) — account balance endpoints
-// differ by deployment region; we probe the documented account endpoint but
-// never fail the dashboard if the shape is unexpected.
-// ---------------------------------------------------------------------------
-export async function probeMiniMax(apiKey, baseUrl = "https://api.minimax.io/v1") {
+// MiniMax — Token Plan remains is the authoritative subscription signal.
+export async function probeMiniMax(apiKey, baseUrl = "https://www.minimax.io", options = {}) {
+  const observed = options.observedUsage;
   if (!apiKey) {
-    return informational(
+    return noQuotaSource(
       "tokligence",
       "Embedded Tokligence gateway",
-      "Inner gateway quota is managed by its configured upstream credentials; no MiniMax API key is configured for dashboard balance probing",
+      "Inner gateway quota is managed by its configured upstream credentials; no MiniMax key is configured for dashboard token-plan probing",
+      attachObserved({}, observed),
     );
   }
   try {
     const { protocol, hostname, port, pathname } = baseUrlParts(baseUrl);
+    const base = pathname === "/v1" ? pathname : `${pathname}/v1`;
     const data = await fetchJson({
       protocol, hostname, port,
-      path: `${pathname}/account/balance`,
+      path: `${base}/token_plan/remains`,
       headers: { Authorization: `Bearer ${apiKey}` },
     });
-    const payload = data?.body ?? data;
-    const balance = payload?.data?.balance ?? payload?.balance;
-    const walletCurrency = payload?.data?.currency ?? payload?.wallet_currency ?? "USD";
-    const currency = ["USD", "EUR", "CNY", "GBP"].includes(walletCurrency) ? walletCurrency : "unknown";
-    if (Number.isFinite(balance)) {
+    const payload = data?.body?.data ?? data?.body ?? {};
+    const remaining = firstNumber(
+      payload.remaining_tokens,
+      payload.remaining,
+      payload.remains,
+      payload.current_interval_usage_count,
+    );
+    const total = firstNumber(payload.total, payload.limit, payload.token_limit, payload.current_interval_total_count);
+    if (remaining != null || total != null) {
       return ok("tokligence", {
-        account: "MiniMax account",
+        account: "MiniMax Token Plan",
         used: null,
-        limit: null,
+        limit: total,
         limitKind: "balance",
-        limitLabel: "balance only",
-        unit: currency === "unknown" ? "credits" : currency,
-        ...(currency !== "unknown" ? { currency } : {}),
-      }, { balance_remaining: balance, reachable: true });
+        limitLabel: "remaining tokens",
+        unit: "tokens",
+      }, attachObserved({
+        remaining_tokens: remaining,
+        interval: payload.interval || payload.current_interval || null,
+      }, observed));
     }
     return ok("tokligence", {
-      account: "MiniMax account",
+      account: "MiniMax Token Plan",
       used: null,
       limit: null,
       limitKind: "unknown",
       limitLabel: "metering unknown",
-      unit: "unknown",
-    }, { reachable: true });
+      unit: "tokens",
+    }, attachObserved({ reachable: true }, observed));
   } catch (error) {
-    return unavailable("tokligence", "MiniMax", error.message);
+    return unavailable("tokligence", "MiniMax", error.message, attachObserved({}, observed));
   }
 }
 
-// ---------------------------------------------------------------------------
-// Modal adapter — Modal bills by active apps/GPU usage; there is no simple
-// per-key balance API. Show that metering is external instead of unmetered.
-// ---------------------------------------------------------------------------
-export async function probeModal(apiKey, baseUrl = "https://api.us-west-2.modal.direct") {
-  if (!apiKey) return unavailable("modal", "Modal", "no API key configured");
-  return ok("modal", {
-    account: "Modal (by usage)",
-    used: null,
-    limit: null,
-    limitKind: "external",
-    limitLabel: "metered by Modal",
-    unit: "unknown",
-  }, { reachable: true, note: "Modal bills per second of compute; no balance endpoint" });
+export async function probeModal(apiKey, baseUrl = "https://api.us-west-2.modal.direct", options = {}) {
+  if (!apiKey) return unavailable("modal", "Modal", "no API key configured", attachObserved({}, options.observedUsage));
+  return noQuotaSource(
+    "modal",
+    "Modal (external billing)",
+    "Modal bills at the account/app level; gateway-observed usage is tracked separately",
+    attachObserved({}, options.observedUsage),
+  );
 }
 
-// ---------------------------------------------------------------------------
-// codex-oauth — credential pool; no per-account quota probe through the proxy.
-// ---------------------------------------------------------------------------
-export function probeCodexOauth() {
-  return informational(
+export function probeCodexOauth(provider, context = {}) {
+  return noQuotaSource(
     "codex-oauth",
     "Codex OAuth credential pool",
-    "Quota is managed by the embedded CLIProxy credential pool; no separate gateway quota endpoint",
+    "Quota is managed by the embedded CLIProxy credential pool; gateway-observed usage is tracked separately",
+    attachObserved({}, context.observedUsage),
   );
 }
 
-export function probeClineOauth() {
-  return informational(
-    "cline-oauth",
-    "Cline OAuth account",
-    "Cline free-model limits are enforced by Cline upstream per model/account; no aggregate quota endpoint",
-  );
+export async function probeClineOauth(provider, context = {}) {
+  const observed = context.observedUsage;
+  const adapter = context.clineOAuth;
+  if (!adapter?.accountUsage) {
+    return noQuotaSource(
+      "cline-oauth",
+      "Cline OAuth account",
+      "Cline account balance needs an authenticated OAuth adapter; free-model daily limits are still enforced per model upstream",
+      attachObserved({}, observed),
+    );
+  }
+  try {
+    const data = await adapter.accountUsage();
+    const user = data.user || {};
+    const balance = data.balance || {};
+    const transactions = Array.isArray(data.usageTransactions) ? data.usageTransactions : [];
+    const balanceCents = firstNumber(balance.balance, balance.currentBalance, balance.current_balance_cents);
+    return ok("cline-oauth", {
+      account: user.email || user.name || user.id || "Cline OAuth account",
+      used: null,
+      limit: null,
+      limitKind: "balance",
+      limitLabel: "balance only",
+      unit: "credits",
+    }, attachObserved({
+      user_id: user.id || user.uid || null,
+      balance_remaining_cents: balanceCents,
+      transaction_count: transactions.length,
+    }, observed));
+  } catch (error) {
+    return unavailable("cline-oauth", "Cline OAuth account", error.message, attachObserved({}, observed));
+  }
 }
 
-export function probeCopilotAuto() {
-  return informational(
+export function probeCopilotAuto(provider, context = {}) {
+  return noQuotaSource(
     "copilot-auto",
     "Copilot subscription",
-    "GitHub Copilot subscription quota is managed upstream; no quota endpoint is exposed to the gateway",
+    "Copilot Individual has no supported real-time quota API; gateway-observed usage and exhaustion errors are tracked separately",
+    attachObserved({}, context.observedUsage),
   );
 }
 
-export function probeGoogleAiStudio() {
-  return informational(
+export function probeGoogleAiStudio(provider, context = {}) {
+  return noQuotaSource(
     "google-ai-studio",
     "Google AI Studio",
-    "Google AI Studio usage is managed upstream; no quota probe is configured",
+    "Google AI Studio API-key quota is managed upstream; authoritative project metrics need Google Cloud auth, gateway-observed usage is tracked separately",
+    attachObserved({}, context.observedUsage),
   );
 }
 
-export function probeNvidia() {
-  return informational(
+export function probeNvidia(provider, context = {}) {
+  return noQuotaSource(
     "nvidia",
     "NVIDIA NIM",
-    "NVIDIA NIM free-tier quota is managed upstream; no quota probe is configured",
+    "NVIDIA NIM trial/free-tier quota is managed upstream; gateway-observed usage and 429s are tracked separately",
+    attachObserved({}, context.observedUsage),
   );
 }
 
-export function probeNous() {
-  return informational(
+export function probeNous(provider, context = {}) {
+  return noQuotaSource(
     "nous",
     "Nous Research",
-    "Nous free-tier quota is managed upstream; no quota probe is configured",
+    "Nous portal usage has no public balance API; gateway-observed usage is tracked separately",
+    attachObserved({}, context.observedUsage),
   );
 }
 
-// ---------------------------------------------------------------------------
-// Dispatch: probe every enabled provider, in parallel, without aborting others.
-// `providerCtx` maps a provider id to the probe arguments it needs.
-// ---------------------------------------------------------------------------
+function observedFor(context, id) {
+  return context.observedUsageByProvider?.[id] || context.observedUsage?.[id] || null;
+}
+
 export async function probeProviderQuota(provider, context = {}) {
   const id = provider?.id;
+  const withObserved = { ...context, observedUsage: observedFor(context, id) };
   switch (id) {
     case "openrouter":
-      return probeOpenRouter(context.openrouterKey, context.openrouterBaseUrl);
+      return probeOpenRouter(context.openrouterKey, context.openrouterBaseUrl, withObserved);
     case "mistral":
-      return probeMistral(context.mistralKey, context.mistralBaseUrl);
+      return probeMistral(context.mistralKey, context.mistralBaseUrl, {
+        ...withObserved,
+        adminApiKey: context.mistralAdminApiKey,
+      });
     case "opencode-go":
-      return probeOpenCodeGo(context.opencodeKey, context.opencodeBaseUrl);
+      return probeOpenCodeGo(context.opencodeKey, context.opencodeBaseUrl, withObserved);
     case "opencode-zen":
-      return probeOpenCodeZen(context.opencodeKey, context.opencodeBaseUrl);
+      return probeOpenCodeZen(context.opencodeKey, context.opencodeBaseUrl, withObserved);
     case "tokligence":
-      return probeMiniMax(context.minimaxKey, context.minimaxBaseUrl);
+      return probeMiniMax(context.minimaxKey, context.minimaxBaseUrl, withObserved);
     case "modal":
-      return probeModal(context.modalKey, context.modalBaseUrl);
+      return probeModal(context.modalKey, context.modalBaseUrl, withObserved);
     case "codex-oauth":
-      return probeCodexOauth(provider);
+      return probeCodexOauth(provider, withObserved);
     case "cline-oauth":
-      return probeClineOauth(provider);
+      return probeClineOauth(provider, { ...withObserved, clineOAuth: context.clineOAuth });
     case "copilot-auto":
-      return probeCopilotAuto(provider);
+      return probeCopilotAuto(provider, withObserved);
     case "google-ai-studio":
-      return probeGoogleAiStudio(provider);
+      return probeGoogleAiStudio(provider, withObserved);
     case "nvidia":
-      return probeNvidia(provider);
+      return probeNvidia(provider, withObserved);
     case "nous":
-      return probeNous(provider);
+      return probeNous(provider, withObserved);
     default:
-      return informational(id, id, "No quota probe is configured for this provider");
+      return noQuotaSource(id, id, "No quota probe is configured for this provider", attachObserved({}, withObserved.observedUsage));
   }
 }
 

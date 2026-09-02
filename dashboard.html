@@ -255,8 +255,7 @@ function limitLabel(q) {
   if (q.limit != null) return fmt(q.limit, q.unit);
   if (q.limitLabel) return q.limitLabel;
   if (q.detail && q.detail.balance_remaining != null) return "balance tracked";
-  if (q.detail && q.detail.note) return "managed upstream";
-  return q.available ? "not reported" : "—";
+  return q.available ? "not reported" : "not reported";
 }
 
 function quotaCard(q) {
@@ -290,7 +289,7 @@ function quotaCard(q) {
     '<div class="sub">' + esc(q.account || "") + "</div>" +
     '<div class="metric">' + used + " <small>/ " + esc(limit) + "</small></div>" +
     bar +
-    (q.available ? "" : '<div class="errnote">' + esc(q.error || "unavailable") + "</div>") +
+    (q.error ? '<div class="errnote">' + esc(q.error) + "</div>" : "") +
     detailHtml;
   return el;
 }

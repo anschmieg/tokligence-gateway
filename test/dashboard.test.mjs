@@ -68,11 +68,13 @@ test("quota probes return normalized shapes and fail safe", async () => {
 
   const minimax = await probeProviderQuota({ id: "tokligence" }, {});
   assert.equal(minimax.provider, "tokligence");
-  assert.equal(minimax.available, true);
+  assert.equal(minimax.available, false);
+  assert.equal(minimax.source, "unreported");
   assert.equal(minimax.limit, null);
-  assert.equal(minimax.limitKind, "external");
-  assert.notEqual(minimax.limitLabel, "unmetered");
-  assert.match(minimax.detail.note, /dashboard balance probing/);
+  assert.equal(minimax.limitKind, "unreported");
+  assert.equal(minimax.limitLabel, "not reported");
+  assert.equal(minimax.error, undefined);
+  assert.match(minimax.detail.note, /no MiniMax key is configured|managed by its configured upstream/);
 });
 
 test("OpenRouter free tier remains explicitly unmetered", async (t) => {
@@ -107,29 +109,32 @@ test("probeAllProviderQuota never rejects and covers enabled providers", async (
 
 
 test("quota probes show informational cards for providers without quota endpoints", async () => {
-  const cline = probeClineOauth();
+  const cline = await probeClineOauth();
   assert.equal(cline.provider, "cline-oauth");
-  assert.equal(cline.available, true);
+  assert.equal(cline.available, false);
+  assert.equal(cline.source, "unreported");
   assert.equal(cline.limit, null);
-  assert.equal(cline.limitKind, "external");
-  assert.equal(cline.limitLabel, "metered upstream");
-  assert.match(cline.detail.note, /no aggregate quota endpoint/);
+  assert.equal(cline.limitKind, "unreported");
+  assert.equal(cline.limitLabel, "not reported");
+  assert.match(cline.detail.note, /no aggregate quota endpoint|authenticated OAuth adapter/);
   assert.equal(cline.error, undefined);
 
   const codex = probeCodexOauth();
   assert.equal(codex.provider, "codex-oauth");
-  assert.equal(codex.available, true);
+  assert.equal(codex.available, false);
+  assert.equal(codex.source, "unreported");
   assert.equal(codex.limit, null);
-  assert.equal(codex.limitKind, "external");
-  assert.equal(codex.limitLabel, "metered upstream");
+  assert.equal(codex.limitKind, "unreported");
+  assert.equal(codex.limitLabel, "not reported");
   assert.match(codex.detail.note, /CLIProxy credential pool/);
   assert.equal(codex.error, undefined);
 
   const generic = await probeProviderQuota({ id: "nvidia" }, {});
-  assert.equal(generic.available, true);
+  assert.equal(generic.available, false);
+  assert.equal(generic.source, "unreported");
   assert.equal(generic.limit, null);
-  assert.equal(generic.limitKind, "external");
-  assert.equal(generic.limitLabel, "metered upstream");
+  assert.equal(generic.limitKind, "unreported");
+  assert.equal(generic.limitLabel, "not reported");
   assert.match(generic.detail.note, /managed upstream/);
   assert.equal(generic.error, undefined);
 });
@@ -143,9 +148,11 @@ test("OpenCode unavailable usage endpoints render as informational, not errors",
   await new Promise((resolve) => server.once("listening", resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const result = await probeOpenCodeGo("key", `http://127.0.0.1:${server.address().port}`);
-  assert.equal(result.available, true);
+  assert.equal(result.available, false);
+  assert.equal(result.source, "unreported");
   assert.equal(result.error, undefined);
-  assert.match(result.detail.note, /does not expose quota/);
+  assert.equal(result.limitLabel, "not reported");
+  assert.match(result.detail.note, /does not expose quota|console-only|gateway-observed spend/);
 });
 
 test("bakeToRoutes persists overrides into gateway.routes.yaml", () => {
