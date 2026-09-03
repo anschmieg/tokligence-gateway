@@ -18,6 +18,7 @@ test("agent profiles preserve deterministic candidate order", () => {
     { provider: "cline-oauth", model: "cline/glm-5.3-flash" },
     { provider: "opencode-zen", model: "opencode-zen/kimi-k2.6-free" },
     { provider: "nvidia", model: "nvidia/nemotron-3-super-120b-a12b" },
+    { provider: "groq", model: "groq/llama-3.3-70b-versatile" },
     { provider: "mistral", model: "mistral-medium-3-5" },
     { provider: "google-ai-studio", model: "gemini-3-flash-latest" },
     { provider: "copilot-auto", model: "copilot-auto" },

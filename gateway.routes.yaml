@@ -136,6 +136,25 @@ providers:
       capabilities: [coding, reasoning, tool_calling]
       quota_type: free_tier
 
+  - id: groq
+    adapter: middleware
+    billing_class: free
+    base_url: https://api.groq.com/openai/v1
+    api_key_env: GROQ_API_KEY
+    base_url_env: GROQ_API_BASE
+    protocols: [chat_completions]
+    discover_models: true
+    models:
+      - id: llama-3.3-70b-versatile
+        context_window: 131072
+      - id: openai/gpt-oss-120b
+        context_window: 131072
+    metadata:
+      cost_class: free
+      context_window: 131072
+      capabilities: [coding, reasoning, tool_calling]
+      quota_type: free_tier
+
   - id: nous
     adapter: middleware
     billing_class: free
@@ -237,6 +256,8 @@ routes:
     prefixes: [gemini-, google/]
   - provider: nvidia
     prefixes: [nvidia/, nemotron-, poolside/]
+  - provider: groq
+    prefixes: [groq/]
   - provider: nous
     prefixes: [nousresearch/, laguna-, stepfun/]
   - provider: tokligence
@@ -257,6 +278,8 @@ profiles:
         model: opencode-zen/kimi-k2.6-free
       - provider: nvidia
         model: nvidia/nemotron-3-super-120b-a12b
+      - provider: groq
+        model: groq/llama-3.3-70b-versatile
       - provider: mistral
         model: mistral-medium-3-5
       - provider: google-ai-studio
@@ -277,6 +300,8 @@ profiles:
         model: opencode-zen/kimi-k2.6-free
       - provider: nvidia
         model: nvidia/nemotron-3-super-120b-a12b
+      - provider: groq
+        model: groq/llama-3.3-70b-versatile
       - provider: mistral
         model: mistral-medium-3-5
       - provider: google-ai-studio
