@@ -136,6 +136,42 @@ providers:
       capabilities: [coding, reasoning, tool_calling]
       quota_type: free_tier
 
+  - id: cerebras
+    adapter: middleware
+    billing_class: free
+    base_url: https://api.cerebras.ai/v1
+    api_key_env: CEREBRAS_API_KEY
+    base_url_env: CEREBRAS_API_BASE
+    protocols: [chat_completions]
+    discover_models: true
+    models:
+      - id: gpt-oss-120b
+        context_window: 65536
+      - id: gemma-4-31b
+        context_window: 65536
+    metadata:
+      cost_class: free
+      context_window: 65536
+      capabilities: [coding, reasoning, tool_calling]
+      quota_type: free_tier
+
+  - id: together
+    adapter: middleware
+    billing_class: free
+    base_url: https://api.together.xyz/v1
+    api_key_env: TOGETHER_API_KEY
+    base_url_env: TOGETHER_API_BASE
+    protocols: [chat_completions]
+    discover_models: true
+    models:
+      - id: Prism-ML/Ternary-Bonsai-27B
+        context_window: 262144
+    metadata:
+      cost_class: free
+      context_window: 262144
+      capabilities: [coding, reasoning, tool_calling, vision]
+      quota_type: free_tier
+
   - id: groq
     adapter: middleware
     billing_class: free
@@ -256,6 +292,10 @@ routes:
     prefixes: [gemini-, google/]
   - provider: nvidia
     prefixes: [nvidia/, nemotron-, poolside/]
+  - provider: cerebras
+    prefixes: [cerebras/]
+  - provider: together
+    prefixes: [together/]
   - provider: groq
     prefixes: [groq/]
   - provider: nous
@@ -278,6 +318,10 @@ profiles:
         model: opencode-zen/kimi-k2.6-free
       - provider: nvidia
         model: nvidia/nemotron-3-super-120b-a12b
+      - provider: cerebras
+        model: cerebras/gpt-oss-120b
+      - provider: together
+        model: together/Prism-ML/Ternary-Bonsai-27B
       - provider: groq
         model: groq/llama-3.3-70b-versatile
       - provider: mistral
@@ -290,7 +334,7 @@ profiles:
         model: gpt-5.6-terra
       - provider: openrouter
         model: deepseek/deepseek-v4-flash-0731
-    max_attempts: 8
+    max_attempts: 10
 
   agentic-worker:
     candidates:
@@ -300,6 +344,8 @@ profiles:
         model: opencode-zen/kimi-k2.6-free
       - provider: nvidia
         model: nvidia/nemotron-3-super-120b-a12b
+      - provider: together
+        model: together/Prism-ML/Ternary-Bonsai-27B
       - provider: groq
         model: groq/llama-3.3-70b-versatile
       - provider: mistral
@@ -312,7 +358,7 @@ profiles:
         model: gpt-5.6-terra
       - provider: openrouter
         model: deepseek/deepseek-v4-flash-0731
-    max_attempts: 8
+    max_attempts: 10
 
 aliases:
   # Tiered Capability Profiles (Waterfall Failover)
