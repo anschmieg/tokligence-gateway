@@ -37,7 +37,7 @@ function firstStreamChunk(response, signal) {
   });
 }
 
-export async function executeRoutePlan({ plan, req, res, path, body, env = process.env, runtimeState = {}, adapters = {} }) {
+export async function executeRoutePlan({ plan, req, res, path, body, env = process.env, runtimeState = {}, adapters = {}, affinityKey = null }) {
   const requestId = randomUUID();
   const aborter = new AbortController();
   const timeout = setTimeout(() => aborter.abort(new Error("upstream deadline exceeded")), Math.max(plan.deadline - Date.now(), 1));
@@ -69,6 +69,13 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
           res.writeHead(status, headers);
         }
         response.pipe(res);
+        if (affinityKey && plan.profile && runtimeState.affinity) {
+          runtimeState.affinity.set(`${affinityKey}:${plan.profile}`, {
+            provider: candidate.provider.id,
+            model: candidate.upstreamModel,
+            updatedAt: Date.now(),
+          });
+        }
         return { committed: true, requestId, provider: candidate.provider.id, attempts: plan.candidates.indexOf(candidate) + 1 };
       } catch (error) {
         if (aborter.signal.aborted) break;

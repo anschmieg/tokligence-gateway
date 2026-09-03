@@ -55,3 +55,26 @@ test("route planner skips a candidate while its circuit is open", () => {
   assert.equal(plan.candidates[0].provider.id, "mistral");
   assert.equal(plan.candidates[0].upstreamModel, "mistral-medium-3-5");
 });
+
+
+test("route planner filters candidates by request capabilities", () => {
+  const plan = buildRoutePlan(config, {
+    model: "agent-default",
+    protocol: "chat_completions",
+    body: { messages: [{ role: "user", content: [{ type: "text", text: "look" }, { type: "image_url", image_url: { url: "https://example.test/a.png" } }] }] },
+  }, env, { cooldowns: new Map() });
+  assert.equal(plan.error, undefined);
+  assert.ok(plan.candidates.every(({ provider }) => provider.metadata.capabilities.includes("vision")));
+});
+
+test("route planner keeps a successful model sticky within a profile", () => {
+  const affinity = new Map([["principal:agent-default", { provider: "mistral", model: "mistral-medium-3-5", updatedAt: Date.now() }]]);
+  const plan = buildRoutePlan(config, {
+    model: "agent-default",
+    protocol: "chat_completions",
+    body: { messages: [{ role: "user", content: "hello" }] },
+    affinityKey: "principal",
+  }, env, { cooldowns: new Map(), affinity });
+  assert.equal(plan.candidates[0].provider.id, "mistral");
+  assert.equal(plan.candidates[0].upstreamModel, "mistral-medium-3-5");
+});

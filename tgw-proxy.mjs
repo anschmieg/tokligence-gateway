@@ -47,7 +47,7 @@ const TGW_PORT   = Number(process.env.TGW_PORT || 8081);
 const DEBUG = process.env.TGW_DEBUG === "1";
 const ROUTING_CONFIG_PATH = path.resolve(process.env.ROUTING_CONFIG_PATH || "gateway.routes.yaml");
 const ROUTING = loadRoutingConfig(ROUTING_CONFIG_PATH);
-const PROFILE_RUNTIME_STATE = { cooldowns: new Map() };
+const PROFILE_RUNTIME_STATE = { cooldowns: new Map(), affinity: new Map(), quotas: new Map() };
 
 function providerApiKey(id) {
   const provider = providerById(ROUTING, id);
@@ -438,6 +438,12 @@ function quotaContext() {
   };
 }
 
+async function refreshRoutingQuotas() {
+  const providers = ROUTING.providers.filter((provider) => providerEnabled(provider, process.env));
+  const results = await probeAllProviderQuota(providers, quotaContext());
+  for (const result of results) PROFILE_RUNTIME_STATE.quotas.set(result.provider, result);
+}
+
 function resolveModel(model) {
   return PREFERENCES.resolve(model, resolveConfiguredAlias);
 }
@@ -455,7 +461,7 @@ function handleProfileRequest(req, res, parsed, protocol) {
   const profile = profileByModel(ROUTING, parsed?.model);
   const plan = buildRoutePlan(
     ROUTING,
-    { model: parsed.model, protocol, body: parsed },
+    { model: parsed.model, protocol, body: parsed, affinityKey: routingAffinityKey(req) },
     process.env,
     PROFILE_RUNTIME_STATE,
   );
@@ -474,6 +480,7 @@ function handleProfileRequest(req, res, parsed, protocol) {
     env: process.env,
     runtimeState: PROFILE_RUNTIME_STATE,
     adapters: { [CLINE_OAUTH_PROVIDER?.id]: CLINE_OAUTH },
+    affinityKey: routingAffinityKey(req),
   }).catch((error) => {
     if (res.headersSent) {
       res.destroy(error);
@@ -736,6 +743,13 @@ function copilotCallerKey(req) {
   // Never retain or log the bearer secret. This binds a pending external-tool
   // continuation to an authenticated gateway principal for its short TTL.
   return createHash("sha256").update(String(req.headers["authorization"] || "")).digest("base64url");
+}
+
+function routingAffinityKey(req) {
+  // Bind affinity to the authenticated principal without retaining the token.
+  const principal = String(req.headers["authorization"] || "");
+  const session = String(req.headers["x-session-id"] || req.headers["x-task-id"] || "default");
+  return createHash("sha256").update(`${principal}\0${session}`).digest("base64url");
 }
 
 async function validateAdminAuth(req) {
@@ -2032,4 +2046,15 @@ server.listen(PROXY_PORT, "0.0.0.0", () => {
   console.log(CODEX.enabled
     ? `  codex-oauth -> private Codex backend`
     : `  codex-oauth -> disabled`);
+
+  // Quotas are advisory and refreshed out-of-band; a probe failure never blocks routing.
+  const quotaRefreshMs = Number(process.env.ROUTING_QUOTA_REFRESH_MS || 300000);
+  const initialQuotaTimer = setTimeout(() => {
+    refreshRoutingQuotas().catch((error) => console.warn(`[routing-quota] initial refresh failed: ${error.message}`));
+  }, Math.min(quotaRefreshMs, 1000));
+  initialQuotaTimer.unref?.();
+  const quotaTimer = setInterval(() => {
+    refreshRoutingQuotas().catch((error) => console.warn(`[routing-quota] refresh failed: ${error.message}`));
+  }, quotaRefreshMs);
+  quotaTimer.unref?.();
 });

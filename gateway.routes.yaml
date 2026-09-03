@@ -99,7 +99,7 @@ providers:
       - ministral-3b-latest
     metadata:
       cost_class: subscription
-      capabilities: [coding, reasoning, tool_calling]
+      capabilities: [coding, reasoning, tool_calling, vision]
       quota_type: subscription
 
   - id: google-ai-studio
