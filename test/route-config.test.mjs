@@ -34,6 +34,18 @@ test("Mistral provider is configured and routed", () => {
   assert.equal(providerEnabled(mistral, { MISTRAL_API_KEY: "x" }), true);
 });
 
+test("Cline OAuth provider is native, free-only, and fail-closed by prefix", () => {
+  const cline = config.providers.find((provider) => provider.id === "cline-oauth");
+  assert.equal(cline.adapter, "cline-oauth");
+  assert.equal(cline.credentials_path, "/data/cline-oauth/credentials.json");
+  assert.equal(cline.default_base_url, "https://api.cline.bot");
+  assert.equal(cline.default_workos_base_url, "https://api.workos.com");
+  assert.equal(cline.model_cache_ttl_ms, 300000);
+  assert.equal(cline.metadata.cost_class, "free");
+  assert.equal(matchConfiguredProvider(config, "cline/z-ai/glm-5.3-flash"), "cline-oauth");
+  assert.equal(providerEnabled(cline, {}), true);
+});
+
 test("capability profiles route to correct models and fallbacks", () => {
   const enabled = { CODEX_PROXY_ENABLED: "true", CODEX_PROXY_API_KEY: "internal" };
   assert.equal(resolveConfiguredAlias(config, "xhigh", enabled), "gpt-5.6-sol");
@@ -85,5 +97,9 @@ test("invalid policies fail during startup validation", () => {
   assert.throws(
     () => parseRoutingConfig("version: 1\naccess:\n  public_secret_env: PUBLIC\n  admin_secret_env: ADMIN\nproviders:\n  - id: x\n    adapter: invalid\n    default: true\n"),
     /not supported/,
+  );
+  assert.throws(
+    () => parseRoutingConfig("version: 1\naccess:\n  public_secret_env: PUBLIC\n  admin_secret_env: ADMIN\nproviders:\n  - id: x\n    adapter: cline-oauth\n    default: true\n    model_cache_ttl_ms: 300001\naliases: []\n"),
+    /model_cache_ttl_ms must be between 0 and 300000/,
   );
 });

@@ -9,8 +9,12 @@ import { RoutingPreferences } from "../preferences.mjs";
 import { loadRoutingConfig } from "../route-config.mjs";
 import {
   probeAllProviderQuota,
+  probeClineOauth,
+  probeCodexOauth,
   probeMistral,
+  probeOpenCodeGo,
   probeOpenRouter,
+  probeProviderQuota,
 } from "../quota.mjs";
 
 const config = parseRoutingConfig(fs.readFileSync("gateway.routes.yaml", "utf8"));
@@ -62,9 +66,33 @@ test("quota probes return normalized shapes and fail safe", async () => {
   assert.equal(or.available, false);
   assert.equal(or.source, "unavailable");
 
-  const mistral = await probeMistral("", "https://api.mistral.ai/v1");
-  assert.equal(mistral.available, false);
-  assert.equal(mistral.error, "no API key configured");
+  const minimax = await probeProviderQuota({ id: "tokligence" }, {});
+  assert.equal(minimax.provider, "tokligence");
+  assert.equal(minimax.available, false);
+  assert.equal(minimax.source, "unreported");
+  assert.equal(minimax.limit, null);
+  assert.equal(minimax.limitKind, "unreported");
+  assert.equal(minimax.limitLabel, "not reported");
+  assert.equal(minimax.error, undefined);
+  assert.match(minimax.detail.note, /no MiniMax key is configured|managed by its configured upstream/);
+});
+
+test("OpenRouter free tier remains explicitly unmetered", async (t) => {
+  const server = await import("node:http").then(({ default: http }) => http.createServer((req, res) => {
+    assert.equal(req.url, "/api/v1/key");
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ data: { usage: 1.25, limit: 0, is_free_tier: true } }));
+  }));
+  server.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.once("listening", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const result = await probeOpenRouter("key", `http://127.0.0.1:${server.address().port}/api/v1`);
+  assert.equal(result.available, true);
+  assert.equal(result.limit, null);
+  assert.equal(result.limitKind, "unmetered");
+  assert.equal(result.limitLabel, "unmetered");
+  assert.equal(result.detail.is_free_tier, true);
 });
 
 test("probeAllProviderQuota never rejects and covers enabled providers", async () => {
@@ -78,6 +106,54 @@ test("probeAllProviderQuota never rejects and covers enabled providers", async (
   assert.deepEqual(res.filter((q) => q.available), []);
 });
 
+
+
+test("quota probes show informational cards for providers without quota endpoints", async () => {
+  const cline = await probeClineOauth();
+  assert.equal(cline.provider, "cline-oauth");
+  assert.equal(cline.available, false);
+  assert.equal(cline.source, "unreported");
+  assert.equal(cline.limit, null);
+  assert.equal(cline.limitKind, "unreported");
+  assert.equal(cline.limitLabel, "not reported");
+  assert.match(cline.detail.note, /no aggregate quota endpoint|authenticated OAuth adapter/);
+  assert.equal(cline.error, undefined);
+
+  const codex = probeCodexOauth();
+  assert.equal(codex.provider, "codex-oauth");
+  assert.equal(codex.available, false);
+  assert.equal(codex.source, "unreported");
+  assert.equal(codex.limit, null);
+  assert.equal(codex.limitKind, "unreported");
+  assert.equal(codex.limitLabel, "not reported");
+  assert.match(codex.detail.note, /CLIProxy credential pool/);
+  assert.equal(codex.error, undefined);
+
+  const generic = await probeProviderQuota({ id: "nvidia" }, {});
+  assert.equal(generic.available, false);
+  assert.equal(generic.source, "unreported");
+  assert.equal(generic.limit, null);
+  assert.equal(generic.limitKind, "unreported");
+  assert.equal(generic.limitLabel, "not reported");
+  assert.match(generic.detail.note, /managed upstream/);
+  assert.equal(generic.error, undefined);
+});
+
+test("OpenCode unavailable usage endpoints render as informational, not errors", async (t) => {
+  const server = await import("node:http").then(({ default: http }) => http.createServer((req, res) => {
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "not found" }));
+  }));
+  server.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.once("listening", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const result = await probeOpenCodeGo("key", `http://127.0.0.1:${server.address().port}`);
+  assert.equal(result.available, false);
+  assert.equal(result.source, "unreported");
+  assert.equal(result.error, undefined);
+  assert.equal(result.limitLabel, "not reported");
+  assert.match(result.detail.note, /does not expose quota|console-only|gateway-observed spend/);
+});
 
 test("bakeToRoutes persists overrides into gateway.routes.yaml", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tgw-bake-"));
@@ -136,3 +212,17 @@ test("bakeToRoutes clears a provider/fallback when override sets them null", () 
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test("dashboard exposes Cline OAuth controls without token fields", () => {
+  const html = fs.readFileSync("dashboard.html", "utf8");
+  assert.match(html, /Cline OAuth/);
+  assert.match(html, /admin\/cline\/oauth\/start/);
+  assert.match(html, /admin\/cline\/oauth\/status/);
+  assert.match(html, /admin\/cline\/oauth\/logout/);
+  assert.match(html, /Connect Cline/);
+  assert.match(html, /Clear credentials/);
+  assert.match(html, /limitLabel\(q\)/);
+  assert.doesNotMatch(html, /q\.limit\s*==\s*null\s*\?\s*["']unmetered["']/);
+  assert.doesNotMatch(html, /accessToken|refreshToken|device_code/);
+});
+

@@ -62,6 +62,24 @@ providers:
       capabilities: [coding, reasoning, tool_calling]
       quota_type: subscription
 
+  - id: cline-oauth
+    adapter: cline-oauth
+    default_base_url: https://api.cline.bot
+    api_base_url_env: CLINE_API_BASE_URL
+    default_workos_base_url: https://api.workos.com
+    workos_base_url_env: CLINE_WORKOS_BASE_URL
+    credentials_path: /data/cline-oauth/credentials.json
+    credentials_path_env: CLINE_OAUTH_CREDENTIALS_PATH
+    request_timeout_ms: 30000
+    refresh_buffer_ms: 300000
+    model_cache_ttl_ms: 300000
+    discover_models: true
+    models: []
+    metadata:
+      cost_class: free
+      capabilities: [coding, reasoning, tool_calling]
+      quota_type: free_tier
+
   # === NEUE PROVIDER (Quota-basiert) ===
   - id: mistral
     adapter: middleware
@@ -81,7 +99,7 @@ providers:
       - ministral-3b-latest
     metadata:
       cost_class: subscription
-      capabilities: [coding, reasoning, tool_calling]
+      capabilities: [coding, reasoning, tool_calling, vision]
       quota_type: subscription
 
   - id: google-ai-studio
@@ -118,6 +136,61 @@ providers:
       capabilities: [coding, reasoning, tool_calling]
       quota_type: free_tier
 
+  - id: cerebras
+    adapter: middleware
+    billing_class: free
+    base_url: https://api.cerebras.ai/v1
+    api_key_env: CEREBRAS_API_KEY
+    base_url_env: CEREBRAS_API_BASE
+    protocols: [chat_completions]
+    discover_models: true
+    models:
+      - id: gpt-oss-120b
+        context_window: 65536
+      - id: gemma-4-31b
+        context_window: 65536
+    metadata:
+      cost_class: free
+      context_window: 65536
+      capabilities: [coding, reasoning, tool_calling]
+      quota_type: free_tier
+
+  - id: together
+    adapter: middleware
+    billing_class: free
+    base_url: https://api.together.xyz/v1
+    api_key_env: TOGETHER_API_KEY
+    base_url_env: TOGETHER_API_BASE
+    protocols: [chat_completions]
+    discover_models: true
+    models:
+      - id: Prism-ML/Ternary-Bonsai-27B
+        context_window: 262144
+    metadata:
+      cost_class: free
+      context_window: 262144
+      capabilities: [coding, reasoning, tool_calling, vision]
+      quota_type: free_tier
+
+  - id: groq
+    adapter: middleware
+    billing_class: free
+    base_url: https://api.groq.com/openai/v1
+    api_key_env: GROQ_API_KEY
+    base_url_env: GROQ_API_BASE
+    protocols: [chat_completions]
+    discover_models: true
+    models:
+      - id: llama-3.3-70b-versatile
+        context_window: 131072
+      - id: openai/gpt-oss-120b
+        context_window: 131072
+    metadata:
+      cost_class: free
+      context_window: 131072
+      capabilities: [coding, reasoning, tool_calling]
+      quota_type: free_tier
+
   - id: nous
     adapter: middleware
     billing_class: free
@@ -148,7 +221,7 @@ providers:
       - deepseek/deepseek-v4-flash
       - deepseek/deepseek-v4-pro
     catalog:
-      zero_price_only: false
+      zero_price_only: true
       paid_allowlist:
         - deepseek/deepseek-v4-flash-0731
         - deepseek/deepseek-v4-flash
@@ -201,8 +274,12 @@ providers:
       quota_type: free_tier
 
 routes:
+  - provider: cline-oauth
+    prefixes: [cline/]
   - provider: modal
     prefixes: [glm-5, zai-org/GLM-5]
+  - provider: copilot-auto
+    prefixes: [copilot/]
   - provider: openrouter
     prefixes: [openrouter/, or/, free, deepseek-v4, deepseek/]
   - provider: opencode-zen
@@ -215,6 +292,12 @@ routes:
     prefixes: [gemini-, google/]
   - provider: nvidia
     prefixes: [nvidia/, nemotron-, poolside/]
+  - provider: cerebras
+    prefixes: [cerebras/]
+  - provider: together
+    prefixes: [together/]
+  - provider: groq
+    prefixes: [groq/]
   - provider: nous
     prefixes: [nousresearch/, laguna-, stepfun/]
   - provider: tokligence
@@ -229,27 +312,53 @@ routes:
 profiles:
   agent-default:
     candidates:
-      - provider: openrouter
-        model: deepseek/deepseek-v4-flash
+      - provider: cline-oauth
+        model: cline/glm-5.3-flash
+      - provider: opencode-zen
+        model: opencode-zen/kimi-k2.6-free
+      - provider: nvidia
+        model: nvidia/nemotron-3-super-120b-a12b
+      - provider: cerebras
+        model: cerebras/gpt-oss-120b
+      - provider: together
+        model: together/Prism-ML/Ternary-Bonsai-27B
+      - provider: groq
+        model: groq/llama-3.3-70b-versatile
       - provider: mistral
         model: mistral-medium-3-5
-      - provider: openrouter
-        model: z-ai/glm-5.2
+      - provider: google-ai-studio
+        model: gemini-3-flash-latest
+      - provider: copilot-auto
+        model: copilot-auto
       - provider: codex-oauth
         model: gpt-5.6-terra
-    max_attempts: 4
+      - provider: openrouter
+        model: deepseek/deepseek-v4-flash-0731
+    max_attempts: 10
 
   agentic-worker:
     candidates:
+      - provider: cline-oauth
+        model: cline/deepseek
+      - provider: opencode-zen
+        model: opencode-zen/kimi-k2.6-free
+      - provider: nvidia
+        model: nvidia/nemotron-3-super-120b-a12b
+      - provider: together
+        model: together/Prism-ML/Ternary-Bonsai-27B
+      - provider: groq
+        model: groq/llama-3.3-70b-versatile
       - provider: mistral
         model: mistral-medium-3-5
-      - provider: openrouter
-        model: z-ai/glm-5.2
-      - provider: openrouter
-        model: deepseek/deepseek-v4-pro
+      - provider: google-ai-studio
+        model: gemini-3-flash-latest
+      - provider: copilot-auto
+        model: copilot-auto
       - provider: codex-oauth
         model: gpt-5.6-terra
-    max_attempts: 4
+      - provider: openrouter
+        model: deepseek/deepseek-v4-flash-0731
+    max_attempts: 10
 
 aliases:
   # Tiered Capability Profiles (Waterfall Failover)

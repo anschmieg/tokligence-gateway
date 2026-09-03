@@ -62,6 +62,11 @@
   .toast.error { border-color: var(--danger); }
   .empty { color: var(--muted); font-size: 13px; padding: 20px; text-align: center; }
   #auth-password { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 9px; padding: 8px 12px; font-size: 13px; width: 240px; }
+  .oauth-grid { display:grid; grid-template-columns: minmax(260px, 1fr) minmax(260px, 1.4fr); gap:14px; align-items:stretch; }
+  .oauth-code { font-size: 30px; letter-spacing: 2px; font-weight: 800; margin: 6px 0; }
+  .oauth-actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+  .oauth-actions a { text-decoration:none; }
+  @media (max-width: 760px) { .oauth-grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -92,6 +97,38 @@
         <button id="q-refresh" class="ghost">Refresh</button>
       </div>
       <div class="cards" id="quota-cards"></div>
+    </section>
+
+
+
+    <section>
+      <div class="toolbar">
+        <h2 style="margin:0;">Cline OAuth</h2>
+        <span class="sub">Connect Cline free models without running the Cline agent harness.</span>
+        <span class="spacer"></span>
+        <button id="cline-refresh" class="ghost">Refresh</button>
+      </div>
+      <div class="oauth-grid">
+        <div class="panel">
+          <div class="sub">Status</div>
+          <div class="metric" id="cline-status">Loading…</div>
+          <div class="sub" id="cline-detail">Checking stored credentials.</div>
+          <div class="oauth-actions">
+            <button id="cline-start" class="primary">Connect Cline</button>
+            <button id="cline-logout" class="danger ghost">Clear credentials</button>
+          </div>
+        </div>
+        <div class="panel" id="cline-login-panel" style="display:none;">
+          <div class="sub">Complete login in Cline / WorkOS</div>
+          <div class="oauth-code mono" id="cline-code">—</div>
+          <div class="sub" id="cline-expires">Waiting for authorization…</div>
+          <div class="oauth-actions">
+            <a id="cline-link" target="_blank" rel="noopener"><button type="button" class="primary">Open login</button></a>
+            <button id="cline-copy" class="ghost">Copy code</button>
+          </div>
+          <div class="detail" id="cline-url" style="margin-top:12px;"></div>
+        </div>
+      </div>
     </section>
 
     <section>
@@ -148,7 +185,10 @@ async function api(path, opts) {
   if (res.status === 401) { showAuth(); throw new Error("Unauthorized"); }
   if (!res.ok) {
     var msg = "Request failed";
-    try { var j = await res.json(); msg = j.error || msg; } catch(e) {}
+    try {
+      var j = await res.json();
+      msg = (j.error && j.error.message) || j.error || msg;
+    } catch(e) {}
     throw new Error(msg);
   }
   return res.json();
@@ -211,6 +251,13 @@ function fmt(n, unit) {
   return out;
 }
 
+function limitLabel(q) {
+  if (q.limit != null) return fmt(q.limit, q.unit);
+  if (q.limitLabel) return q.limitLabel;
+  if (q.detail && q.detail.balance_remaining != null) return "balance tracked";
+  return q.available ? "not reported" : "not reported";
+}
+
 function quotaCard(q) {
   var el = document.createElement("div");
   el.className = "card";
@@ -227,7 +274,7 @@ function quotaCard(q) {
     badge = '<span class="badge off">no quota source</span>';
   }
   var used = q.used == null ? "—" : fmt(q.used, q.unit);
-  var limit = q.limit == null ? "unmetered" : fmt(q.limit, q.unit);
+  var limit = limitLabel(q);
   var detailLines = [];
   if (q.detail && typeof q.detail === "object") {
     Object.keys(q.detail).forEach(function(k){
@@ -242,7 +289,7 @@ function quotaCard(q) {
     '<div class="sub">' + esc(q.account || "") + "</div>" +
     '<div class="metric">' + used + " <small>/ " + esc(limit) + "</small></div>" +
     bar +
-    (q.available ? "" : '<div class="errnote">' + esc(q.error || "unavailable") + "</div>") +
+    (q.error ? '<div class="errnote">' + esc(q.error) + "</div>" : "") +
     detailHtml;
   return el;
 }
@@ -354,6 +401,89 @@ async function loadPrefs() {
   } catch (e) { toast("Failed to load preferences: " + e.message, true); }
 }
 
+
+var clinePollTimer = null;
+
+function renderClineOAuth(state) {
+  state = state || { status: "unknown" };
+  var status = document.getElementById("cline-status");
+  var detail = document.getElementById("cline-detail");
+  var panel = document.getElementById("cline-login-panel");
+  var start = document.getElementById("cline-start");
+  var logout = document.getElementById("cline-logout");
+  var normalized = String(state.status || "unknown").replace(/_/g, " ");
+  status.textContent = normalized;
+  start.disabled = state.status === "pending";
+  logout.disabled = state.status !== "authenticated" && state.status !== "pending";
+  panel.style.display = state.status === "pending" ? "block" : "none";
+  if (state.status === "authenticated") {
+    detail.textContent = state.expires_at ? "Credential expires " + new Date(state.expires_at).toLocaleString() + "." : "Credentials are stored server-side.";
+  } else if (state.status === "pending") {
+    detail.textContent = "Waiting for browser authorization. Tokens remain server-side.";
+    document.getElementById("cline-code").textContent = state.user_code || "—";
+    document.getElementById("cline-expires").textContent = state.expires_at ? "Expires " + new Date(state.expires_at).toLocaleTimeString() : "Waiting for authorization…";
+    document.getElementById("cline-link").href = state.verification_url || "#";
+    document.getElementById("cline-url").textContent = state.verification_url || "";
+  } else if (state.status === "expired") {
+    detail.textContent = "Login expired. Start a new Cline login.";
+  } else if (state.status === "error") {
+    detail.textContent = "Login failed: " + (state.error || "unknown error");
+  } else if (state.status === "login_required") {
+    detail.textContent = "No Cline credential is stored.";
+  } else {
+    detail.textContent = "Cline OAuth status is unavailable.";
+  }
+  if (clinePollTimer && state.status !== "pending") {
+    clearInterval(clinePollTimer);
+    clinePollTimer = null;
+  }
+}
+
+async function loadClineOAuth() {
+  try {
+    var state = await api("/admin/cline/oauth/status");
+    renderClineOAuth(state);
+    if (state.status === "pending" && !clinePollTimer) {
+      clinePollTimer = setInterval(loadClineOAuth, 3000);
+    }
+  } catch (e) {
+    renderClineOAuth({ status: "error", error: e.message });
+  }
+}
+
+async function startClineOAuth() {
+  var btn = document.getElementById("cline-start");
+  btn.disabled = true;
+  try {
+    var state = await api("/admin/cline/oauth/start", { method: "POST" });
+    renderClineOAuth(state);
+    if (state.verification_url) window.open(state.verification_url, "_blank", "noopener");
+    if (!clinePollTimer) clinePollTimer = setInterval(loadClineOAuth, 3000);
+  } catch (e) {
+    toast("Cline login failed: " + e.message, true);
+  }
+  btn.disabled = false;
+}
+
+async function logoutClineOAuth() {
+  var btn = document.getElementById("cline-logout");
+  btn.disabled = true;
+  try {
+    var state = await api("/admin/cline/oauth/logout", { method: "POST" });
+    renderClineOAuth(state);
+    toast("Cline credentials cleared.");
+  } catch (e) {
+    toast("Clear failed: " + e.message, true);
+  }
+  btn.disabled = false;
+}
+
+function copyClineCode() {
+  var code = document.getElementById("cline-code").textContent;
+  if (!code || code === "—") return;
+  navigator.clipboard.writeText(code).then(function(){ toast("Cline code copied."); }, function(){ toast("Copy failed.", true); });
+}
+
 async function init() {
   var dot = document.getElementById("status-dot");
   var txt = document.getElementById("status-text");
@@ -366,9 +496,14 @@ async function init() {
   document.getElementById("pref-save").addEventListener("click", savePrefs);
   document.getElementById("pref-bake").addEventListener("click", persistPrefs);
   document.getElementById("pref-reset").addEventListener("click", resetPrefs);
+  document.getElementById("cline-refresh").addEventListener("click", loadClineOAuth);
+  document.getElementById("cline-start").addEventListener("click", startClineOAuth);
+  document.getElementById("cline-logout").addEventListener("click", logoutClineOAuth);
+  document.getElementById("cline-copy").addEventListener("click", copyClineCode);
   document.getElementById("auth-btn").addEventListener("click", unlock);
   authInput.addEventListener("keydown", function(e){ if (e.key === "Enter") unlock(); });
   loadQuota();
+  loadClineOAuth();
   loadPrefs();
 }
 

@@ -28,6 +28,7 @@ import {
   resolveConfiguredAlias,
 } from "./route-config.mjs";
 import { probeAllProviderQuota } from "./quota.mjs";
+import { createObservedUsageStore } from "./usage-observer.mjs";
 import { RoutingPreferences, sanitizedPreferences } from "./preferences.mjs";
 import { DASHBOARD_HTML } from "./dashboard.mjs";
 import { cloudflareAccessConfigured, isValidCloudflareAccessToken } from "./cloudflare-access.mjs";
@@ -35,6 +36,10 @@ import { modelAllowedByCatalog } from "./model-catalog.mjs";
 import { COPILOT_AUTO_MODEL, createCopilotAutoAdapter } from "./copilot-auto.mjs";
 import { buildRoutePlan } from "./routing-planner.mjs";
 import { executeRoutePlan } from "./request-executor.mjs";
+import {
+  ClineAdapterError,
+  ClineOAuthAdapter,
+} from "./cline-oauth.mjs";
 
 const PROXY_PORT = Number(process.env.PROXY_PORT || 8080);
 const TGW_HOST   = process.env.TGW_HOST || "127.0.0.1";
@@ -42,7 +47,7 @@ const TGW_PORT   = Number(process.env.TGW_PORT || 8081);
 const DEBUG = process.env.TGW_DEBUG === "1";
 const ROUTING_CONFIG_PATH = path.resolve(process.env.ROUTING_CONFIG_PATH || "gateway.routes.yaml");
 const ROUTING = loadRoutingConfig(ROUTING_CONFIG_PATH);
-const PROFILE_RUNTIME_STATE = { cooldowns: new Map() };
+const PROFILE_RUNTIME_STATE = { cooldowns: new Map(), affinity: new Map(), quotas: new Map() };
 
 function providerApiKey(id) {
   const provider = providerById(ROUTING, id);
@@ -82,6 +87,11 @@ function loadOAuthAdapterConfig() {
 }
 
 const CODEX = loadOAuthAdapterConfig();
+
+const CLINE_OAUTH_PROVIDER = ROUTING.providers.find(({ adapter }) => adapter === "cline-oauth") || null;
+const CLINE_OAUTH = CLINE_OAUTH_PROVIDER && providerEnabled(CLINE_OAUTH_PROVIDER)
+  ? new ClineOAuthAdapter({ provider: CLINE_OAUTH_PROVIDER, env: process.env })
+  : null;
 
 const COPILOT_AUTO_PROVIDER = providerById(ROUTING, "copilot-auto");
 const COPILOT_AUTO_ENABLED = Boolean(COPILOT_AUTO_PROVIDER && providerEnabled(COPILOT_AUTO_PROVIDER));
@@ -238,6 +248,22 @@ async function registerModelsFromEndpoint({ provider, hostname, port, path, head
   return registered;
 }
 
+async function registerClineFreeModels() {
+  const models = await CLINE_OAUTH.discoverFreeModels();
+  const registered = new Set();
+  for (const model of models) {
+    registerModel(model.id, CLINE_OAUTH_PROVIDER.id, {
+      ...model,
+      owned_by: CLINE_OAUTH_PROVIDER.id,
+      discovered: true,
+      discoveredBy: CLINE_OAUTH_PROVIDER.id,
+      supports_parallel_tool_calls: true,
+    });
+    registered.add(model.id.toLowerCase());
+  }
+  return registered;
+}
+
 function pruneStaleDiscovered(provider, keepIds) {
   // Keep the provider's endpoint-derived model list current: drop discovered
   // entries that no longer appear upstream. Explicitly configured models
@@ -245,7 +271,7 @@ function pruneStaleDiscovered(provider, keepIds) {
   // routing aliases keep resolving even when an upstream endpoint omits them.
   for (const [key, model] of MODEL_REGISTRY) {
     if (model.provider !== provider) continue;
-    if (model.source === "config") continue;
+    if (model.source === "config" && provider !== CLINE_OAUTH_PROVIDER?.id) continue;
     if (!keepIds.has(key)) {
       MODEL_REGISTRY.delete(key);
     }
@@ -313,6 +339,13 @@ async function refreshModelRegistry() {
       });
     }
 
+    if (CLINE_OAUTH) {
+      refreshes.push({
+        provider: CLINE_OAUTH_PROVIDER.id,
+        promise: registerClineFreeModels(),
+      });
+    }
+
     refreshes.push({
       provider: "tokligence",
       promise: registerModelsFromEndpoint({
@@ -360,35 +393,79 @@ const PREFERENCES = new RoutingPreferences(ROUTING, {
   routesPath: ROUTING_CONFIG_PATH,
   readonly: process.env.ROUTING_PREFERENCES_READONLY === "1",
 });
+const OBSERVED_USAGE = createObservedUsageStore();
+
+function topLevelOrUpstreamApiKey(id, upstream = "anthropic") {
+  const provider = providerById(ROUTING, id);
+  const envName = provider?.api_key_env || provider?.upstreams?.[upstream]?.api_key_env;
+  return envName ? process.env[envName] : null;
+}
+
+function topLevelOrUpstreamBaseUrl(id, upstream = "anthropic") {
+  return providerBaseUrl(id)?.toString()
+    || providerById(ROUTING, id)?.upstreams?.[upstream]?.default_base_url
+    || null;
+}
+
+function recordObservedUsage(provider, model, data) {
+  OBSERVED_USAGE.recordUsage(provider, model, data);
+}
+
+function recordModelObservedUsage(model, data) {
+  const provider = matchConfiguredProvider(ROUTING, model) || modelProvider(model);
+  if (provider) recordObservedUsage(provider, model, data);
+}
+
+function recordObservedEvent(provider, model, code) {
+  OBSERVED_USAGE.recordEvent(provider, model, code);
+}
 
 function quotaContext() {
   return {
     openrouterKey: providerApiKey("openrouter"),
     openrouterBaseUrl: providerBaseUrl("openrouter")?.toString() || "https://openrouter.ai/api/v1",
     mistralKey: providerApiKey("mistral"),
+    mistralAdminApiKey: process.env.MISTRAL_ADMIN_API_KEY,
     mistralBaseUrl: providerBaseUrl("mistral")?.toString() || "https://api.mistral.ai/v1",
     opencodeKey: providerApiKey("opencode-go"),
     opencodeBaseUrl: providerBaseUrl("opencode-go")?.toString() || "https://opencode.ai",
-    minimaxKey: providerApiKey("tokligence"),
-    minimaxBaseUrl: providerBaseUrl("tokligence")?.toString() || "https://api.minimax.io/v1",
+    minimaxKey: topLevelOrUpstreamApiKey("tokligence", "anthropic"),
+    minimaxBaseUrl: process.env.MINIMAX_TOKEN_PLAN_BASE_URL || "https://www.minimax.io",
     modalKey: providerApiKey("modal"),
     modalBaseUrl: providerBaseUrl("modal")?.toString() || "https://api.us-west-2.modal.direct",
+    clineOAuth: CLINE_OAUTH,
+    observedUsageByProvider: OBSERVED_USAGE.snapshotByProvider(),
   };
+}
+
+async function refreshRoutingQuotas() {
+  const providers = ROUTING.providers.filter((provider) => providerEnabled(provider, process.env));
+  const results = await probeAllProviderQuota(providers, quotaContext());
+  for (const result of results) PROFILE_RUNTIME_STATE.quotas.set(result.provider, result);
 }
 
 function resolveModel(model) {
   return PREFERENCES.resolve(model, resolveConfiguredAlias);
 }
 
+function sendClineError(res, error) {
+  const known = error instanceof ClineAdapterError;
+  const status = known ? error.status : 502;
+  const code = known ? error.code : "cline_upstream_error";
+  const message = known ? error.message : "Cline upstream request failed";
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ error: { code, message, type: "cline_oauth_error" } }));
+}
+
 function handleProfileRequest(req, res, parsed, protocol) {
   const profile = profileByModel(ROUTING, parsed?.model);
-  if (!profile) return false;
   const plan = buildRoutePlan(
     ROUTING,
-    { model: parsed.model, protocol, body: parsed },
+    { model: parsed.model, protocol, body: parsed, affinityKey: routingAffinityKey(req) },
     process.env,
     PROFILE_RUNTIME_STATE,
   );
+  if (!profile && !plan) return false;
   if (plan.error) {
     res.writeHead(plan.error.status, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: plan.error }));
@@ -402,6 +479,8 @@ function handleProfileRequest(req, res, parsed, protocol) {
     body: parsed,
     env: process.env,
     runtimeState: PROFILE_RUNTIME_STATE,
+    adapters: { [CLINE_OAUTH_PROVIDER?.id]: CLINE_OAUTH },
+    affinityKey: routingAffinityKey(req),
   }).catch((error) => {
     if (res.headersSent) {
       res.destroy(error);
@@ -666,6 +745,13 @@ function copilotCallerKey(req) {
   return createHash("sha256").update(String(req.headers["authorization"] || "")).digest("base64url");
 }
 
+function routingAffinityKey(req) {
+  // Bind affinity to the authenticated principal without retaining the token.
+  const principal = String(req.headers["authorization"] || "");
+  const session = String(req.headers["x-session-id"] || req.headers["x-task-id"] || "default");
+  return createHash("sha256").update(`${principal}\0${session}`).digest("base64url");
+}
+
 async function validateAdminAuth(req) {
   // 1) Admin bearer secret (TOKLIGENCE_ADMIN_SECRET) — legacy / direct-origin path.
   if (secretsEqual(extractBearerToken(req.headers["authorization"]), ADMIN_AUTH_SECRET)) {
@@ -768,6 +854,37 @@ function handleCodexRoute(req, res, parsed, model) {
     return true;
   }
   return false;
+}
+
+function recordUsageFromResponseChunks(provider, model, headers, chunks) {
+  const text = Buffer.concat(chunks).toString();
+  const contentType = String(headers?.["content-type"] || headers?.["Content-Type"] || "");
+  if (contentType.includes("text/event-stream") || text.includes("data:")) {
+    for (const line of text.split(/\r?\n/)) {
+      const match = line.match(/^data:\s*(.+)$/);
+      if (!match || match[1] === "[DONE]") continue;
+      try {
+        recordObservedUsage(provider, model, JSON.parse(match[1]));
+      } catch {}
+    }
+    return;
+  }
+  try {
+    recordObservedUsage(provider, model, JSON.parse(text));
+  } catch {}
+}
+
+function pipeAndRecordUsage(provider, model, upstream, res) {
+  const chunks = [];
+  upstream.on("data", (chunk) => {
+    if (chunks.reduce((sum, current) => sum + current.length, 0) < 1024 * 1024) chunks.push(chunk);
+    res.write(chunk);
+  });
+  upstream.once("end", () => {
+    recordUsageFromResponseChunks(provider, model, upstream.headers, chunks);
+    res.end();
+  });
+  upstream.once("error", () => res.end());
 }
 
 function providerSummary() {
@@ -1020,7 +1137,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname.startsWith("/admin/")) {
-    validateAdminAuth(req).then((isAdmin) => {
+    validateAdminAuth(req).then(async (isAdmin) => {
     if (!isAdmin) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Unauthorized" }));
@@ -1029,6 +1146,58 @@ const server = http.createServer((req, res) => {
     if (req.method === "GET" && url.pathname === "/admin/routes") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(publicRoutingConfig(ROUTING)));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/admin/cline/oauth/start") {
+      if (!CLINE_OAUTH) {
+        sendClineError(res, new ClineAdapterError("Cline OAuth is not configured", {
+          status: 503,
+          code: "cline_not_configured",
+        }));
+        return;
+      }
+      try {
+        const state = await CLINE_OAUTH.startOAuth();
+        res.writeHead(202, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(state));
+      } catch (error) {
+        sendClineError(res, error);
+      }
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/admin/cline/oauth/status") {
+      if (!CLINE_OAUTH) {
+        sendClineError(res, new ClineAdapterError("Cline OAuth is not configured", {
+          status: 503,
+          code: "cline_not_configured",
+        }));
+        return;
+      }
+      try {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(await CLINE_OAUTH.oauthStatus()));
+      } catch (error) {
+        sendClineError(res, error);
+      }
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/admin/cline/oauth/logout") {
+      if (!CLINE_OAUTH) {
+        sendClineError(res, new ClineAdapterError("Cline OAuth is not configured", {
+          status: 503,
+          code: "cline_not_configured",
+        }));
+        return;
+      }
+      try {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(await CLINE_OAUTH.logout()));
+      } catch (error) {
+        sendClineError(res, error);
+      }
       return;
     }
 
@@ -1332,6 +1501,7 @@ const server = http.createServer((req, res) => {
               model,
               parsed.stream === true,
             );
+            recordModelObservedUsage(model, data);
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
@@ -1342,6 +1512,7 @@ const server = http.createServer((req, res) => {
         callOpenCodeGoOpenAI(model, messages, parsed.max_tokens || 4096)
           .then((data) => {
             sendChatCompletionResult(res, data, model, parsed.stream === true);
+            recordModelObservedUsage(model, data);
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
@@ -1369,7 +1540,7 @@ const server = http.createServer((req, res) => {
 
         const upstream = https.request(options, (upRes) => {
           res.writeHead(upRes.statusCode, upRes.headers);
-          upRes.pipe(res);
+          pipeAndRecordUsage("opencode-go", model, upRes, res);
         });
 
         upstream.on("error", (err) => {
@@ -1398,7 +1569,7 @@ const server = http.createServer((req, res) => {
 
         const upstream = https.request(options, (upRes) => {
           res.writeHead(upRes.statusCode, upRes.headers);
-          upRes.pipe(res);
+          pipeAndRecordUsage("opencode-go", model, upRes, res);
         });
 
         upstream.on("error", (err) => {
@@ -1419,7 +1590,7 @@ const server = http.createServer((req, res) => {
           { host: TGW_HOST, port: TGW_PORT, path: "/v1/chat/completions", method: "POST", headers },
           (upRes) => {
             res.writeHead(upRes.statusCode, upRes.headers);
-            upRes.pipe(res);
+            pipeAndRecordUsage("opencode-go", model, upRes, res);
           }
         );
 
@@ -1440,7 +1611,7 @@ const server = http.createServer((req, res) => {
           { host: TGW_HOST, port: TGW_PORT, path: "/v1/chat/completions", method: "POST", headers },
           (upRes) => {
             res.writeHead(upRes.statusCode, upRes.headers);
-            upRes.pipe(res);
+            pipeAndRecordUsage("opencode-go", model, upRes, res);
           }
         );
         upstream.on("error", (err) => {
@@ -1472,6 +1643,8 @@ const server = http.createServer((req, res) => {
       const model = resolveModel(parsed.model);
       const messages = responsesPayloadToMessages(parsed);
 
+      if (handleProfileRequest(req, res, parsed, "responses")) return;
+
       if (handleCodexRoute(req, res, parsed, model)) return;
       if (DEBUG) {
         console.error(`responses request model=${model} stream=${parsed.stream === true} messages=${JSON.stringify(messages).slice(0, 1000)}`);
@@ -1488,6 +1661,7 @@ const server = http.createServer((req, res) => {
             let text = msg?.content || msg?.reasoning_content || "";
             
             sendResponsesResult(res, model, text, parsed.stream === true);
+            recordModelObservedUsage(model, data);
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
@@ -1509,6 +1683,7 @@ const server = http.createServer((req, res) => {
             let text = msg?.content || "";
             
             sendResponsesResult(res, model, text, parsed.stream === true);
+            recordModelObservedUsage(model, data);
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
@@ -1521,6 +1696,7 @@ const server = http.createServer((req, res) => {
             let text = msg?.content || "";
             
             sendResponsesResult(res, model, text, parsed.stream === true);
+            recordModelObservedUsage(model, data);
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
@@ -1533,6 +1709,7 @@ const server = http.createServer((req, res) => {
             let text = msg?.content || "";
             
             sendResponsesResult(res, model, text, parsed.stream === true);
+            recordModelObservedUsage(model, data);
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
@@ -1563,6 +1740,7 @@ const server = http.createServer((req, res) => {
                 const resp = JSON.parse(data);
                 const output = resp.content?.[0]?.text || resp.content?.[0]?.thinking || "";
                 sendResponsesResult(res, model, output, parsed.stream === true);
+                recordModelObservedUsage(model, resp);
               } catch {
                 res.writeHead(upRes.statusCode, upRes.headers);
                 res.end(data);
@@ -1600,6 +1778,7 @@ const server = http.createServer((req, res) => {
                 // Translate back to Responses API format
                 const output = resp.content?.[0]?.text || resp.content?.[0]?.thinking || "";
                 sendResponsesResult(res, model, output, parsed.stream === true);
+                recordModelObservedUsage(model, resp);
               } catch {
                 res.writeHead(upRes.statusCode, upRes.headers);
                 res.end(data);
@@ -1633,6 +1812,8 @@ const server = http.createServer((req, res) => {
       }
 
       const model = resolveModel(parsed.model);
+
+      if (handleProfileRequest(req, res, parsed, "messages")) return;
 
       if (handleCodexRoute(req, res, parsed, model)) return;
 
@@ -1683,6 +1864,7 @@ const server = http.createServer((req, res) => {
 
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify(response));
+            recordModelObservedUsage(model, data);
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
@@ -1693,6 +1875,7 @@ const server = http.createServer((req, res) => {
           .then((data) => {
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify(anthropicToMessage(data, model)));
+            recordModelObservedUsage(model, data);
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
@@ -1721,6 +1904,7 @@ const server = http.createServer((req, res) => {
 
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify(response));
+            recordModelObservedUsage(model, data);
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
@@ -1752,7 +1936,7 @@ const server = http.createServer((req, res) => {
 
         const upstream = https.request(options, (upRes) => {
           res.writeHead(upRes.statusCode, upRes.headers);
-          upRes.pipe(res);
+          pipeAndRecordUsage("opencode-go", model, upRes, res);
         });
 
         upstream.on("error", (err) => {
@@ -1768,6 +1952,7 @@ const server = http.createServer((req, res) => {
           .then((data) => {
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify(openAIToAnthropicMessage(data, model)));
+            recordModelObservedUsage(model, data);
           })
           .catch((err) => {
             res.writeHead(502, { "Content-Type": "application/json" });
@@ -1784,7 +1969,7 @@ const server = http.createServer((req, res) => {
           { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers },
           (upRes) => {
             res.writeHead(upRes.statusCode, upRes.headers);
-            upRes.pipe(res);
+            pipeAndRecordUsage("opencode-go", model, upRes, res);
           }
         );
 
@@ -1804,7 +1989,7 @@ const server = http.createServer((req, res) => {
           { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers },
           (upRes) => {
             res.writeHead(upRes.statusCode, upRes.headers);
-            upRes.pipe(res);
+            pipeAndRecordUsage("opencode-go", model, upRes, res);
           }
         );
 
@@ -1861,4 +2046,15 @@ server.listen(PROXY_PORT, "0.0.0.0", () => {
   console.log(CODEX.enabled
     ? `  codex-oauth -> private Codex backend`
     : `  codex-oauth -> disabled`);
+
+  // Quotas are advisory and refreshed out-of-band; a probe failure never blocks routing.
+  const quotaRefreshMs = Number(process.env.ROUTING_QUOTA_REFRESH_MS || 300000);
+  const initialQuotaTimer = setTimeout(() => {
+    refreshRoutingQuotas().catch((error) => console.warn(`[routing-quota] initial refresh failed: ${error.message}`));
+  }, Math.min(quotaRefreshMs, 1000));
+  initialQuotaTimer.unref?.();
+  const quotaTimer = setInterval(() => {
+    refreshRoutingQuotas().catch((error) => console.warn(`[routing-quota] refresh failed: ${error.message}`));
+  }, quotaRefreshMs);
+  quotaTimer.unref?.();
 });

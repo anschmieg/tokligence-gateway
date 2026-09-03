@@ -37,7 +37,7 @@ function firstStreamChunk(response, signal) {
   });
 }
 
-export async function executeRoutePlan({ plan, req, res, path, body, env = process.env, runtimeState = {} }) {
+export async function executeRoutePlan({ plan, req, res, path, body, env = process.env, runtimeState = {}, adapters = {}, affinityKey = null }) {
   const requestId = randomUUID();
   const aborter = new AbortController();
   const timeout = setTimeout(() => aborter.abort(new Error("upstream deadline exceeded")), Math.max(plan.deadline - Date.now(), 1));
@@ -51,7 +51,7 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
       if (aborter.signal.aborted) break;
       const candidateBody = Buffer.from(JSON.stringify({ ...body, model: candidate.upstreamModel }));
       try {
-        const { response } = await startAttempt({ candidate, req, path, body: candidateBody, env, signal: aborter.signal });
+        const { response } = await startAttempt({ candidate, req, path, body: candidateBody, env, signal: aborter.signal, adapters });
         const status = response.statusCode || 502;
         if (status < 200 || status >= 300) {
           lastStatus = status;
@@ -69,9 +69,21 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
           res.writeHead(status, headers);
         }
         response.pipe(res);
+        if (affinityKey && plan.profile && runtimeState.affinity) {
+          runtimeState.affinity.set(`${affinityKey}:${plan.profile}`, {
+            provider: candidate.provider.id,
+            model: candidate.upstreamModel,
+            updatedAt: Date.now(),
+          });
+        }
         return { committed: true, requestId, provider: candidate.provider.id, attempts: plan.candidates.indexOf(candidate) + 1 };
       } catch (error) {
         if (aborter.signal.aborted) break;
+        if (candidate.provider.adapter === "cline-oauth" && error?.status && error?.code) {
+          res.writeHead(error.status, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: { code: error.code, message: error.message, type: "cline_oauth_error" } }));
+          return { committed: false, requestId };
+        }
         lastStatus = 502;
         runtimeState.cooldowns?.set(`${candidate.provider.id}:${candidate.model?.id || candidate.upstreamModel}:${candidate.protocol}`, Date.now() + 10000);
       }
