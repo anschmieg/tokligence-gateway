@@ -223,6 +223,8 @@ routes:
     prefixes: [cline/]
   - provider: modal
     prefixes: [glm-5, zai-org/GLM-5]
+  - provider: copilot-auto
+    prefixes: [copilot/]
   - provider: openrouter
     prefixes: [openrouter/, or/, free, deepseek-v4, deepseek/]
   - provider: opencode-zen
@@ -259,11 +261,13 @@ profiles:
         model: mistral-medium-3-5
       - provider: google-ai-studio
         model: gemini-3-flash-latest
+      - provider: copilot-auto
+        model: copilot-auto
       - provider: codex-oauth
         model: gpt-5.6-terra
       - provider: openrouter
         model: deepseek/deepseek-v4-flash-0731
-    max_attempts: 7
+    max_attempts: 8
 
   agentic-worker:
     candidates:
@@ -277,11 +281,13 @@ profiles:
         model: mistral-medium-3-5
       - provider: google-ai-studio
         model: gemini-3-flash-latest
+      - provider: copilot-auto
+        model: copilot-auto
       - provider: codex-oauth
         model: gpt-5.6-terra
       - provider: openrouter
         model: deepseek/deepseek-v4-flash-0731
-    max_attempts: 7
+    max_attempts: 8
 
 aliases:
   # Tiered Capability Profiles (Waterfall Failover)

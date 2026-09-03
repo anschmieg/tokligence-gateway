@@ -20,6 +20,7 @@ test("agent profiles preserve deterministic candidate order", () => {
     { provider: "nvidia", model: "nvidia/nemotron-3-super-120b-a12b" },
     { provider: "mistral", model: "mistral-medium-3-5" },
     { provider: "google-ai-studio", model: "gemini-3-flash-latest" },
+    { provider: "copilot-auto", model: "copilot-auto" },
     { provider: "codex-oauth", model: "gpt-5.6-terra" },
     { provider: "openrouter", model: "deepseek/deepseek-v4-flash-0731" },
   ]);

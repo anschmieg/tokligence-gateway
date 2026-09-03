@@ -37,7 +37,7 @@ test("quota-tracker: calculateDynamicCost with undefined quota", () => {
 test("routing-profiles: primary profile exists", () => {
   assert.ok(ROUTING_PROFILES.primary);
   assert.equal(ROUTING_PROFILES.primary.name, "Primary (High-Quality)");
-  assert.equal(ROUTING_PROFILES.primary.providers.length, 8);
+  assert.equal(ROUTING_PROFILES.primary.providers.length, 9);
 });
 
 test("routing-profiles: auxiliary profiles exist", () => {
