@@ -313,7 +313,7 @@ profiles:
   agent-default:
     candidates:
       - provider: cline-oauth
-        model: cline/glm-5.3-flash
+        model: cline/z-ai/glm-5.3-flash
       - provider: opencode-zen
         model: opencode-zen/kimi-k2.6-free
       - provider: nvidia
