@@ -17,7 +17,8 @@ const config = parseRoutingConfig(fs.readFileSync("gateway.routes.yaml", "utf8")
 test("routing policy preserves current provider prefixes", () => {
   assert.equal(matchConfiguredProvider(config, "openrouter/free"), "openrouter");
   assert.equal(matchConfiguredProvider(config, "zen/model"), "opencode-zen");
-  assert.equal(matchConfiguredProvider(config, "oc/kimi-k2.6"), "opencode-go");
+  assert.equal(matchConfiguredProvider(config, "oc/kimi-k2.6"), "tokligence");
+  assert.equal(matchConfiguredProvider(config, "opencode-go/deepseek-v4-flash-free"), "tokligence");
   assert.equal(matchConfiguredProvider(config, "minimax-m2.7"), "tokligence");
   assert.equal(matchConfiguredProvider(config, "unknown-model"), "tokligence");
 });

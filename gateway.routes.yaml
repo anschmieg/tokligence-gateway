@@ -249,18 +249,6 @@ providers:
       capabilities: [coding, reasoning]
       quota_type: payg
 
-  - id: opencode-go
-    adapter: middleware
-    api_key_env: OPENCODE_API_KEY
-    default_base_url: https://opencode.ai
-    discover_models: false
-    models:
-      - deepseek-v4-flash-free
-    metadata:
-      cost_class: free
-      capabilities: [coding, reasoning]
-      quota_type: free_tier
-
   - id: opencode-zen
     adapter: middleware
     api_key_env: OPENCODE_API_KEY
@@ -284,8 +272,6 @@ routes:
     prefixes: [openrouter/, or/, free, deepseek-v4, deepseek/]
   - provider: opencode-zen
     prefixes: [opencode-zen/, zen/]
-  - provider: opencode-go
-    prefixes: [opencode-go/, oc/, kimi-k2, glm-5., mimo-v2, qwen3]
   - provider: mistral
     prefixes: [mistral/, mistral-]
   - provider: google-ai-studio
@@ -314,16 +300,30 @@ profiles:
     candidates:
       - provider: cline-oauth
         model: cline/z-ai/glm-5.3-flash
+      - provider: cline-oauth
+        model: cline/deepseek/deepseek-v4-flash
       - provider: opencode-zen
         model: opencode-zen/kimi-k2.6-free
       - provider: nvidia
         model: nvidia/nemotron-3-super-120b-a12b
+      - provider: nvidia
+        model: nvidia/nemotron-3-ultra-550b-a55b
       - provider: cerebras
         model: cerebras/gpt-oss-120b
+      - provider: cerebras
+        model: cerebras/gemma-4-31b
       - provider: together
         model: together/Prism-ML/Ternary-Bonsai-27B
       - provider: groq
         model: groq/llama-3.3-70b-versatile
+      - provider: groq
+        model: groq/openai/gpt-oss-120b
+      - provider: nous
+        model: nousresearch/laguna-xs-2.1
+      - provider: nous
+        model: nousresearch/laguna-s-2.1
+      - provider: nous
+        model: stepfun/step-3.7-flash
       - provider: mistral
         model: mistral-medium-3-5
       - provider: google-ai-studio
@@ -334,20 +334,38 @@ profiles:
         model: gpt-5.6-terra
       - provider: openrouter
         model: deepseek/deepseek-v4-flash-0731
-    max_attempts: 10
+      - provider: openrouter
+        model: openrouter/free
+    max_attempts: 19
 
   agentic-worker:
     candidates:
       - provider: cline-oauth
-        model: cline/deepseek
+        model: cline/deepseek/deepseek-v4-flash
+      - provider: cline-oauth
+        model: cline/z-ai/glm-5.3-flash
       - provider: opencode-zen
         model: opencode-zen/kimi-k2.6-free
       - provider: nvidia
         model: nvidia/nemotron-3-super-120b-a12b
+      - provider: nvidia
+        model: nvidia/nemotron-3-ultra-550b-a55b
+      - provider: cerebras
+        model: cerebras/gpt-oss-120b
+      - provider: cerebras
+        model: cerebras/gemma-4-31b
       - provider: together
         model: together/Prism-ML/Ternary-Bonsai-27B
       - provider: groq
         model: groq/llama-3.3-70b-versatile
+      - provider: groq
+        model: groq/openai/gpt-oss-120b
+      - provider: nous
+        model: nousresearch/laguna-xs-2.1
+      - provider: nous
+        model: nousresearch/laguna-s-2.1
+      - provider: nous
+        model: stepfun/step-3.7-flash
       - provider: mistral
         model: mistral-medium-3-5
       - provider: google-ai-studio
@@ -358,7 +376,45 @@ profiles:
         model: gpt-5.6-terra
       - provider: openrouter
         model: deepseek/deepseek-v4-flash-0731
-    max_attempts: 10
+      - provider: openrouter
+        model: openrouter/free
+    max_attempts: 19
+
+  free-pool:
+    candidates:
+      - provider: cline-oauth
+        model: cline/z-ai/glm-5.3-flash
+      - provider: cline-oauth
+        model: cline/cline-free/longcat-2.0
+      - provider: cline-oauth
+        model: cline/poolside/laguna-s-2.1:free
+      - provider: cline-oauth
+        model: cline/deepseek/deepseek-v4-flash
+      - provider: opencode-zen
+        model: opencode-zen/kimi-k2.6-free
+      - provider: nvidia
+        model: nvidia/nemotron-3-ultra-550b-a55b
+      - provider: nvidia
+        model: nvidia/nemotron-3-super-120b-a12b
+      - provider: cerebras
+        model: cerebras/gpt-oss-120b
+      - provider: cerebras
+        model: cerebras/gemma-4-31b
+      - provider: together
+        model: together/Prism-ML/Ternary-Bonsai-27B
+      - provider: groq
+        model: groq/llama-3.3-70b-versatile
+      - provider: groq
+        model: groq/openai/gpt-oss-120b
+      - provider: nous
+        model: nousresearch/laguna-xs-2.1
+      - provider: nous
+        model: nousresearch/laguna-s-2.1
+      - provider: nous
+        model: stepfun/step-3.7-flash
+      - provider: openrouter
+        model: openrouter/free
+    max_attempts: 16
 
 aliases:
   # Tiered Capability Profiles (Waterfall Failover)

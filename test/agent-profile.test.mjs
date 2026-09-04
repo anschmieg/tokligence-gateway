@@ -16,16 +16,24 @@ const env = {
 test("agent profiles preserve deterministic candidate order", () => {
   assert.deepEqual(profileByModel(config, "agent-default").candidates, [
     { provider: "cline-oauth", model: "cline/z-ai/glm-5.3-flash" },
+    { provider: "cline-oauth", model: "cline/deepseek/deepseek-v4-flash" },
     { provider: "opencode-zen", model: "opencode-zen/kimi-k2.6-free" },
     { provider: "nvidia", model: "nvidia/nemotron-3-super-120b-a12b" },
+    { provider: "nvidia", model: "nvidia/nemotron-3-ultra-550b-a55b" },
     { provider: "cerebras", model: "cerebras/gpt-oss-120b" },
+    { provider: "cerebras", model: "cerebras/gemma-4-31b" },
     { provider: "together", model: "together/Prism-ML/Ternary-Bonsai-27B" },
     { provider: "groq", model: "groq/llama-3.3-70b-versatile" },
+    { provider: "groq", model: "groq/openai/gpt-oss-120b" },
+    { provider: "nous", model: "nousresearch/laguna-xs-2.1" },
+    { provider: "nous", model: "nousresearch/laguna-s-2.1" },
+    { provider: "nous", model: "stepfun/step-3.7-flash" },
     { provider: "mistral", model: "mistral-medium-3-5" },
     { provider: "google-ai-studio", model: "gemini-3-flash-latest" },
     { provider: "copilot-auto", model: "copilot-auto" },
     { provider: "codex-oauth", model: "gpt-5.6-terra" },
     { provider: "openrouter", model: "deepseek/deepseek-v4-flash-0731" },
+    { provider: "openrouter", model: "openrouter/free" },
   ]);
   assert.equal(profileByModel(config, "AGENTIC-WORKER").candidates[0].provider, "cline-oauth");
 });
@@ -39,9 +47,11 @@ test("route planner builds the ordered fallback chain", () => {
   assert.equal(plan.error, undefined);
   assert.deepEqual(plan.candidates.map(({ provider, upstreamModel }) => [provider.id, upstreamModel]), [
     ["cline-oauth", "cline/z-ai/glm-5.3-flash"],
+    ["cline-oauth", "cline/deepseek/deepseek-v4-flash"],
     ["mistral", "mistral-medium-3-5"],
     ["codex-oauth", "gpt-5.6-terra"],
     ["openrouter", "deepseek/deepseek-v4-flash-0731"],
+    ["openrouter", "openrouter/free"],
   ]);
 });
 
@@ -55,8 +65,8 @@ test("route planner skips a candidate while its circuit is open", () => {
     protocol: "chat_completions",
     body: { messages: [] },
   }, env, { cooldowns });
-  assert.equal(plan.candidates[0].provider.id, "mistral");
-  assert.equal(plan.candidates[0].upstreamModel, "mistral-medium-3-5");
+  assert.equal(plan.candidates[0].provider.id, "cline-oauth");
+  assert.equal(plan.candidates[0].upstreamModel, "cline/deepseek/deepseek-v4-flash");
 });
 
 
