@@ -366,8 +366,6 @@ profiles:
         model: nousresearch/laguna-s-2.1
       - provider: nous
         model: stepfun/step-3.7-flash
-      - provider: mistral
-        model: mistral-medium-3-5
       - provider: google-ai-studio
         model: gemini-3-flash-latest
       - provider: copilot-auto
@@ -378,7 +376,7 @@ profiles:
         model: deepseek/deepseek-v4-flash-0731
       - provider: openrouter
         model: openrouter/free
-    max_attempts: 19
+    max_attempts: 18
 
   free-pool:
     candidates:
