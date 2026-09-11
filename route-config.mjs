@@ -138,7 +138,7 @@ export function parseRoutingConfig(source) {
     if (!Number.isSafeInteger(max_attempts) || max_attempts < 1 || max_attempts > candidates.length) {
       throw new Error(`profile ${id}.max_attempts must be between 1 and ${candidates.length}`);
     }
-    return { id, candidates, max_attempts };
+    return { id, candidates, max_attempts, context_window: value?.context_window || undefined };
   });
   const profileIds = new Set(profiles.map(({ id }) => id.toLowerCase()));
   if (profileIds.size !== profiles.length) throw new Error("profile IDs must be unique case-insensitively");
