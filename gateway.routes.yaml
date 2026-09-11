@@ -297,6 +297,7 @@ routes:
 
 profiles:
   agent-default:
+    context_window: 128000
     candidates:
       - provider: cline-oauth
         model: cline/z-ai/glm-5.3-flash
@@ -339,6 +340,7 @@ profiles:
     max_attempts: 19
 
   agentic-worker:
+    context_window: 128000
     candidates:
       - provider: cline-oauth
         model: cline/deepseek/deepseek-v4-flash

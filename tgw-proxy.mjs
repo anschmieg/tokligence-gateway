@@ -223,13 +223,18 @@ function _lookupContextWindow(modelId) {
 function registerRoutingProfiles() {
   // Register routing profiles (agent-default, agentic-worker, etc.) as virtual models
   // so clients can discover their context_window via /v1/models instead of hardcoding.
-  // The context_window is the minimum across all candidates that have one in the registry,
-  // giving a safe conservative budget regardless of which candidate actually serves.
+  // If the profile has an explicit context_window, use that; otherwise compute the
+  // minimum across all candidates (safe conservative budget).
   for (const profile of ROUTING.profiles || []) {
-    const contextWindows = (profile.candidates || [])
-      .map((c) => _lookupContextWindow(c.model))
-      .filter((cw) => typeof cw === "number" && cw > 0);
-    const context_window = contextWindows.length ? Math.min(...contextWindows) : undefined;
+    let context_window;
+    if (profile.context_window) {
+      context_window = profile.context_window;
+    } else {
+      const contextWindows = (profile.candidates || [])
+        .map((c) => _lookupContextWindow(c.model))
+        .filter((cw) => typeof cw === "number" && cw > 0);
+      context_window = contextWindows.length ? Math.min(...contextWindows) : undefined;
+    }
     registerModel(profile.id, "tokligence", {
       source: "profile",
       display_name: `Routing profile: ${profile.id}`,
