@@ -197,6 +197,29 @@ function seedConfiguredModels() {
   registerRoutingProfiles();
 }
 
+function _lookupContextWindow(modelId) {
+  // Try the full candidate ID first (e.g. "cerebras/gpt-oss-120b"),
+  // then fall back to the base name after the first "/" (e.g. "gpt-oss-120b").
+  // Profile candidates use provider-prefixed IDs but MODEL_REGISTRY may
+  // store models with or without the prefix depending on discovery source.
+  const lower = String(modelId || "").toLowerCase();
+  const entry = MODEL_REGISTRY.get(lower);
+  if (entry?.context_window) return entry.context_window;
+  const slashIdx = lower.indexOf("/");
+  if (slashIdx >= 0) {
+    const base = lower.slice(slashIdx + 1);
+    const baseEntry = MODEL_REGISTRY.get(base);
+    if (baseEntry?.context_window) return baseEntry.context_window;
+  }
+  // Also try the provider's metadata context_window as a fallback.
+  if (slashIdx >= 0) {
+    const providerId = lower.slice(0, slashIdx);
+    const provider = providerById(ROUTING, providerId);
+    if (provider?.metadata?.context_window) return provider.metadata.context_window;
+  }
+  return undefined;
+}
+
 function registerRoutingProfiles() {
   // Register routing profiles (agent-default, agentic-worker, etc.) as virtual models
   // so clients can discover their context_window via /v1/models instead of hardcoding.
@@ -204,7 +227,7 @@ function registerRoutingProfiles() {
   // giving a safe conservative budget regardless of which candidate actually serves.
   for (const profile of ROUTING.profiles || []) {
     const contextWindows = (profile.candidates || [])
-      .map((c) => MODEL_REGISTRY.get(c.model?.toLowerCase())?.context_window)
+      .map((c) => _lookupContextWindow(c.model))
       .filter((cw) => typeof cw === "number" && cw > 0);
     const context_window = contextWindows.length ? Math.min(...contextWindows) : undefined;
     registerModel(profile.id, "tokligence", {
