@@ -193,6 +193,30 @@ function seedConfiguredModels() {
     } : {};
     registerModel(model.id, model.provider, { ...model, ...codexMetadata, source: "config", discoveredBy: undefined });
   }
+
+  registerRoutingProfiles();
+}
+
+function registerRoutingProfiles() {
+  // Register routing profiles (agent-default, agentic-worker, etc.) as virtual models
+  // so clients can discover their context_window via /v1/models instead of hardcoding.
+  // The context_window is the minimum across all candidates that have one in the registry,
+  // giving a safe conservative budget regardless of which candidate actually serves.
+  for (const profile of ROUTING.profiles || []) {
+    const contextWindows = (profile.candidates || [])
+      .map((c) => MODEL_REGISTRY.get(c.model?.toLowerCase())?.context_window)
+      .filter((cw) => typeof cw === "number" && cw > 0);
+    const context_window = contextWindows.length ? Math.min(...contextWindows) : undefined;
+    registerModel(profile.id, "tokligence", {
+      source: "profile",
+      display_name: `Routing profile: ${profile.id}`,
+      description: `Tokligence routing profile with ${(profile.candidates || []).length} candidates`,
+      context_window,
+      supported_reasoning_levels: [],
+      supports_reasoning_summaries: false,
+      supports_parallel_tool_calls: false,
+    });
+  }
 }
 
 function fetchJson(options) {
@@ -374,6 +398,10 @@ async function refreshModelRegistry() {
         console.warn(`model registry refresh warning: ${result.reason.message}`);
       }
     }
+
+    // Re-register profiles after discovery so context_window reflects
+    // dynamically-discovered models (e.g. Cline free-tier models).
+    registerRoutingProfiles();
   })().finally(() => {
     modelRegistryRefresh = null;
   });
