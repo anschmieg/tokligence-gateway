@@ -202,3 +202,71 @@ test("daily-quota 429 cools cline down for follow-up requests, rate-limit 429s s
   assert.equal(clineChatRequests.length, 2);
   assert.equal(mistralRequests.length, 2);
 });
+
+test("a middle candidate's 404 must not abort the failover chain", async (t) => {
+  const mistralRequests = [];
+  const openrouterRequests = [];
+  // mistral serves 404 for its profile candidate (model rotated upstream),
+  // openrouter serves 200 — the chain must reach openrouter instead of dying
+  // on the mistral 404.
+  const mistral = http.createServer(async (req, res) => {
+    await readJson(req);
+    mistralRequests.push(req.url);
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "model not found" }));
+  });
+  const openrouter = http.createServer(async (req, res) => {
+    const body = await readJson(req);
+    openrouterRequests.push(body.model);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      id: "chatcmpl-test",
+      object: "chat.completion",
+      model: body.model,
+      choices: [{ index: 0, message: { role: "assistant", content: "openrouter ok" }, finish_reason: "stop" }],
+    }));
+  });
+  const mistralPort = await listen(mistral);
+  const openrouterPort = await listen(openrouter);
+
+  const child = spawn(process.execPath, ["tgw-proxy.mjs"], {
+    cwd: projectRoot,
+    env: {
+      ...process.env,
+      PROXY_PORT: "0",
+      TOKLIGENCE_AUTH_SECRET: "public-secret",
+      TOKLIGENCE_ADMIN_SECRET: "admin-secret",
+      MISTRAL_API_KEY: "mistral-key",
+      MISTRAL_API_BASE: `http://127.0.0.1:${mistralPort}/v1`,
+      OPENROUTER_API_KEY: "or-key",
+      OPENROUTER_API_BASE: `http://127.0.0.1:${openrouterPort}/api/v1`,
+      CODEX_PROXY_ENABLED: "false",
+      CODEX_PROXY_API_KEY: "",
+      OPENCODE_API_KEY: "",
+      MODAL_GLM5_API_KEY: "",
+      MINIMAX_API_KEY: "",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  t.after(async () => {
+    child.kill("SIGTERM");
+    await Promise.all([close(mistral), close(openrouter)]);
+  });
+
+  const proxyPort = await waitForProxy(child);
+  const response = await fetch(`http://127.0.0.1:${proxyPort}/v1/chat/completions`, {
+    method: "POST",
+    headers: { Authorization: "Bearer public-secret", "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "agent-default",
+      messages: [{ role: "user", content: "hello" }],
+      stream: false,
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.choices?.[0]?.message?.content, "openrouter ok");
+  assert.equal(mistralRequests.length, 1);
+  assert.equal(openrouterRequests.length, 1);
+});

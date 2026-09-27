@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { startAttempt } from "./provider-adapters.mjs";
 
-const RETRYABLE_STATUSES = new Set([401, 402, 403, 408, 425, 429, 500, 502, 503, 504]);
-
 // Errors whose allowance is gone until a periodic reset (e.g. a daily free
 // quota) get a long cooldown; transient limits (per-minute rate limits,
 // hiccups) keep the short default. Tuned via ROUTING_DAILY_QUOTA_COOLDOWN_MS.
@@ -122,7 +120,10 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
             ? await status429CooldownMs(response, aborter.signal)
             : cooldownMs(response);
           discard(response);
-          if (!RETRYABLE_STATUSES.has(status)) break;
+          // A failing status describes THIS candidate (rotated model, dead
+          // credential, upstream outage) — never the remaining candidates.
+          // Move on so the chain survives catalog rotations and partial
+          // upstream outages.
           runtimeState.cooldowns?.set(`${candidate.provider.id}:${candidate.model?.id || candidate.upstreamModel}:${candidate.protocol}`, Date.now() + cooldown);
           continue;
         }
