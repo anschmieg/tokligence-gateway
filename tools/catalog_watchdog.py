@@ -49,6 +49,12 @@ FEEDS = {
 # How a provider's public ids are styled in gateway.routes.yaml references.
 PUBLIC_PREFIX = {"cline-oauth": "cline/", "openrouter": "openrouter/"}
 
+# The codex upstream is CLIProxyAPI running inside the gateway container
+# (127.0.0.1:8317, api-key = CODEX_PROXY_API_KEY). Its /v1/models reflects the
+# models the OAuth accounts actually serve, so codex supersessions are
+# feed-verifiable and auto-applyable like the public feeds.
+CLIPROXY_PORT = os.environ.get("WATCHDOG_CLIPROXY_PORT", "8317")
+
 
 @dataclass
 class Ref:
@@ -398,6 +404,22 @@ def _http_json(url: str, timeout: int = 20, headers: dict | None = None) -> obje
         return json.loads(resp.read().decode("utf-8", "replace"))
 
 
+def fetch_codex_catalog() -> set | None:
+    """Query CLIProxyAPI inside the gateway container for served codex models."""
+    try:
+        container = _gateway_container()
+        cmd = (f'wget -qO- --timeout=10 '
+               f'--header="Authorization: Bearer $CODEX_PROXY_API_KEY" '
+               f'"http://127.0.0.1:{CLIPROXY_PORT}/v1/models"')
+        proc = subprocess.run(["docker", "exec", container, "sh", "-c", cmd],
+                              capture_output=True, text=True)
+        payload = json.loads(proc.stdout)
+        return {m["id"] for m in payload.get("data", []) if m.get("id")}
+    except Exception as error:  # noqa: BLE001 - codex falls back to ask-mode
+        print(f"watchdog: codex catalog fetch failed: {error}", file=sys.stderr)
+        return None
+
+
 def fetch_catalogs() -> dict:
     catalogs = {}
     for provider, (url, normalize) in FEEDS.items():
@@ -419,6 +441,9 @@ def fetch_catalogs() -> dict:
                 catalogs[provider] = ids
         except Exception as error:  # noqa: BLE001 - feed failure must not abort the run
             print(f"watchdog: catalog fetch failed for {provider}: {error}", file=sys.stderr)
+    codex = fetch_codex_catalog()
+    if codex:
+        catalogs["codex-oauth"] = codex
     return catalogs
 
 
@@ -601,6 +626,12 @@ def run_once(state: WatchState, dry_run: bool = False) -> WatchState:
         deployed = wait_for_deploy(sha)
         state.applied.append({"date": state.last_run, "sha": sha,
                               "renames": [asdict(r) for r in renames]})
+        if any(r.provider == "codex-oauth" for r in renames):
+            notify("tokligence watchdog: codex rename applied",
+                   f"{summary}\nReminder: the Claude-compat surface uses Coolify env "
+                   "CODEX_HAIKU_MODEL/CODEX_SONNET_MODEL/CODEX_OPUS_MODEL/CODEX_FABLE_MODEL — "
+                   "update those manually if they reference a renamed model.",
+                   priority="high")
     elif renames and dry_run:
         print("watchdog: DRY RUN would rename: "
               + ", ".join(f"{r.old} -> {r.new}" for r in renames))

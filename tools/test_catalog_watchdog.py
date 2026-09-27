@@ -23,6 +23,8 @@ providers:
         context_window: 1050000
       - id: gpt-5.6-terra
         context_window: 1050000
+      - id: gpt-5.6-sol
+        context_window: 1050000
   - id: cline-oauth
     adapter: cline-oauth
     discover_models: true
@@ -91,7 +93,7 @@ aliases:
 def catalogs(**kw):
     base = {
         "cline-oauth": {"cline/cline-free/deepseek-v4-flash"},
-        "codex-oauth": {"gpt-5.6-luna", "gpt-5.6-terra"},
+        "codex-oauth": {"gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"},
     }
     base.update(kw)
     return base
@@ -236,6 +238,31 @@ class InsertionTests(unittest.TestCase):
         inline = {(r.provider, r.model) for r in refs if r.kind == "provider_model"}
         self.assertIn(("tokligence", "minimax-m2.5"), inline)
         self.assertIn(("codex-oauth", "gpt-5.6-terra"), inline)
+
+
+CODEX_CATALOG = {"codex-auto-review", "gpt-5.5", "gpt-5.6-luna", "gpt-5.6-sol",
+                 "gpt-5.6-terra", "gpt-6-astra", "gpt-6-luna", "gpt-6-sol",
+                 "gpt-image-1.5", "gpt-image-2"}
+
+
+class CodexTests(unittest.TestCase):
+    def test_codex_served_models_are_noop(self):
+        renames, asks = cw.classify_changes(ROUTES, {"codex-oauth": CODEX_CATALOG})
+        self.assertEqual((renames, asks), ([], []))
+
+    def test_codex_supersession_when_retired(self):
+        catalog = CODEX_CATALOG - {"gpt-5.6-sol"}
+        renames, _ = cw.classify_changes(ROUTES, {"codex-oauth": catalog})
+        self.assertEqual([(r.old, r.new) for r in renames],
+                         [("gpt-5.6-sol", "gpt-6-sol")])
+
+    def test_codex_unrelated_models_do_not_match(self):
+        catalog = CODEX_CATALOG - {"gpt-5.6-luna", "gpt-6-luna"}
+        renames, asks = cw.classify_changes(ROUTES, {"codex-oauth": catalog})
+        # with no luna-family model served, there is no verifiable successor:
+        # queued for approval instead of renamed.
+        self.assertEqual([r.old for r in renames if r.old == "gpt-5.6-luna"], [])
+        self.assertIn("gpt-5.6-luna", [a.old for a in asks])
 
 
 class ApprovalTests(unittest.TestCase):
