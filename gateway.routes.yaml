@@ -300,9 +300,9 @@ profiles:
     context_window: 128000
     candidates:
       - provider: cline-oauth
-        model: cline/z-ai/glm-5.3-flash
+        model: cline/cline-free/deepseek-v4.1-flash
       - provider: cline-oauth
-        model: cline/deepseek/deepseek-v4-flash
+        model: cline/cline-free/mimo-v2.6-flash
       - provider: opencode-zen
         model: opencode-zen/kimi-k2.6-free
       - provider: nvidia
@@ -343,9 +343,9 @@ profiles:
     context_window: 128000
     candidates:
       - provider: cline-oauth
-        model: cline/deepseek/deepseek-v4-flash
+        model: cline/cline-free/mimo-v2.6-flash
       - provider: cline-oauth
-        model: cline/z-ai/glm-5.3-flash
+        model: cline/cline-free/deepseek-v4.1-flash
       - provider: opencode-zen
         model: opencode-zen/kimi-k2.6-free
       - provider: nvidia
@@ -383,13 +383,13 @@ profiles:
   free-pool:
     candidates:
       - provider: cline-oauth
-        model: cline/z-ai/glm-5.3-flash
+        model: cline/cline-free/deepseek-v4.1-flash
       - provider: cline-oauth
-        model: cline/cline-free/longcat-2.0
+        model: cline/stealth/space-bunny-alpha
       - provider: cline-oauth
-        model: cline/poolside/laguna-s-2.1:free
+        model: cline/cline-free/gemini-3.8-flash
       - provider: cline-oauth
-        model: cline/deepseek/deepseek-v4-flash
+        model: cline/cline-free/mimo-v2.6-flash
       - provider: opencode-zen
         model: opencode-zen/kimi-k2.6-free
       - provider: nvidia

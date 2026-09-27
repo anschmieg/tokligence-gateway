@@ -15,8 +15,8 @@ const env = {
 
 test("agent profiles preserve deterministic candidate order", () => {
   assert.deepEqual(profileByModel(config, "agent-default").candidates, [
-    { provider: "cline-oauth", model: "cline/z-ai/glm-5.3-flash" },
-    { provider: "cline-oauth", model: "cline/deepseek/deepseek-v4-flash" },
+    { provider: "cline-oauth", model: "cline/cline-free/deepseek-v4.1-flash" },
+    { provider: "cline-oauth", model: "cline/cline-free/mimo-v2.6-flash" },
     { provider: "opencode-zen", model: "opencode-zen/kimi-k2.6-free" },
     { provider: "nvidia", model: "nvidia/nemotron-3-super-120b-a12b" },
     { provider: "nvidia", model: "nvidia/nemotron-3-ultra-550b-a55b" },
@@ -46,8 +46,8 @@ test("route planner builds the ordered fallback chain", () => {
   }, env, { cooldowns: new Map() });
   assert.equal(plan.error, undefined);
   assert.deepEqual(plan.candidates.map(({ provider, upstreamModel }) => [provider.id, upstreamModel]), [
-    ["cline-oauth", "cline/z-ai/glm-5.3-flash"],
-    ["cline-oauth", "cline/deepseek/deepseek-v4-flash"],
+    ["cline-oauth", "cline/cline-free/deepseek-v4.1-flash"],
+    ["cline-oauth", "cline/cline-free/mimo-v2.6-flash"],
     ["mistral", "mistral-medium-3-5"],
     ["codex-oauth", "gpt-5.6-terra"],
     ["openrouter", "deepseek/deepseek-v4-flash-0731"],
@@ -57,7 +57,7 @@ test("route planner builds the ordered fallback chain", () => {
 
 test("route planner skips a candidate while its circuit is open", () => {
   const cooldowns = new Map([[
-    "cline-oauth:cline/z-ai/glm-5.3-flash:chat_completions",
+    "cline-oauth:cline/cline-free/deepseek-v4.1-flash:chat_completions",
     Date.now() + 60_000,
   ]]);
   const plan = buildRoutePlan(config, {
@@ -66,7 +66,7 @@ test("route planner skips a candidate while its circuit is open", () => {
     body: { messages: [] },
   }, env, { cooldowns });
   assert.equal(plan.candidates[0].provider.id, "cline-oauth");
-  assert.equal(plan.candidates[0].upstreamModel, "cline/deepseek/deepseek-v4-flash");
+  assert.equal(plan.candidates[0].upstreamModel, "cline/cline-free/mimo-v2.6-flash");
 });
 
 
