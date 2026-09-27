@@ -39,6 +39,10 @@ providers:
         context_window: 1050000
       - id: gpt-5.6-sol
         context_window: 1050000
+      - id: gpt-6-luna
+        context_window: 1050000
+      - id: gpt-6-sol
+        context_window: 1050000
     credential_pool:
       strategy: round-robin
       session_affinity: true
@@ -289,6 +293,8 @@ routes:
   - provider: tokligence
     upstream: anthropic
     prefixes: [claude, minimax-m2]
+  - provider: codex-oauth
+    prefixes: [gpt-5.6, gpt-6]
   - provider: tokligence
     upstream: openai
     prefixes: [gpt]
