@@ -454,7 +454,8 @@ def canary_profiles() -> dict:
                            "max_tokens": 10}).encode()
         req = urllib.request.Request(
             f"{GATEWAY_URL}/v1/chat/completions", data=body, method="POST",
-            headers={"Authorization": f"Bearer {secret}", "Content-Type": "application/json"})
+            headers={"Authorization": f"Bearer {secret}", "Content-Type": "application/json",
+                     "User-Agent": "tokligence-watchdog/1.0"})
         try:
             with urllib.request.urlopen(req, timeout=90) as resp:
                 payload = json.loads(resp.read().decode("utf-8", "replace"))
@@ -628,8 +629,11 @@ def run_once(state: WatchState, dry_run: bool = False) -> WatchState:
                priority="high" if alerts else "default")
     if alerts:
         notify("tokligence watchdog: profile canary failing", " | ".join(alerts), priority="high")
-    if not state.pending and not alerts and not renames:
-        print("watchdog: catalogs healthy, profiles canary ok, nothing to do")
+    if not state.pending and not alerts:
+        if all(r["ok"] for r in canary.values()):
+            print("watchdog: catalogs healthy, profiles canary ok, nothing to do")
+        else:
+            print("watchdog: no pending approvals; canary failures below alert threshold")
     save_state(state)
     return state
 
