@@ -34,12 +34,12 @@ function zenServicesFor(provider, env) {
         tokenUrl: provider.token_url || env.OPENCODE_ZEN_TOKEN_URL,
         clientId: provider.client_id || env.OPENCODE_ZEN_CLIENT_ID,
         skewMs: Number(provider.refresh_skew_ms || 10 * 60 * 1000),
-        log: (message) => { if (process.env.TGW_DEBUG === "1") console.error(`opencode-zen: ${message}`); },
+        log: (message) => console.error(message.startsWith("opencode-zen:") ? message : `opencode-zen: ${message}`),
       }),
       sessions: createSessionPool({
         command: provider.serve_command || env.OPENCODE_ZEN_SERVE_COMMAND || "opencode",
         port: Number(provider.serve_port || env.OPENCODE_ZEN_SERVE_PORT || 4096),
-        log: (message) => { if (process.env.TGW_DEBUG === "1") console.error(`opencode-zen: ${message}`); },
+        log: (message) => console.error(message.startsWith("opencode-zen:") ? message : `opencode-zen: ${message}`),
       }),
     });
   }
