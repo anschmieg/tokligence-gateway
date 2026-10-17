@@ -23,7 +23,11 @@ RUN npm install -g @tokligence/gateway@0.4.0
 # OpenCode mints the session identity the OpenCode Zen free tier requires: no
 # other client produces one the gateway accepts. Pinned to a release that also
 # satisfies the user-agent version check the same gate applies.
-ARG OPENCODE_VERSION=1.18.32
+# The free tier only answers a request that looks like it came from a current
+# OpenCode client, so the image tracks the client rather than pinning a version
+# that eventually falls below what the service accepts. The user-agent sent
+# upstream is read from this binary at runtime.
+ARG OPENCODE_VERSION=latest
 RUN npm install -g opencode-ai@${OPENCODE_VERSION}
 
 COPY --from=cliproxy /usr/local/bin/cli-proxy-api /usr/local/bin/cli-proxy-api
