@@ -134,6 +134,21 @@ async function respondWithCodec({ response, codec, res, status, requestId, model
   res.end(JSON.stringify(collectAnthropicStream(collected)));
 }
 
+async function readSnippet(response, limit = 300) {
+  try {
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of response) {
+      chunks.push(chunk);
+      size += chunk.length;
+      if (size >= limit) break;
+    }
+    return Buffer.concat(chunks).toString("utf8").slice(0, limit).replace(/\s+/g, " ").trim();
+  } catch {
+    return "<unreadable>";
+  }
+}
+
 export async function executeRoutePlan({ plan, req, res, path, body, env = process.env, runtimeState = {}, adapters = {}, affinityKey = null }) {
   const requestId = randomUUID();
   const aborter = new AbortController();
@@ -152,6 +167,10 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
         const status = response.statusCode || 502;
         if (status < 200 || status >= 300) {
           lastStatus = status;
+          const detail = await readSnippet(response);
+          console.error(
+            `upstream ${status} from ${candidate.provider.id}/${candidate.upstreamModel}: ${detail || "<empty body>"}`,
+          );
           const cooldown = status === 429
             ? await status429CooldownMs(response, aborter.signal)
             : cooldownMs(response);
@@ -203,6 +222,9 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
           return { committed: false, requestId };
         }
         lastStatus = 502;
+        console.error(
+          `attempt failed for ${candidate.provider.id}/${candidate.upstreamModel}: ${error?.message ?? error}`,
+        );
         runtimeState.cooldowns?.set(`${candidate.provider.id}:${candidate.model?.id || candidate.upstreamModel}:${candidate.protocol}`, Date.now() + errorCooldownMs(error));
       }
     }
