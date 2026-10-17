@@ -60,15 +60,25 @@ export function createSessionPool({
   let starting = null;
   let childLog = "";
 
+  let serverPassword = process.env.OPENCODE_ZEN_SERVE_PASSWORD || null;
+
   const record = (text) => {
+    // OpenCode v2 protects `serve` with a password it prints at startup.
+    const announced = String(text).match(/server password (\S+)/);
+    if (announced) {
+      serverPassword = announced[1];
+      log("opencode-zen: serve announced a password; using it for local calls");
+    }
     childLog = (childLog + text).slice(-CHILD_LOG_LIMIT);
   };
+
+  const authHeaders = () => (serverPassword ? { authorization: `Bearer ${serverPassword}` } : {});
 
   const probe = async () => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
     try {
-      const response = await fetchImpl(`${origin}/session`, { method: "GET", signal: controller.signal });
+      const response = await fetchImpl(`${origin}/session`, { method: "GET", headers: authHeaders(), signal: controller.signal });
       if (response.ok) return { ready: true };
       return { ready: false, why: `GET ${origin}/session returned ${response.status}` };
     } catch (error) {
@@ -136,7 +146,7 @@ export function createSessionPool({
     await ensureServer();
     const response = await fetchImpl(`${origin}/session`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...authHeaders() },
       body: JSON.stringify({ title }),
     });
     if (!response.ok) throw new Error(`OpenCode Zen could not create a session (${response.status}): ${describe()}`);
