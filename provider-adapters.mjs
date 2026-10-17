@@ -60,7 +60,7 @@ async function zenAttempt(candidate, { body, env }) {
     headers: zenHeaders({
       session,
       authorization,
-      clientVersion: provider.client_version || "1.18.32",
+      clientVersion: (await sessions.clientVersion()) || provider.client_version || "1.18.32",
       project: provider.client_project || "global",
     }),
     codec: candidate.protocol === "messages"

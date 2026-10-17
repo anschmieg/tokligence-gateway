@@ -32,6 +32,30 @@ export function createSessionPool({
 } = {}) {
   const origin = `http://${host}:${port}`;
   const ready = [];
+  let detectedVersion = null;
+
+  // Zen checks that the request looks like it came from OpenCode. Hardcoding a
+  // version means the user-agent can drift from the binary that actually minted
+  // the session, and the pair has to agree, so ask the binary instead.
+  const clientVersion = async () => {
+    if (detectedVersion) return detectedVersion;
+    detectedVersion = await new Promise((resolve) => {
+      let out = "";
+      try {
+        const probe = spawnProcess(command, ["--version"], { stdio: ["ignore", "pipe", "ignore"] });
+        probe.stdout?.on("data", (chunk) => { out += String(chunk); });
+        probe.on?.("error", () => resolve(null));
+        probe.on?.("exit", () => {
+          const match = out.match(/(\d+\.\d+\.\d+)/);
+          resolve(match ? match[1] : null);
+        });
+      } catch {
+        resolve(null);
+      }
+    });
+    log(`opencode-zen: ${command} reports version ${detectedVersion ?? "unknown"}`);
+    return detectedVersion;
+  };
   let child = null;
   let starting = null;
   let childLog = "";
@@ -136,5 +160,5 @@ export function createSessionPool({
     return (await mint()).id;
   };
 
-  return { sessionId, ensureServer, close: () => { ready.length = 0; } };
+  return { sessionId, ensureServer, clientVersion, close: () => { ready.length = 0; } };
 }
