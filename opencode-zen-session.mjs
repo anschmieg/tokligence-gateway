@@ -72,15 +72,44 @@ export function createSessionPool({
     childLog = (childLog + text).slice(-CHILD_LOG_LIMIT);
   };
 
-  const authHeaders = () => (serverPassword ? { authorization: `Bearer ${serverPassword}` } : {});
+  // v2 protects the server with HTTP Basic (username "opencode"); v1 had no
+  // local auth at all, so an absent password simply sends no credentials.
+  const authHeaders = () =>
+    serverPassword
+      ? { authorization: `Basic ${Buffer.from(`opencode:${serverPassword}`).toString("base64")}` }
+      : {};
+
+  // Resolved once from the running server: v2 serves /api/session, v1 /session.
+  let sessionPath = null;
+  const candidatePaths = ["/api/session", "/session"];
+  const resolveSessionPath = async () => {
+    if (sessionPath) return sessionPath;
+    for (const candidate of candidatePaths) {
+      try {
+        const response = await fetchImpl(`${origin}${candidate}`, {
+          method: "GET",
+          headers: authHeaders(),
+          signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+        });
+        if (response.ok || response.status === 401) {
+          sessionPath = candidate;
+          return candidate;
+        }
+      } catch {
+        // Try the next shape.
+      }
+    }
+    return null;
+  };
 
   const probe = async () => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
     try {
-      const response = await fetchImpl(`${origin}/session`, { method: "GET", headers: authHeaders(), signal: controller.signal });
+      const path = (await resolveSessionPath()) || "/api/session";
+      const response = await fetchImpl(`${origin}${path}`, { method: "GET", headers: authHeaders(), signal: controller.signal });
       if (response.ok) return { ready: true };
-      return { ready: false, why: `GET ${origin}/session returned ${response.status}` };
+      return { ready: false, why: `GET ${origin}${path} returned ${response.status}` };
     } catch (error) {
       return { ready: false, why: `${error.name}: ${error.message}` };
     } finally {
@@ -144,15 +173,19 @@ export function createSessionPool({
 
   const mint = async () => {
     await ensureServer();
-    const response = await fetchImpl(`${origin}/session`, {
+    const path = (await resolveSessionPath()) || "/api/session";
+    const response = await fetchImpl(`${origin}${path}`, {
       method: "POST",
       headers: { "content-type": "application/json", ...authHeaders() },
       body: JSON.stringify({ title }),
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS * 5),
     });
-    if (!response.ok) throw new Error(`OpenCode Zen could not create a session (${response.status}): ${describe()}`);
+    if (!response.ok) throw new Error(`OpenCode Zen could not create a session (${response.status} at ${path}): ${describe()}`);
     const payload = await response.json();
-    if (!payload?.id) throw new Error("OpenCode Zen session response had no id");
-    return { id: payload.id, minted: now() };
+    // v2 nests the session under `data`; v1 returned it at the top level.
+    const id = payload?.data?.id || payload?.id;
+    if (!id) throw new Error(`OpenCode Zen session response had no id (${path}): ${describe()}`);
+    return { id, minted: now() };
   };
 
   const fill = async () => {
