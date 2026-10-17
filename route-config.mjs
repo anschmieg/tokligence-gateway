@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { parse, stringify } from "yaml";
 
-const VALID_ADAPTERS = new Set(["tokligence", "oauth-proxy", "middleware", "copilot-sdk", "openai-compatible", "cline-oauth"]);
+const VALID_ADAPTERS = new Set(["tokligence", "oauth-proxy", "middleware", "copilot-sdk", "openai-compatible", "cline-oauth", "opencode-zen"]);
 
 function requireString(value, label) {
   if (typeof value !== "string" || !value.trim()) {
@@ -170,6 +170,20 @@ export function loadRoutingConfig(path) {
 
 export function providerEnabled(provider, env = process.env) {
   if (!envEnabled(provider, env)) return false;
+  if (provider.adapter === "opencode-zen") {
+    // The free tier is only served to an account that completed the Console
+    // sign-in, so the OAuth credential is what makes this provider available.
+    const file = (provider.credential_file_env && env[provider.credential_file_env])
+      || provider.credential_file
+      || env.OPENCODE_ZEN_CREDENTIAL_FILE;
+    if (!file) return false;
+    try {
+      const credential = JSON.parse(fs.readFileSync(file, "utf8"));
+      return typeof credential?.access === "string" && credential.access.length > 0;
+    } catch {
+      return false;
+    }
+  }
   if (provider.api_key_env) return Boolean(env[provider.api_key_env]);
   if (provider.adapter === "oauth-proxy") return Boolean(env[provider.internal_api_key_env]);
   return true;

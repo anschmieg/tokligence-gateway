@@ -1,7 +1,21 @@
 #!/bin/sh
 set -eu
 
-mkdir -p /app/config/dev /root/.tokligence/logs /data /data/cliproxy/auth
+mkdir -p /app/config/dev /root/.tokligence/logs /data /data/cliproxy/auth /data/zen
+
+# OpenCode Zen free tier needs the OAuth credential from a Console sign-in, not a
+# Console API key. The credential arrives as environment variables and is written
+# to the persistent volume; the adapter refreshes it in place before it expires.
+if [ -n "${OPENCODE_ZEN_ACCESS_TOKEN:-}" ]; then
+  umask 077
+  cat > /data/zen/oauth.json <<ZEN_JSON
+{"type":"oauth","methodID":"device","access":"${OPENCODE_ZEN_ACCESS_TOKEN}","refresh":"${OPENCODE_ZEN_REFRESH_TOKEN:-}","expires":${OPENCODE_ZEN_EXPIRES_MS:-0},"metadata":{"server":"https://opencode.ai/console","orgID":"${OPENCODE_ZEN_ORG_ID:-}","orgName":"${OPENCODE_ZEN_ORG_NAME:-}"}}
+ZEN_JSON
+  umask 022
+  echo "Wrote OpenCode Zen credential to /data/zen/oauth.json"
+elif [ ! -f /data/zen/oauth.json ]; then
+  echo "NOTE: OpenCode Zen disabled; no credential at /data/zen/oauth.json and OPENCODE_ZEN_ACCESS_TOKEN is unset"
+fi
 
 if [ "${CODEX_PROXY_ENABLED:-false}" = "true" ]; then
   if [ -z "${CODEX_PROXY_API_KEY:-}" ]; then
@@ -64,10 +78,11 @@ echo "Starting gatewayd: $GATEWAYD"
 for i in $(seq 1 30); do
   if wget -q -O- http://127.0.0.1:8081/health > /dev/null 2>&1; then
     echo "Gateway ready after ${i}s"
-    break
+    exec node /app/tgw-proxy.mjs
   fi
   echo "Waiting for gateway... ($i)"
   sleep 1
 done
 
-exec node /app/tgw-proxy.mjs
+echo "ERROR: gatewayd did not become ready" >&2
+exit 1

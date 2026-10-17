@@ -253,19 +253,58 @@ providers:
       capabilities: [coding, reasoning]
       quota_type: payg
 
+  # Zen's free tier is gated server-side: the request needs the OAuth token of a
+  # Console sign-in (a Console API key never qualifies), an OpenCode 1.18+
+  # user-agent, a session a real OpenCode client minted, streaming, and a declared
+  # tool set. The adapter satisfies all of it, and translates the Anthropic
+  # protocol because Zen only serves free traffic on chat completions.
   - id: opencode-zen
-    adapter: middleware
-    api_key_env: OPENCODE_API_KEY
-    default_base_url: https://opencode.ai
-    discover_models: true
-    catalog:
-      id_suffixes: ["-free"]
+    adapter: opencode-zen
+    billing_class: subscription
+    protocols: [chat_completions, messages]
+    base_url: https://opencode.ai/inference/v1
+    default_base_url: https://opencode.ai/inference/v1
+    credential_file: /data/zen/oauth.json
+    credential_file_env: OPENCODE_ZEN_CREDENTIAL_FILE
+    token_url: https://opencode.ai/console/auth/device/token
+    client_id: opencode-cli
+    client_version: "1.18.32"
+    serve_command: opencode
+    serve_port: 4096
+    refresh_skew_ms: 600000
+    models:
+      - beam-free
+      - deepseek-v4.1-flash-free
+      - glm-5.3-flash-free
+      - jev-1.13-free
+      - longcat-2.5-preview-free
+      - mimo-v2.6-flash-free
+      - nemotron-3.5-lightning-free
+      - nemotron-3.5-super-vl-free
+      - space-bunny-free
     metadata:
       cost_class: free
       capabilities: [coding, reasoning]
       quota_type: free_tier
 
 routes:
+  - provider: opencode-zen
+    # The exact free model ids come first: several of them (nemotron-*, glm-*,
+    # deepseek-*) also exist on paid providers, and first-match-wins would send
+    # a bare id to whichever route is listed first.
+    prefixes:
+      - opencode-zen/
+      - zen/
+      - beam-free
+      - deepseek-v4.1-flash-free
+      - glm-5.3-flash-free
+      - jev-1.13-free
+      - longcat-2.5-preview-free
+      - mimo-v2.6-flash-free
+      - nemotron-3.5-lightning-free
+      - nemotron-3.5-super-vl-free
+      - space-bunny-free
+
   - provider: cline-oauth
     prefixes: [cline/]
   - provider: modal
@@ -274,8 +313,6 @@ routes:
     prefixes: [copilot/]
   - provider: openrouter
     prefixes: [openrouter/, or/, free, deepseek-v4, deepseek/]
-  - provider: opencode-zen
-    prefixes: [opencode-zen/, zen/]
   - provider: mistral
     prefixes: [mistral/, mistral-]
   - provider: google-ai-studio

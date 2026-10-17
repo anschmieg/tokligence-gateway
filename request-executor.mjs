@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { startAttempt } from "./provider-adapters.mjs";
+import { collectAnthropicStream, createAnthropicStreamCodec, createSseChunkReader } from "./anthropic-openai-codec.mjs";
 
 // Errors whose allowance is gone until a periodic reset (e.g. a daily free
 // quota) get a long cooldown; transient limits (per-minute rate limits,
@@ -98,6 +99,41 @@ function firstStreamChunk(response, signal) {
   });
 }
 
+// Serves an OpenAI stream to a caller that spoke the Anthropic protocol: as
+// Anthropic server-sent events, or folded into one message when the caller
+// asked for a single response. Used when the upstream only speaks OpenAI.
+async function respondWithCodec({ response, codec, res, status, requestId, model, provider, publicModel, signal }) {
+  const reader = createSseChunkReader();
+  const encoder = createAnthropicStreamCodec({ model });
+  const first = await firstStreamChunk(response, signal);
+  response.setEncoding("utf8");
+  const base = {
+    "x-gateway-request-id": requestId,
+    "x-gateway-model": publicModel || model,
+    "x-gateway-provider": provider,
+    "x-gateway-upstream-model": model,
+  };
+
+  if (codec.stream) {
+    res.writeHead(status, { ...base, "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive" });
+    const write = (events) => { if (events.length && !res.writableEnded) res.write(events.join("")); };
+    const feed = (chunk) => { for (const payload of reader.push(String(chunk))) write(encoder.push(payload)); };
+    feed(first);
+    for await (const chunk of response) feed(chunk);
+    write(encoder.end());
+    res.end();
+    return;
+  }
+
+  const collected = [];
+  const feed = (chunk) => { for (const payload of reader.push(String(chunk))) collected.push(...encoder.push(payload)); };
+  feed(first);
+  for await (const chunk of response) feed(chunk);
+  collected.push(...encoder.end());
+  res.writeHead(status, { ...base, "content-type": "application/json" });
+  res.end(JSON.stringify(collectAnthropicStream(collected)));
+}
+
 export async function executeRoutePlan({ plan, req, res, path, body, env = process.env, runtimeState = {}, adapters = {}, affinityKey = null }) {
   const requestId = randomUUID();
   const aborter = new AbortController();
@@ -112,7 +148,7 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
       if (aborter.signal.aborted) break;
       const candidateBody = Buffer.from(JSON.stringify({ ...body, model: candidate.upstreamModel }));
       try {
-        const { response } = await startAttempt({ candidate, req, path, body: candidateBody, env, signal: aborter.signal, adapters });
+        const { response, codec } = await startAttempt({ candidate, req, path, body: candidateBody, env, signal: aborter.signal, adapters });
         const status = response.statusCode || 502;
         if (status < 200 || status >= 300) {
           lastStatus = status;
@@ -126,6 +162,17 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
           // upstream outages.
           runtimeState.cooldowns?.set(`${candidate.provider.id}:${candidate.model?.id || candidate.upstreamModel}:${candidate.protocol}`, Date.now() + cooldown);
           continue;
+        }
+        if (codec) {
+          await respondWithCodec({ response, codec, res, status, requestId, model: candidate.upstreamModel, provider: candidate.provider.id, publicModel: plan.publicModel, signal: aborter.signal });
+          if (affinityKey && plan.profile && runtimeState.affinity) {
+            runtimeState.affinity.set(`${affinityKey}:${plan.profile}`, {
+              provider: candidate.provider.id,
+              model: candidate.upstreamModel,
+              updatedAt: Date.now(),
+            });
+          }
+          return { committed: true, requestId, provider: candidate.provider.id, attempts: plan.candidates.indexOf(candidate) + 1, translated: codec.kind };
         }
         const headers = { ...response.headers, "x-gateway-request-id": requestId, "x-gateway-model": plan.publicModel, "x-gateway-provider": candidate.provider.id, "x-gateway-upstream-model": candidate.upstreamModel };
         if (plan.required.streaming) {

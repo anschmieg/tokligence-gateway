@@ -7,3 +7,6 @@
 .playwright-mcp/
 node_modules/
 gateway.preferences.yaml
+
+# Local OpenCode Zen credential - never commit.
+.zen-oauth.json

@@ -64,7 +64,34 @@ export function buildRoutePlan(config, { model, protocol, body, affinityKey = nu
   if (!profile) {
     const providerId = matchConfiguredProvider(config, model);
     const provider = providerById(config, providerId);
-    if (!provider || provider.adapter !== "cline-oauth") return null;
+    if (!provider) return null;
+    if (provider.adapter === "opencode-zen") {
+      // Direct model requests for Zen are routed through the adapter so the
+      // free-tier gate (OAuth token, OpenCode identity, real session, streaming,
+      // declared tools) is applied, and the Anthropic protocol is translated
+      // because Zen only serves free traffic on chat completions.
+      const protocols = Array.isArray(provider.protocols) && provider.protocols.length
+        ? provider.protocols
+        : ["chat_completions"];
+      if (!protocols.includes(protocol)) {
+        return { error: { status: 400, code: "opencode_zen_unsupported_protocol", message: `OpenCode Zen does not serve the ${protocol} protocol` } };
+      }
+      if (!providerEnabled(provider, env)) {
+        return { error: { status: 503, code: "opencode_zen_unavailable", message: "OpenCode Zen credential is missing or unreadable" } };
+      }
+      const upstreamModel = model
+        .replace(/^(opencode-zen|zen|oc)\//i, "");
+      return {
+        requestedModel: model,
+        publicModel: model,
+        profile: null,
+        required: inspectRequestFeatures(protocol, body),
+        deadline: Date.now() + Number(env.GATEWAY_REQUEST_TIMEOUT_MS || 120000),
+        maxAttempts: 1,
+        candidates: [{ provider, model: { id: model }, upstreamModel, protocol, native: true }],
+      };
+    }
+    if (provider.adapter !== "cline-oauth") return null;
     if (!(provider.protocols || ["chat_completions"]).includes(protocol)) {
       return { error: { status: 400, code: "cline_chat_completions_only", message: "Cline free models support only OpenAI Chat Completions" } };
     }

@@ -20,6 +20,12 @@ RUN apt-get update && apt-get install -y procps curl wget && rm -rf /var/lib/apt
 
 RUN npm install -g @tokligence/gateway@0.4.0
 
+# OpenCode mints the session identity the OpenCode Zen free tier requires: no
+# other client produces one the gateway accepts. Pinned to a release that also
+# satisfies the user-agent version check the same gate applies.
+ARG OPENCODE_VERSION=1.18.32
+RUN npm install -g opencode-ai@${OPENCODE_VERSION}
+
 COPY --from=cliproxy /usr/local/bin/cli-proxy-api /usr/local/bin/cli-proxy-api
 
 WORKDIR /app
@@ -29,6 +35,9 @@ COPY tgw-proxy.mjs openai-stream.mjs sanitize-headers.mjs routing-planner.mjs re
 COPY gateway-config.mjs ./
 COPY route-config.mjs compile-config.mjs gateway.routes.yaml ./
 COPY quota.mjs preferences.mjs dashboard.mjs dashboard.html cloudflare-access.mjs model-catalog.mjs copilot-auto.mjs ./
+# OpenCode Zen adapter: protocol translation, session pool, gate conditions,
+# OAuth credential refresh.
+COPY anthropic-openai-codec.mjs opencode-zen-gate.mjs opencode-zen-credential.mjs opencode-zen-session.mjs ./
 # Copilot SDK state must live on the mounted data volume; credentials are supplied
 # through COPILOT_GITHUB_TOKEN (or an interactive device login), never baked in.
 ENV COPILOT_AUTO_HOME=/data/copilot-auto
