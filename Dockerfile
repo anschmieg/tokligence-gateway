@@ -38,6 +38,8 @@ COPY quota.mjs preferences.mjs dashboard.mjs dashboard.html cloudflare-access.mj
 # OpenCode Zen adapter: protocol translation, session pool, gate conditions,
 # OAuth credential refresh.
 COPY anthropic-openai-codec.mjs opencode-zen-gate.mjs opencode-zen-credential.mjs opencode-zen-session.mjs ./
+# Copilot-compatible catalog metadata for /v1/models.
+COPY model-catalog-metadata.mjs ./
 # Copilot SDK state must live on the mounted data volume; credentials are supplied
 # through COPILOT_GITHUB_TOKEN (or an interactive device login), never baked in.
 ENV COPILOT_AUTO_HOME=/data/copilot-auto

@@ -33,6 +33,7 @@ import { RoutingPreferences, sanitizedPreferences } from "./preferences.mjs";
 import { DASHBOARD_HTML } from "./dashboard.mjs";
 import { cloudflareAccessConfigured, isValidCloudflareAccessToken } from "./cloudflare-access.mjs";
 import { modelAllowedByCatalog } from "./model-catalog.mjs";
+import { decorateModel } from "./model-catalog-metadata.mjs";
 import { COPILOT_AUTO_MODEL, createCopilotAutoAdapter } from "./copilot-auto.mjs";
 import { buildRoutePlan } from "./routing-planner.mjs";
 import { executeRoutePlan } from "./request-executor.mjs";
@@ -1394,7 +1395,7 @@ const server = http.createServer((req, res) => {
     refreshModelRegistry()
       .catch((err) => console.warn(`model registry refresh failed: ${err.message}`))
       .finally(() => {
-        const models = getAvailableModels();
+        const models = getAvailableModels().map((model) => decorateModel(model, ROUTING.model_picker));
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({
           object: "list",

@@ -161,7 +161,7 @@ export function parseRoutingConfig(source) {
     };
   });
 
-  return { version: 1, access, providers, routes, profiles, aliases };
+  return { version: 1, access, providers, routes, profiles, aliases, model_picker: raw.model_picker || {} };
 }
 
 export function loadRoutingConfig(path) {

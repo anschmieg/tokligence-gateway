@@ -338,6 +338,31 @@ routes:
   - provider: openrouter
     prefixes: ["*"]
 
+# Model picker visibility served on GET /v1/models. Hidden models stay callable;
+# policy.terms explains why they are not offered.
+model_picker:
+  categories:
+    opencode-zen: free
+    cline-oauth: free
+    ollama-cloud: subscription
+    codex-oauth: subscription
+    openrouter: paid
+    mistral: paid
+    modal: paid
+    tokligence: routing
+  providers:
+    ollama-cloud:
+      enabled: false
+      reason: "Ollama Cloud subscription is not active"
+    cline-oauth:
+      enabled: true
+      free_only: true
+  hide:
+    - pattern: "^gpt-5\\.6"
+      reason: "Superseded by the gpt-6 generation"
+    - pattern: "^gpt-5"
+      reason: "Superseded by the gpt-6 generation"
+
 profiles:
   agent-default:
     context_window: 128000
