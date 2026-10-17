@@ -539,6 +539,12 @@ function handleProfileRequest(req, res, parsed, protocol) {
     adapters: { [CLINE_OAUTH_PROVIDER?.id]: CLINE_OAUTH },
     affinityKey: routingAffinityKey(req),
   }).catch((error) => {
+    // The client gets a generic message on purpose, but the operator needs the
+    // real cause: this path is how every routed provider, Zen included, reaches
+    // the client, and an unlogged failure here is indistinguishable from an
+    // upstream outage.
+    console.error(`routing failed for ${parsed?.model ?? "unknown model"}: ${error?.message ?? error}`);
+    if (DEBUG && error?.stack) console.error(error.stack);
     if (res.headersSent) {
       res.destroy(error);
       return;
