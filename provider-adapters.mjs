@@ -133,6 +133,7 @@ function sendThroughProxy({ target, headers, body, signal, proxy }) {
       headers: { host: `${target.hostname}:${targetPort}` },
     });
     connectReq.on("connect", (res, socket) => {
+      console.error(`opencode-zen: proxy CONNECT ${proxyUrl.hostname}:${proxyUrl.port || 80} -> ${target.hostname}:${targetPort} = ${res.statusCode}`);
       if (res.statusCode !== 200) {
         reject(new Error(`proxy CONNECT failed: ${res.statusCode}`));
         return;
@@ -154,7 +155,10 @@ function sendThroughProxy({ target, headers, body, signal, proxy }) {
       signal?.addEventListener("abort", () => upstream.destroy(signal.reason), { once: true });
       upstream.end(body);
     });
-    connectReq.on("error", reject);
+    connectReq.on("error", (error) => {
+      console.error(`opencode-zen: proxy CONNECT error: ${error.message}`);
+      reject(error);
+    });
     signal?.addEventListener("abort", () => connectReq.destroy(signal.reason), { once: true });
     connectReq.end();
   });
