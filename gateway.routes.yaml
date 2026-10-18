@@ -385,8 +385,8 @@ model_picker:
       reason: "Preview endpoint returns an execution error"
     - pattern: "^mistral/mistral-large-4(-0)?$"
       reason: "Listing returns an execution error"
-    - pattern: "^mistral/voxtral-mini-latest$"
-      reason: "Transcription model returns an execution error"
+    - pattern: "^mistral/voxtral-mini-"
+      reason: "Transcription model answers with an empty content array"
 
 profiles:
   agent-default:
