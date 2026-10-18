@@ -5,7 +5,7 @@ publishes the unified model/provider registry, and routes each exact model to
 Tokligence or a configured provider adapter.
 
 Tokligence remains the default backend. Codex OAuth is optional and is reached
-through CLIProxyAPI v7.2.75 embedded in the same container. The adapter binds
+through CLIProxyAPI v7.3.20 embedded in the same container. The adapter binds
 only to loopback and is never exposed directly to the internet.
 
 ## Public endpoints

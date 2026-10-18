@@ -1,11 +1,14 @@
 FROM alpine:3.23 AS cliproxy
 
 ARG TARGETARCH
-ARG CLIPROXY_VERSION=7.2.75
+# Stay on the 7.x line. 8.x regrouped config.yaml under server/access/oauth/etc.,
+# while compileOAuthProxyYaml (route-config.mjs) still writes the flat 7.x schema,
+# so crossing that boundary misconfigures the Codex lane silently.
+ARG CLIPROXY_VERSION=7.3.20
 RUN apk add --no-cache ca-certificates curl tar \
     && case "${TARGETARCH}" in \
-         arm64) archive_arch="aarch64"; checksum="48ef8381ca26d380e04bad5d0387469b4e13d5bb3beee11dc7276c7a1e23efa9" ;; \
-         amd64) archive_arch="amd64"; checksum="d4aeec774e42f832b17d60c81a909655cfd3a435cfafc91aa5f983ff8d2b3692" ;; \
+         arm64) archive_arch="aarch64"; checksum="caa1ae89a8364964f317877913efb7f76365fb51f252455ba929b607552f3769" ;; \
+         amd64) archive_arch="amd64"; checksum="7050c6ecc68b24493c323d3c51d840a9e4509207f124ea34a8428525e27d9354" ;; \
          *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
        esac \
     && archive="CLIProxyAPI_${CLIPROXY_VERSION}_linux_${archive_arch}.tar.gz" \
