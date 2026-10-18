@@ -377,10 +377,16 @@ model_picker:
       reason: "Superseded by the gpt-6 generation"
     - pattern: "-embed|-fim"
       reason: "Embedding and fill-in-the-middle models answer no prompts"
-    - pattern: "^mistral/labs-leanstral-1-5$"
+    - pattern: "-ocr|-tts|-realtime|-moderation"
+      reason: "OCR, speech, realtime-audio and moderation models answer no prompts"
+    - pattern: "^pixtral-"
+      reason: "Pixtral vision models time out on the Messages endpoint"
+    - pattern: "^mistral/labs-leanstral"
       reason: "Preview endpoint returns an execution error"
-    - pattern: "^mistral/mistral-large-4$"
+    - pattern: "^mistral/mistral-large-4(-0)?$"
       reason: "Listing returns an execution error"
+    - pattern: "^mistral/voxtral-mini-latest$"
+      reason: "Transcription model returns an execution error"
 
 profiles:
   agent-default:
