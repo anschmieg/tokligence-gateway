@@ -101,11 +101,26 @@ test("an expired token with a failed refresh reports why", async () => {
 });
 
 test("every request carries the OpenCode identity the gate checks", () => {
-  const headers = zenHeaders({ session: "ses_abc", authorization: "Bearer st_abc", clientVersion: "1.18.32" });
-  assert.equal(headers["user-agent"], "opencode/1.18.32/cli");
+  // Captured from a current client talking to the inference endpoint: the
+  // organisation id, x-session-id and x-session-affinity are all required, and
+  // v2 reports a channel in the user-agent.
+  const headers = zenHeaders({
+    session: "ses_abc",
+    authorization: "Bearer st_abc",
+    clientVersion: "2.0.32",
+    orgId: "wrk_test",
+  });
+  assert.equal(headers["user-agent"], "opencode/latest/2.0.32/cli");
   assert.equal(headers["x-opencode-client"], "cli");
   assert.equal(headers["x-opencode-session"], "ses_abc");
-  assert.match(headers["x-opencode-request"], /^msg_[A-Za-z0-9]{26}$/);
+  assert.equal(headers["x-session-id"], "ses_abc");
+  assert.equal(headers["x-session-affinity"], "ses_abc");
+  assert.equal(headers["x-opencode-org-id"], "wrk_test");
+
+  // A v1 client reports no channel, and the request id it used to send is gone.
+  const v1 = zenHeaders({ session: "ses_abc", authorization: "Bearer st_abc", clientVersion: "1.18.32" });
+  assert.equal(v1["user-agent"], "opencode/1.18.32/cli");
+  assert.equal(v1["x-opencode-request"], undefined);
   assert.notEqual(requestId(), requestId());
 });
 

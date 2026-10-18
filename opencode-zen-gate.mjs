@@ -11,7 +11,7 @@
 // The built-ins are re-declared here with empty schemas so the model can see
 // them but will not select them in favour of the caller's tools.
 
-export const GATE_TOOL_NAMES = ["bash", "edit", "glob", "grep", "read", "skill", "task", "todowrite", "webfetch", "websearch", "write"];
+export const GATE_TOOL_NAMES = ["edit", "glob", "grep", "question", "read", "shell", "skill", "subagent", "webfetch", "write", "execute"];
 
 export const GATE_TOOLS = GATE_TOOL_NAMES.map((name) => ({
   type: "function",
@@ -29,15 +29,30 @@ export function requestId() {
   return `msg_${id}`;
 }
 
-export function zenHeaders({ session, client = "cli", project = "global", clientVersion = "1.18.32", authorization }) {
-  return {
+export function zenHeaders({
+  session,
+  client = "cli",
+  project = "global",
+  clientVersion = "1.18.32",
+  channel = "latest",
+  orgId = "",
+  authorization,
+}) {
+  // v2 reports itself as opencode/<channel>/<version>/cli; v1 had no channel.
+  const versioned = String(clientVersion).startsWith("2.")
+    ? `${channel}/${clientVersion}`
+    : clientVersion;
+  const headers = {
     authorization,
-    "user-agent": `opencode/${clientVersion}/cli`,
+    "user-agent": `opencode/${versioned}/cli`,
     "x-opencode-client": client,
     "x-opencode-project": project,
     "x-opencode-session": session,
-    "x-opencode-request": requestId(),
+    "x-session-id": session,
+    "x-session-affinity": session,
   };
+  if (orgId) headers["x-opencode-org-id"] = orgId;
+  return headers;
 }
 
 // Merges the gate tools with the caller's tools and forces streaming.

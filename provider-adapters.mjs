@@ -50,7 +50,14 @@ async function zenAttempt(candidate, { body, env }) {
   const provider = candidate.provider;
   const { tokens, sessions } = zenServicesFor(provider, env);
   const request = Buffer.isBuffer(body) ? JSON.parse(body.toString("utf8")) : body;
-  const [session, authorization] = await Promise.all([sessions.sessionId(), tokens.authorization()]);
+  const [session, authorization, credential] = await Promise.all([
+    sessions.sessionId(),
+    tokens.authorization(),
+    tokens.credential(),
+  ]);
+  // The service attributes the request with the organisation id; without it the
+  // request is refused as not coming from a client.
+  const orgId = credential?.metadata?.orgID || env.OPENCODE_ZEN_ORG_ID || "";
   // Zen serves the free tier on chat completions only, so an Anthropic caller is
   // translated rather than forwarded.
   const upstream = candidate.protocol === "messages" ? anthropicToOpenAI(request, { gateTools: GATE_TOOLS }) : request;
@@ -62,6 +69,7 @@ async function zenAttempt(candidate, { body, env }) {
       authorization,
       clientVersion: (await sessions.clientVersion()) || provider.client_version || "1.18.32",
       project: provider.client_project || "global",
+      orgId,
     }),
     codec: candidate.protocol === "messages"
       ? { kind: "anthropic-from-openai", stream: request.stream === true, model: candidate.upstreamModel }
