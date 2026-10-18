@@ -50,7 +50,8 @@ COPY route-config.mjs compile-config.mjs gateway.routes.yaml ./
 COPY quota.mjs preferences.mjs dashboard.mjs dashboard.html cloudflare-access.mjs model-catalog.mjs copilot-auto.mjs ./
 # OpenCode Zen adapter: protocol translation, session pool, gate conditions,
 # OAuth credential refresh.
-COPY anthropic-openai-codec.mjs opencode-zen-gate.mjs opencode-zen-credential.mjs opencode-zen-session.mjs ./
+# Anthropic pass-through repair shares the codec it imports.
+COPY anthropic-passthrough.mjs anthropic-openai-codec.mjs opencode-zen-gate.mjs opencode-zen-credential.mjs opencode-zen-session.mjs ./
 # Copilot-compatible catalog metadata for /v1/models.
 COPY model-catalog-metadata.mjs ./
 # Copilot SDK state must live on the mounted data volume; credentials are supplied
