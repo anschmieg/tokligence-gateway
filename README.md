@@ -406,3 +406,48 @@ The integration test uses mock Tokligence and Codex backends. It verifies
 authentication separation, exact model routing, effort preservation, SSE
 pass-through, token counting, fail-closed behavior, and unchanged fallback to
 Tokligence.
+
+## OpenCode Zen credential
+
+Zen's free tier is served only to an account that completed the Console sign-in,
+so this provider cannot use a Console API key: it needs the OAuth credential from
+a device login.
+
+### The credential belongs to the gateway
+
+Each device login mints its own token family, and the token endpoint rotates the
+refresh token on every renewal. **Sending an already-rotated refresh token is
+treated as reuse and revokes the whole family**, including sessions that happen
+to hold the current one.
+
+Two consequences:
+
+- The gateway must own a session that no other client uses. Never seed
+  `OPENCODE_ZEN_*` from a developer's local `opencode auth login`: the local
+  client's next renewal invalidates the gateway's copy, and vice versa.
+- Never call `POST /console/auth/device/token` by hand. The adapter already
+  renews the token ten minutes before expiry and rewrites the stored credential,
+  so a manual refresh only risks presenting a stale token and burning a family.
+
+To rotate the gateway credential deliberately, mint a fresh one in an isolated
+store so the local client is not touched:
+
+```sh
+ISO=$(mktemp -d)
+env HOME="$ISO" XDG_DATA_HOME="$ISO/.local/share" XDG_CONFIG_HOME="$ISO/.config" \
+    OPENCODE2_BINARY="$HOME/.opencode/bin/opencode" \
+    opencode auth login opencode --method device --standalone
+```
+
+Copy the resulting `access` / `refresh` / `expires` into the `OPENCODE_ZEN_*`
+environment variables, set `OPENCODE_ZEN_FORCE_SEED=true`, redeploy, then unset
+the force flag.
+
+### Precedence at startup
+
+The adapter rotates the credential in place on the persistent volume, so the
+stored file is authoritative once it exists. `entrypoint.sh` seeds
+`/data/zen/oauth.json` from the environment only when the file is absent, when
+`OPENCODE_ZEN_FORCE_SEED=true`, or when the environment carries a strictly later
+expiry. That keeps a redeploy from restoring a revoked token over a valid rotated
+one.

@@ -6,13 +6,35 @@ mkdir -p /app/config/dev /root/.tokligence/logs /data /data/cliproxy/auth /data/
 # OpenCode Zen free tier needs the OAuth credential from a Console sign-in, not a
 # Console API key. The credential arrives as environment variables and is written
 # to the persistent volume; the adapter refreshes it in place before it expires.
+#
+# The adapter rotates the refresh token and rewrites /data/zen/oauth.json, so the
+# environment variables are only a bootstrap value: reseeding them on every start
+# would restore an already-revoked token and leave the provider failing with
+# "Invalid credential". The stored credential therefore wins unless the caller
+# proves it is newer (a later expiry) or asks for it explicitly.
+zen_is_digits() { case "$1" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
+
 if [ -n "${OPENCODE_ZEN_ACCESS_TOKEN:-}" ]; then
-  umask 077
-  cat > /data/zen/oauth.json <<ZEN_JSON
+  zen_env_expires=${OPENCODE_ZEN_EXPIRES_MS:-0}
+  zen_is_digits "$zen_env_expires" || zen_env_expires=0
+  zen_stored_expires=0
+  if [ -f /data/zen/oauth.json ]; then
+    zen_stored_expires=$(sed -n 's/.*"expires":\([0-9][0-9]*\).*/\1/p' /data/zen/oauth.json | head -1)
+    zen_is_digits "$zen_stored_expires" || zen_stored_expires=0
+  fi
+
+  if [ -f /data/zen/oauth.json ] \
+     && [ "${OPENCODE_ZEN_FORCE_SEED:-false}" != "true" ] \
+     && [ "$zen_env_expires" -le "$zen_stored_expires" ]; then
+    echo "Kept stored OpenCode Zen credential (expires $zen_stored_expires; env expires $zen_env_expires). Set OPENCODE_ZEN_FORCE_SEED=true to replace it."
+  else
+    umask 077
+    cat > /data/zen/oauth.json <<ZEN_JSON
 {"type":"oauth","methodID":"device","access":"${OPENCODE_ZEN_ACCESS_TOKEN}","refresh":"${OPENCODE_ZEN_REFRESH_TOKEN:-}","expires":${OPENCODE_ZEN_EXPIRES_MS:-0},"metadata":{"server":"https://opencode.ai/console","orgID":"${OPENCODE_ZEN_ORG_ID:-}","orgName":"${OPENCODE_ZEN_ORG_NAME:-}"}}
 ZEN_JSON
-  umask 022
-  echo "Wrote OpenCode Zen credential to /data/zen/oauth.json"
+    umask 022
+    echo "Wrote OpenCode Zen credential to /data/zen/oauth.json"
+  fi
 elif [ ! -f /data/zen/oauth.json ]; then
   echo "NOTE: OpenCode Zen disabled; no credential at /data/zen/oauth.json and OPENCODE_ZEN_ACCESS_TOKEN is unset"
 fi
