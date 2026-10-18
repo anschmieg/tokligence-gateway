@@ -251,4 +251,21 @@ test("the façade routes exact Codex models and preserves Claude effort", async 
   assert.equal(compactUpstream.headers["x-claude-code-session-id"], "cc-compact-session");
   assert.equal(compactUpstream.headers.authorization, "Bearer internal-secret");
   assert.equal(tokligenceRequests.length, 1);
+
+  // Body-identity synthesis: when a client sends only the
+  // x-claude-code-session-id header (no body identity), the session id is
+  // mirrored into metadata.user_id so body-reading lanes can pin the session.
+  const synthesized = await fetch(`${baseUrl}/v1/messages`, {
+    method: "POST",
+    headers: { ...headers, "x-claude-code-session-id": "cc-synth-session" },
+    body: JSON.stringify({
+      model: "gpt-6-luna",
+      messages: [{ role: "user", content: "hello" }],
+    }),
+  });
+  assert.equal(synthesized.status, 200);
+  const synthUpstream = codexRequests.at(-1);
+  assert.equal(synthUpstream.path, "/v1/messages");
+  assert.equal(synthUpstream.body.metadata.user_id.session_id, "cc-synth-session");
+  assert.equal(tokligenceRequests.length, 1);
 });

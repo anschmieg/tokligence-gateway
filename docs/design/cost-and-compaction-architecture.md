@@ -159,9 +159,10 @@ the identity was in the body.
    on the direct path, `OAUTH_PROXY_FORWARD_HEADERS` on the routed one - and keep
    `openai-beta` symmetric with the `anthropic-beta` already forwarded. They go to
    CLIProxyAPI only; a session id is not handed to third-party providers.
-2. **Pending**: when a client sends `x-claude-code-session-id` and no
-   `metadata.user_id`, synthesise the body identity too, for lanes that read only
-   the body.
+2. **Done**: mirror `x-claude-code-session-id` into `metadata.user_id` when the
+   client sends only the header, for lanes that read only the body
+   (`synthesizeMetadataUserId` in `tgw-proxy.mjs`). Covered by a
+   `proxy-integration.test.mjs` regression test.
 
 Measured effect on the fixtures: 0 cached tokens -> 98% once an identity survives
 the front door. More quota for a handful of lines than any routing cleverness.
@@ -187,6 +188,15 @@ the session model and log the miss.
 
 **Failure handling.** Any routing error or target failure falls back to the
 session model. Routing must never lose a turn.
+
+**Class routing state.** Model substitution onto a cheap policy model is
+specified in this section but not yet wired into model selection: it is opt-in
+and disabled by default, because no cheap model in the current fleet clears the
+window floor against 1M-window session models, so substituting one would either
+be a no-op or risk routing a codex-bound request off the codex lane. Enable it
+by adding `classRouting.cheapPolicyModel` to `gateway.routes.yaml` once a cheap
+target with `context_window >=` the session model's window exists; the window
+floor rule and session-model fallback apply.
 
 **Phase 2 — role aliases.** Harness files name a role
 (`model: role/review-strong`); the gateway resolves it using family diversity,
@@ -328,7 +338,7 @@ full-price turn escapes on the Codex lane.
 
 | phase | content | state stored |
 |---|---|---|
-| 0 | affinity fix (session headers forwarded - done; body identity synthesis pending), Codex compaction pass-through (done), hint headers, class-aware routing, per-route beta allow-list, budget/quota baseline | session id + timestamp |
+| 0 | affinity fix (session headers forwarded - done; body identity synthesis done), Codex compaction pass-through (done), hint headers (client-side), class-aware routing (opt-in; disabled by default until a cheap policy model whose context window clears the floor is configured), per-route beta allow-list, budget/quota baseline | session id + timestamp |
 | 1 | role aliases with family diversity, quota-aware governor, window-floor rule in the picker | none added |
 | 2 | cold-resume hardening: harness-compaction routing (from phase 0) plus the gateway rewrite only if spike 2 says it is needed | bounded in-memory summary cache |
 | 3 (optional) | Codex-lane swap to shunt + transport; eager warm compaction only if resume latency warrants it | — |

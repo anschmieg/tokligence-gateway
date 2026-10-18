@@ -502,6 +502,20 @@ async function refreshRoutingQuotas() {
   for (const result of results) PROFILE_RUNTIME_STATE.quotas.set(result.provider, result);
 }
 
+// Mirrors the client's session id from the `x-claude-code-session-id` header
+// into the request body's `metadata.user_id` when the client did not send one.
+// The OAuth proxy (CLIProxyAPI) reads the session from either the header *or*
+// `metadata.user_id.session_id`; some lanes read only the body, so mirroring
+// keeps session affinity and prompt-cache pinning alive across the front door.
+// An identity the client already sent is never overwritten.
+function synthesizeMetadataUserId(parsed, req) {
+  const sessionId = req.headers["x-claude-code-session-id"];
+  if (!sessionId || !parsed || typeof parsed !== "object") return;
+  const metadata = parsed.metadata || (parsed.metadata = {});
+  if (metadata.user_id) return;
+  metadata.user_id = { session_id: String(sessionId) };
+}
+
 function resolveModel(model) {
   return PREFERENCES.resolve(model, resolveConfiguredAlias);
 }
@@ -1461,6 +1475,8 @@ const server = http.createServer((req, res) => {
         return;
       }
 
+      synthesizeMetadataUserId(parsed, req);
+
       if (handleProfileRequest(req, res, parsed, "chat_completions")) return;
 
       const model = resolveModel(parsed.model);
@@ -1720,6 +1736,8 @@ const server = http.createServer((req, res) => {
         return;
       }
 
+      synthesizeMetadataUserId(parsed, req);
+
       const model = resolveModel(parsed.model);
       const messages = responsesPayloadToMessages(parsed);
 
@@ -1890,6 +1908,8 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ error: "Invalid JSON" }));
         return;
       }
+
+      synthesizeMetadataUserId(parsed, req);
 
       const model = resolveModel(parsed.model);
 
