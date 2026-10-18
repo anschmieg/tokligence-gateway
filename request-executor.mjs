@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { startAttempt } from "./provider-adapters.mjs";
 import { collectAnthropicStream, createAnthropicStreamCodec, createSseChunkReader } from "./anthropic-openai-codec.mjs";
+import { respondWithAnthropicPassthrough } from "./anthropic-passthrough.mjs";
 
 // Errors whose allowance is gone until a periodic reset (e.g. a daily free
 // quota) get a long cooldown; transient limits (per-minute rate limits,
@@ -194,14 +195,32 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
           return { committed: true, requestId, provider: candidate.provider.id, attempts: plan.candidates.indexOf(candidate) + 1, translated: codec.kind };
         }
         const headers = { ...response.headers, "x-gateway-request-id": requestId, "x-gateway-model": plan.publicModel, "x-gateway-provider": candidate.provider.id, "x-gateway-upstream-model": candidate.upstreamModel };
-        if (plan.required.streaming) {
-          const first = await firstStreamChunk(response, aborter.signal);
-          res.writeHead(status, headers);
-          res.write(first);
-        } else {
-          res.writeHead(status, headers);
+        // An Anthropic-protocol pass-through is repaired here rather than relayed
+        // verbatim: some Anthropic-compatible upstreams answer with an array where
+        // the schema wants a string, or buffer a response the caller asked to
+        // stream. Healthy responses come back byte-identical.
+        const thinking = body?.thinking;
+        const keepReasoning = Boolean(thinking && thinking.type !== "disabled") || Boolean(body?.reasoning);
+        const repaired = candidate.protocol === "messages"
+          && await respondWithAnthropicPassthrough({
+            response,
+            res,
+            status,
+            headers,
+            wantStream: plan.required.streaming === true,
+            keepReasoning,
+            signal: aborter.signal,
+          });
+        if (!repaired) {
+          if (plan.required.streaming) {
+            const first = await firstStreamChunk(response, aborter.signal);
+            res.writeHead(status, headers);
+            res.write(first);
+          } else {
+            res.writeHead(status, headers);
+          }
+          response.pipe(res);
         }
-        response.pipe(res);
         if (affinityKey && plan.profile && runtimeState.affinity) {
           runtimeState.affinity.set(`${affinityKey}:${plan.profile}`, {
             provider: candidate.provider.id,
