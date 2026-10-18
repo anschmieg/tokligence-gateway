@@ -350,18 +350,37 @@ model_picker:
     mistral: paid
     modal: paid
     tokligence: routing
+  # enabled: false only clears model_picker_enabled in /v1/models. The models
+  # keep their routes and stay callable, so each reason below records what the
+  # account can actually reach from a Messages-API client rather than a
+  # capability the gateway refuses to serve.
   providers:
     ollama-cloud:
       enabled: false
       reason: "Ollama Cloud subscription is not active"
     cline-oauth:
-      enabled: true
-      free_only: true
+      enabled: false
+      reason: "Cline free models accept only OpenAI Chat Completions, not the Messages endpoint"
+    openrouter:
+      enabled: false
+      reason: "OpenRouter workspace has no credit balance"
+    modal:
+      enabled: false
+      reason: "Modal GLM endpoint returns an execution error"
+    tokligence:
+      enabled: false
+      reason: "Internal routing alias rather than a selectable model"
   hide:
     - pattern: "^gpt-5\\.6"
       reason: "Superseded by the gpt-6 generation"
     - pattern: "^gpt-5"
       reason: "Superseded by the gpt-6 generation"
+    - pattern: "-embed|-fim"
+      reason: "Embedding and fill-in-the-middle models answer no prompts"
+    - pattern: "^mistral/labs-leanstral-1-5$"
+      reason: "Preview endpoint returns an execution error"
+    - pattern: "^mistral/mistral-large-4$"
+      reason: "Listing returns an execution error"
 
 profiles:
   agent-default:
