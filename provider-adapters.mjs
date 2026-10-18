@@ -102,6 +102,13 @@ function requestUrl(candidate, path, env) {
 }
 
 function send({ target, headers, body, signal }) {
+  // An optional proxy (OPENCODE_ZEN_PROXY) lets the Zen adapter exit through a
+  // network Zen accepts, without touching any other provider's traffic. The
+  // tunnel is a plain HTTP CONNECT to the target, with TLS then layered on top.
+  const proxy = process.env.OPENCODE_ZEN_PROXY;
+  if (proxy) {
+    return sendThroughProxy({ target, headers, body, signal, proxy });
+  }
   const client = target.protocol === "https:" ? https : http;
   return new Promise((resolve, reject) => {
     const upstream = client.request(
@@ -111,6 +118,45 @@ function send({ target, headers, body, signal }) {
     upstream.once("error", reject);
     signal?.addEventListener("abort", () => upstream.destroy(signal.reason), { once: true });
     upstream.end(body);
+  });
+}
+
+function sendThroughProxy({ target, headers, body, signal, proxy }) {
+  const proxyUrl = new URL(proxy);
+  const targetPort = Number(target.port) || (target.protocol === "https:" ? 443 : 80);
+  return new Promise((resolve, reject) => {
+    const connectReq = http.request({
+      host: proxyUrl.hostname,
+      port: Number(proxyUrl.port) || 80,
+      method: "CONNECT",
+      path: `${target.hostname}:${targetPort}`,
+      headers: { host: `${target.hostname}:${targetPort}` },
+    });
+    connectReq.on("connect", (res, socket) => {
+      if (res.statusCode !== 200) {
+        reject(new Error(`proxy CONNECT failed: ${res.statusCode}`));
+        return;
+      }
+      const secure = target.protocol === "https:";
+      const upstream = (secure ? https : http).request(
+        {
+          hostname: target.hostname,
+          port: targetPort,
+          path: `${target.pathname}${target.search}`,
+          method: "POST",
+          headers,
+          socket,
+          servername: secure ? target.hostname : undefined,
+        },
+        (response) => resolve({ response, upstream }),
+      );
+      upstream.once("error", reject);
+      signal?.addEventListener("abort", () => upstream.destroy(signal.reason), { once: true });
+      upstream.end(body);
+    });
+    connectReq.on("error", reject);
+    signal?.addEventListener("abort", () => connectReq.destroy(signal.reason), { once: true });
+    connectReq.end();
   });
 }
 
