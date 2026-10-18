@@ -182,25 +182,28 @@ export function createSessionPool({
     });
     if (!response.ok) throw new Error(`OpenCode Zen could not create a session (${response.status} at ${path}): ${describe()}`);
     const payload = await response.json();
-    // v2 nests the session under `data`; v1 returned it at the top level.
+    // v2 nests the session under `data` and reports the project it belongs to;
+    // v1 returned it at the top level with no project.
     const id = payload?.data?.id || payload?.id;
     if (!id) throw new Error(`OpenCode Zen session response had no id (${path}): ${describe()}`);
-    return { id, minted: now() };
+    return { id, project: payload?.data?.projectID || payload?.projectID || null, minted: now() };
   };
 
   const fill = async () => {
     while (ready.length < size) ready.push(await mint());
   };
 
+  // Returns the session together with the project that owns it, so the caller
+  // can describe the session it presents instead of guessing.
   const sessionId = async () => {
     while (ready.length) {
       const entry = ready.shift();
       if (now() - entry.minted <= ttlMs) {
         if (ready.length < size) fill().catch(() => {});
-        return entry.id;
+        return { id: entry.id, project: entry.project };
       }
     }
-    return (await mint()).id;
+    return mint();
   };
 
   return { sessionId, ensureServer, clientVersion, close: () => { ready.length = 0; } };
