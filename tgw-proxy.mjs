@@ -37,6 +37,7 @@ import { decorateModel } from "./model-catalog-metadata.mjs";
 import { COPILOT_AUTO_MODEL, createCopilotAutoAdapter } from "./copilot-auto.mjs";
 import { buildRoutePlan } from "./routing-planner.mjs";
 import { executeRoutePlan } from "./request-executor.mjs";
+import { anthropicMessageToSse, normalizeAnthropicMessage } from "./anthropic-passthrough.mjs";
 import {
   ClineAdapterError,
   ClineOAuthAdapter,
@@ -2013,8 +2014,27 @@ const server = http.createServer((req, res) => {
 
         callMistralOpenAI(model, messages, parsed.max_tokens || 4096)
           .then((data) => {
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify(openAIToAnthropicMessage(data, model)));
+            // Mistral's OpenAI endpoint answers GLM with `content` holding an array
+            // of parts (reasoning first, answer last) where the Anthropic schema
+            // wants a string, and this branch always replies with a complete
+            // message. Repair the shape, and synthesise the stream when asked.
+            const streamRequested = parsed.stream === true;
+            const thinkingRequested = Boolean(parsed.thinking && parsed.thinking.type !== "disabled");
+            const { message } = normalizeAnthropicMessage(
+              openAIToAnthropicMessage(data, model),
+              { keepReasoning: thinkingRequested },
+            );
+            if (streamRequested) {
+              res.writeHead(200, {
+                "Content-Type": "text/event-stream; charset=utf-8",
+                "Cache-Control": "no-cache",
+                Connection: "keep-alive",
+              });
+              res.end(anthropicMessageToSse(message));
+            } else {
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify(message));
+            }
             recordModelObservedUsage(model, data);
           })
           .catch((err) => {
