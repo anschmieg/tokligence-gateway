@@ -226,4 +226,29 @@ test("the façade routes exact Codex models and preserves Claude effort", async 
   });
   assert.equal(existing.status, 200);
   assert.equal(tokligenceRequests.length, 1);
+
+  // Codex remote compaction is a distinct route on the Codex lane. It must reach
+  // CLIProxyAPI as /v1/responses/compact, body intact, with the session headers
+  // the lane keys its credential affinity on.
+  const compact = await fetch(`${baseUrl}/v1/responses/compact`, {
+    method: "POST",
+    headers: {
+      ...headers,
+      "session-id": "019f-compact-session",
+      "x-claude-code-session-id": "cc-compact-session",
+    },
+    body: JSON.stringify({
+      model: "gpt-6-luna",
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "compact please" }] }],
+    }),
+  });
+  assert.equal(compact.status, 200);
+  const compactUpstream = codexRequests.at(-1);
+  assert.equal(compactUpstream.path, "/v1/responses/compact");
+  assert.equal(compactUpstream.body.model, "gpt-6-luna");
+  assert.equal(compactUpstream.body.input[0].content[0].text, "compact please");
+  assert.equal(compactUpstream.headers["session-id"], "019f-compact-session");
+  assert.equal(compactUpstream.headers["x-claude-code-session-id"], "cc-compact-session");
+  assert.equal(compactUpstream.headers.authorization, "Bearer internal-secret");
+  assert.equal(tokligenceRequests.length, 1);
 });

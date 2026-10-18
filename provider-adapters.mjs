@@ -7,14 +7,32 @@ import { createSessionPool } from "./opencode-zen-session.mjs";
 
 const FORWARD_HEADERS = ["accept", "anthropic-beta", "anthropic-version", "content-type", "user-agent", "x-request-id"];
 
+// Forwarded to the self-hosted Codex lane only: CLIProxyAPI keys credential
+// affinity on these session headers, and a missed affinity costs a prompt-cache
+// miss on every turn. A session identifier is not sent to third-party providers,
+// where nothing consumes it.
+const OAUTH_PROXY_FORWARD_HEADERS = [
+  "openai-beta",
+  "session-id",
+  "session_id",
+  "thread-id",
+  "x-claude-code-session-id",
+  "x-client-request-id",
+  "x-session-affinity",
+  "x-session-id",
+];
+
 function baseUrl(provider, env) {
   if (provider.adapter === "tokligence") return new URL(`http://${env.TGW_HOST || "127.0.0.1"}:${env.TGW_PORT || 8081}`);
   const value = (provider.base_url_env && env[provider.base_url_env]) || provider.base_url || provider.default_base_url;
   return value ? new URL(value) : null;
 }
 
-function endpointSuffix(pathname) {
+export function endpointSuffix(pathname) {
   if (pathname.includes("/chat/completions")) return "chat/completions";
+  // Codex remote compaction is its own route. Collapsing it to /responses would
+  // silently turn a compaction call into an ordinary one.
+  if (pathname.includes("/responses/compact")) return "responses/compact";
   if (pathname.includes("/responses")) return "responses";
   if (pathname.includes("/messages")) return "messages";
   return null;
@@ -183,6 +201,9 @@ export async function startAttempt({ candidate, req, path, body, env = process.e
   const headers = { "content-type": "application/json", "content-length": String(body.length), ...candidate.provider.headers };
   for (const name of FORWARD_HEADERS) if (req.headers[name] !== undefined) headers[name] = req.headers[name];
   if (candidate.provider.adapter === "oauth-proxy") {
+    for (const name of OAUTH_PROXY_FORWARD_HEADERS) {
+      if (req.headers[name] !== undefined) headers[name] = req.headers[name];
+    }
     headers.authorization = `Bearer ${env[candidate.provider.internal_api_key_env]}`;
   } else if (candidate.provider.api_key_env && env[candidate.provider.api_key_env]) {
     headers.authorization = `Bearer ${env[candidate.provider.api_key_env]}`;

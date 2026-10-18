@@ -860,13 +860,29 @@ function readJsonBody(req) {
   });
 }
 
+// Headers the Codex lane needs to do its own job. CLIProxyAPI derives its
+// credential-affinity key from the client's session headers (Claude Code
+// x-claude-code-session-id, Codex session-id/session_id, OpenCode
+// x-session-id/x-session-affinity, pi x-client-request-id) and falls back to the
+// body's prompt_cache_key or metadata.user_id. Affinity is what keeps a session
+// on one ChatGPT account; strip these and every turn round-robins to another
+// account, which is a prompt-cache miss on each turn. openai-beta is the
+// OpenAI-protocol analogue of the anthropic-beta already forwarded here.
 const CODEX_FORWARD_HEADERS = [
   "accept",
   "anthropic-beta",
   "anthropic-version",
   "content-type",
+  "openai-beta",
+  "session-id",
+  "session_id",
+  "thread-id",
   "user-agent",
+  "x-claude-code-session-id",
+  "x-client-request-id",
   "x-request-id",
+  "x-session-affinity",
+  "x-session-id",
 ];
 
 function proxyToCodex(req, res, body) {
