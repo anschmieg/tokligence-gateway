@@ -270,3 +270,98 @@ test("a middle candidate's 404 must not abort the failover chain", async (t) => 
   assert.equal(mistralRequests.length, 1);
   assert.equal(openrouterRequests.length, 1);
 });
+
+test("an Anthropic Messages request to Mistral is translated with tools and streaming", async (t) => {
+  const mistralRequests = [];
+  const mistral = http.createServer(async (req, res) => {
+    const body = await readJson(req);
+    mistralRequests.push({ path: req.url, headers: req.headers, body });
+    if (body.stream) {
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.end([
+        "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"mis\"},\"finish_reason\":null}]}\n\n",
+        "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"tral\"},\"finish_reason\":null}]}\n\n",
+        "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n\n",
+        "data: [DONE]\n\n",
+      ].join(""));
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      id: "chatcmpl-1",
+      object: "chat.completion",
+      model: body.model,
+      choices: [{ index: 0, message: { role: "assistant", content: "mistral ok" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 3, completion_tokens: 2 },
+    }));
+  });
+  const mistralPort = await listen(mistral);
+
+  const child = spawn(process.execPath, ["tgw-proxy.mjs"], {
+    cwd: projectRoot,
+    env: {
+      ...process.env,
+      PROXY_PORT: "0",
+      TOKLIGENCE_AUTH_SECRET: "public-secret",
+      TOKLIGENCE_ADMIN_SECRET: "admin-secret",
+      MISTRAL_API_KEY: "mistral-key",
+      MISTRAL_API_BASE: `http://127.0.0.1:${mistralPort}/v1`,
+      CODEX_PROXY_ENABLED: "false",
+      CODEX_PROXY_API_KEY: "",
+      OPENROUTER_API_KEY: "",
+      OPENCODE_API_KEY: "",
+      MODAL_GLM5_API_KEY: "",
+      MINIMAX_API_KEY: "",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  t.after(async () => {
+    child.kill("SIGTERM");
+    await close(mistral);
+  });
+
+  const proxyPort = await waitForProxy(child);
+  const url = `http://127.0.0.1:${proxyPort}/v1/messages`;
+  const headers = {
+    Authorization: "Bearer public-secret", "Content-Type": "application/json",
+    "anthropic-version": "2023-06-01",
+  };
+
+  const single = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model: "mistral-large-latest",
+      max_tokens: 64,
+      messages: [{ role: "user", content: "hello" }],
+      tools: [{ name: "lookup", description: "look up", input_schema: { type: "object", properties: {} } }],
+    }),
+  });
+  assert.equal(single.status, 200);
+  const message = await single.json();
+  assert.equal(message.type, "message");
+  assert.equal(message.content[0].text, "mistral ok");
+  assert.equal(mistralRequests[0].path, "/v1/chat/completions");
+  assert.equal(mistralRequests[0].body.stream, false);
+  assert.equal(mistralRequests[0].body.tools?.length, 1);
+  assert.equal(mistralRequests[0].body.tools[0].function.name, "lookup");
+
+  const streamed = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model: "mistral-large-latest",
+      max_tokens: 64,
+      stream: true,
+      messages: [{ role: "user", content: "hello" }],
+    }),
+  });
+  assert.equal(streamed.status, 200);
+  assert.match(streamed.headers.get("content-type"), /text\/event-stream/);
+  const sse = await streamed.text();
+  assert.match(sse, /event: message_start/);
+  assert.match(sse, /mis/);
+  assert.match(sse, /event: message_stop/);
+  assert.equal(mistralRequests[1].path, "/v1/chat/completions");
+  assert.equal(mistralRequests[1].body.stream, true);
+});

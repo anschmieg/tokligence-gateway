@@ -108,7 +108,11 @@ providers:
     api_key_env: MISTRAL_API_KEY
     base_url_env: MISTRAL_API_BASE
     default_base_url: https://api.mistral.ai/v1
-    protocols: [chat_completions, messages]
+    # Mistral exposes only an OpenAI-compatible chat-completions API; /v1/messages
+    # is served through the shared Anthropic<->chat-completions translation, which
+    # carries tools, images and streaming. Declaring `messages` here would make the
+    # planner treat the surface as native and skip that translation.
+    protocols: [chat_completions]
     discover_models: true
     models:
       - id: mistral-large-latest

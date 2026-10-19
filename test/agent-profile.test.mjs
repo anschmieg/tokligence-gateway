@@ -215,11 +215,19 @@ test("a provider that opts out of translation keeps its own lane", () => {
   assert.equal(plan, null);
 });
 
-test("a provider with native Anthropic support is served by pass-through", () => {
+test("Mistral serves Anthropic callers through translation, not a lossy shim", () => {
   const plan = buildRoutePlan(config, {
     model: "mistral-medium-3-5",
     protocol: "messages",
-    body: { messages: [{ role: "user", content: "hello" }] },
+    body: {
+      messages: [{ role: "user", content: "hello" }],
+      tools: [{ name: "lookup", input_schema: { type: "object", properties: {} } }],
+    },
   }, { ...env, MISTRAL_API_KEY: "mistral-key" }, { cooldowns: new Map() });
-  assert.equal(plan, null);
+  assert.equal(plan.error, undefined);
+  const [candidate] = plan.candidates;
+  assert.equal(candidate.provider.id, "mistral");
+  assert.equal(candidate.upstreamModel, "mistral-medium-3-5");
+  assert.equal(candidate.translate, "anthropic-from-openai");
+  assert.equal(candidate.native, false);
 });

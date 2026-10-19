@@ -360,7 +360,7 @@ MISTRAL_API_BASE=https://api.mistral.ai/v1
 
 Models can be requested with the `mistral/` prefix or bare Mistral IDs, for example `mistral/mistral-large-latest` or `mistral-large-latest`. The proxy discovers available models from Mistral's `/v1/models` endpoint and falls back to the configured model list when discovery is unavailable.
 
-Streaming is supported on `/v1/chat/completions`. The Anthropic Messages and OpenAI Responses endpoints are translated to Mistral's OpenAI-compatible chat completions and returned in the requested format.
+Streaming is supported on `/v1/chat/completions`. The Anthropic Messages endpoint is translated to Mistral's OpenAI-compatible chat completions and returned in the requested Anthropic format, carrying tools, images and streaming; the OpenAI Responses endpoint is translated to a complete (non-streaming) response.
 
 ### Mistral Vibe quota display (unofficial)
 
@@ -392,13 +392,17 @@ candidates, and the configured profile is appended as a fallback.
 `POST /v1/messages` is Anthropic-compatible for the whole catalog, not only for
 the providers that speak Messages natively.
 
-- `mistral` and `opencode-zen` declare the `messages` protocol and are served by
-  pass-through (Zen translates internally behind its free-tier gate).
-- Every other OpenAI-protocol provider (Google AI Studio, NVIDIA, Cerebras,
-  Together, Groq, Nous, OpenRouter, ...) is reached through translation: the
-  request becomes a chat-completions call and the reply becomes Anthropic
-  content blocks, JSON for a non-streaming caller and Anthropic server-sent
-  events for a streaming one.
+- `mistral` exposes only an OpenAI-compatible chat-completions API, so it is
+  reached through the same translation as the other OpenAI-protocol providers,
+  carrying tools, images and streaming (an earlier chat-completions shim dropped
+  tool calls and always answered non-streaming).
+- Every OpenAI-protocol provider (Google AI Studio, NVIDIA, Cerebras, Together,
+  Groq, Nous, OpenRouter, ...) is reached through translation: the request
+  becomes a chat-completions call and the reply becomes Anthropic content
+  blocks, JSON for a non-streaming caller and Anthropic server-sent events for a
+  streaming one.
+- `opencode-zen` declares the `messages` protocol and is served by pass-through
+  (Zen translates internally behind its free-tier gate).
 - `tokligence` (MiniMax), `codex-oauth` and `copilot-auto` keep their dedicated
   lanes, and `modal` sets `messages_translation: false` because GLM reports its
   answer through `reasoning_content`, which the translation would drop.
