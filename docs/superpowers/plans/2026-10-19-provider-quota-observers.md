@@ -34,9 +34,9 @@
 
 ## Current implementation baseline
 
-Already present locally, uncommitted: Codex management config/key wiring, fixed per-account quota calls, numeric window filtering, Mistral timestamped response-header capture, usage/cache counters and synthetic tests. Last reported verification was 120 tests; re-run rather than assume it remains current.
+Implemented and landed as `e703c36` ("observe Codex and Mistral quota without inference probes") and deployed to production: Codex management config/key wiring, fixed per-account quota calls, numeric window filtering, Mistral timestamped response-header capture, usage/cache counters and synthetic tests. Validation is 156/156 with lint clean.
 
-Remaining: Mistral subscription adapter, cache/throttling, structured display, additional security/failure tests, protocol-path accounting coverage, documentation correction and independent review. Existing Codex calls currently run sequentially with per-request timeouts, and no refresh cache prevents dashboard polling from multiplying calls. Treat these as draft code to harden, not deployed capabilities.
+Remaining: independent read-only review of the security boundaries, and live-account validation (a separate checkpoint that needs a real credential installed). The observer modules are implemented and deployed; treat live behavior as unverified until reviewed.
 
 ## Review Focus
 

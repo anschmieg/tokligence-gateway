@@ -1,6 +1,6 @@
 # Cost and compaction architecture
 
-Status: **phase 0 and phase 1 implemented; phase 2 gated.** Class routing is active for delegated/auxiliary turns and two role aliases are configured. Cold-resume routing remains evidence-gated as noted below.
+Status: **phase 0 and phase 1 implemented; phase 2 gated; phase 3 struck.** Class routing is active for delegated/auxiliary turns and two role aliases are configured. Cold-resume routing remains evidence-gated as noted below, and the Codex-lane transport swap is not pursued (see phase 3).
 Scope: how agent work is routed, and how long conversations are kept cheap,
 across Claude Code, Codex CLI, OpenCode and T3 Code.
 
@@ -33,7 +33,7 @@ three distinct translation surfaces, not one:
 
 | surface | who does it | notes |
 |---|---|---|
-| Messages <-> chat completions | `protocol-codecs.mjs` (~30 lines), `anthropic-openai-codec.mjs` (~350), `openai-stream.mjs` | makes `/v1/messages` universal: every provider that declares `chat_completions` is reachable through translation (groq, cerebras, together, nvidia, google, openrouter, nous, cline), and `modal` opts out with `messages_translation: false` |
+| Messages <-> chat completions | `protocol-codecs.mjs` (~30 lines), `anthropic-openai-codec.mjs` (~350), `openai-stream.mjs` | makes `/v1/messages` universal: every provider that declares `chat_completions` is reachable through translation (mistral, groq, cerebras, together, nvidia, google, openrouter, nous, cline), and `modal` opts out with `messages_translation: false`. Only `opencode-zen` keeps a native `messages` declaration, because its own adapter implements the free-tier gate |
 | The Codex lane | **not gateway code**: `codex-oauth` is `adapter: oauth-proxy` pointing at CLIProxyAPI v7.3.20 on loopback | CLIProxyAPI owns OAuth, refresh, credential selection, session affinity, retry, the Anthropic->Codex translation, the Responses surface, and Codex remote compaction (`POST /v1/responses/compact`, plus the `remote_compaction_v2` `compaction_trigger` it does not yet answer - upstream issues #4848, #3085) |
 | Anthropic pass-through, Zen gate, cline/copilot adapters, tokligence backend | gateway modules | `anthropic-passthrough.mjs` normalises non-conforming Anthropic responses |
 
@@ -131,8 +131,8 @@ cache counters every turn reports.
 |---|---|
 | Front door | the deployed gateway, for every harness and machine |
 | Claudex / shunt | stays shippable, out of the path; useful parts are candidates to fold in later |
-| Codex lane | keep CLIProxyAPI. It already implements Codex remote compaction, so the transport swap is **not** justified by compaction. Fix the gateway's own pass-through and header forwarding instead; the swap stays a separate later decision, argued on continuation-delta economics, Codex CLI parity and routing reuse |
-| Model selection | **class routing first** (request class + agent type), **role aliases later** |
+| Codex lane | keep CLIProxyAPI. It already implements Codex remote compaction, so the transport swap is **not** justified by compaction. The gateway's own pass-through and header forwarding were fixed instead. **The Codex-lane swap to shunt is struck (2026-10-19):** it was only ever argued on continuation-delta economics and Codex CLI inbound parity, and neither is proven |
+| Model selection | **class routing first** (request class + agent type), **role aliases later** - both now implemented |
 | Provider compaction (Anthropic lane) | enable the beta **where the lane honours it** |
 | Provider compaction (Codex lane) | pass `/v1/responses/compact` through; it makes Codex read the history, so here it is the fidelity option, not the cheap one |
 | Harness compaction | warm cache -> the provider; cold cache -> a free/cheap model |
@@ -321,11 +321,9 @@ full-price turn escapes on the Codex lane.
   lane), and no injecting it when the client already asked.
 - **No replacing the chat-completions codec with shunt.** That surface is small
   and works; a Rust sidecar would need the same provider credentials and add a
-  component without capability. The swap that would buy something is the Codex
-  lane (CLIProxyAPI + transport -> shunt + `claudex-transport`), which is its
-  own decision with its own costs: two binaries in the container, the ChatGPT
-  device login moved inside it, a volume for transport auth state, Dockerfile
-  changes.
+  component without capability. The only swap that would have bought something
+  was the Codex lane (CLIProxyAPI + transport -> shunt + `claudex-transport`),
+  and that swap is **struck** (phase 3). Shunt stays out of the path entirely.
 
 ## 6. Failure modes
 
@@ -352,8 +350,9 @@ full-price turn escapes on the Codex lane.
 3. Can a harness be driven to compact headlessly? (`claude -p --continue
    "/compact"` returned exit 0 with no output and no distinguishable request on
    the wire.) Not a foundation until proven.
-4. Does Codex CLI inbound parity matter? If yes, that is the strongest reason to
-   host the Codex lane on shunt.
+4. **Closed, not pursued (2026-10-19).** Codex CLI inbound parity was the only
+   remaining argument for hosting the Codex lane on shunt; the swap is struck
+   (phase 3), so this spike is moot.
 5. Exact cold threshold per provider, learned from cache counters. The gateway
    now captures bounded Codex session intervals and aggregate cache counters,
    but the Codex OAuth lane has no authoritative quota denominator in the
@@ -366,10 +365,10 @@ full-price turn escapes on the Codex lane.
 
 | phase | content | state stored |
 |---|---|---|
-| 0 | affinity and Codex compaction pass-through (done); Claude hint headers and beta allow-list implemented; MiniMax route explicitly ineligible per upstream docs; no direct Anthropic provider configured; class-routing foundation implemented but disabled pending verified target/window; aggregate and bounded session-interval cache measurement implemented, savings measurement pending | hashed session key in bounded memory; usage aggregates as before |
-| 1 | role-alias framework, family diversity history, quota-aware ordering and minimum-window metadata implemented; no role candidate set is configured yet | bounded in-memory family history |
+| 0 | affinity and Codex compaction pass-through (done); Claude hint headers and beta allow-list implemented; MiniMax route explicitly ineligible per upstream docs; no direct Anthropic provider configured; class routing **enabled** against `mistral/mistral-medium-3-5` (documented 256k window); aggregate and bounded session-interval cache measurement implemented, savings measurement pending | hashed session key in bounded memory; usage aggregates as before |
+| 1 | role-alias framework, family diversity history, quota-aware ordering and minimum-window metadata implemented; `role/review-strong` and `role/review-fast` are configured | bounded in-memory family history |
 | 2 | cold-resume hardening: cache observation implemented; routing still gated until controlled sampling establishes a trustworthy signal; gateway rewrite only if spike 2 justifies it | no transcripts; session observation keys are hashed and memory-only; the existing aggregate usage store remains persistent |
-| 3 (optional) | Codex-lane swap to shunt + transport; eager warm compaction only if resume latency warrants it | — |
+| 3 | **struck (2026-10-19).** The Codex-lane swap to shunt + transport is not pursued: it was argued only on continuation-delta economics and Codex CLI inbound parity, and neither is proven. CLIProxyAPI stays; eager warm compaction is not warranted either | — |
 
 ## 9. Success criteria
 
