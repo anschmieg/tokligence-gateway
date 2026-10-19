@@ -12,6 +12,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { sendChatCompletionResult } from "./openai-stream.mjs";
 import { resolveMistralModel, resolveOpenCodeModel, resolveOpenRouterModel } from "./upstream-model.mjs";
 import { sanitizeHeaders } from "./sanitize-headers.mjs";
+import { createWarpTraceRecorder } from "./warp-context-trace.mjs";
 import {
   CODEX_REASONING_LEVELS,
   codexUpstreamUrl,
@@ -51,6 +52,9 @@ const PROXY_PORT = Number(process.env.PROXY_PORT || 8080);
 const TGW_HOST   = process.env.TGW_HOST || "127.0.0.1";
 const TGW_PORT   = Number(process.env.TGW_PORT || 8081);
 const DEBUG = process.env.TGW_DEBUG === "1";
+const WARP_TRACE = createWarpTraceRecorder();
+const WARP_TEST_SECRET = process.env.WARP_TRACE_TEST_SECRET || "";
+const WARP_TEST_MODEL = process.env.WARP_TRACE_MODEL || "";
 const ROUTING_CONFIG_PATH = path.resolve(process.env.ROUTING_CONFIG_PATH || "gateway.routes.yaml");
 const ROUTING = loadRoutingConfig(ROUTING_CONFIG_PATH);
 const PROFILE_RUNTIME_STATE = { cooldowns: new Map(), affinity: new Map(), quotas: new Map(), modelHistory: new Map() };
@@ -818,7 +822,21 @@ function publicSecretFromToken(token) {
 }
 
 function validateAndStripAuth(req) {
-  const strippedToken = publicSecretFromToken(extractBearerToken(req.headers["authorization"]));
+  // Dedicated experimental credential. Accept ONLY one test model on the
+  // Chat Completions endpoint, or the public model catalog; never admin routes.
+  const requestedToken = extractBearerToken(req.headers["authorization"]);
+  if (process.env.WARP_TRACE_ENABLED === "1" && WARP_TEST_SECRET.length >= 24 &&
+      AUTH_SECRET && !secretsEqual(WARP_TEST_SECRET, AUTH_SECRET) &&
+      secretsEqual(requestedToken, WARP_TEST_SECRET)) {
+    const pathname = new URL(req.url, "http://localhost").pathname;
+    const allowed = (req.method === "POST" && pathname === "/v1/chat/completions") ||
+      (req.method === "GET" && ["/v1/models", "/models"].includes(pathname));
+    if (!allowed) return false;
+    req.warpTestPrincipal = true;
+    req.headers["authorization"] = `Bearer ${AUTH_SECRET}`;
+    return true;
+  }
+  const strippedToken = publicSecretFromToken(requestedToken);
   if (!strippedToken) return false;
   req.headers["authorization"] = `Bearer ${strippedToken}`;
   return true;
@@ -1514,6 +1532,13 @@ const server = http.createServer((req, res) => {
         return;
       }
 
+      if (req.warpTestPrincipal && (parsed.model !== WARP_TEST_MODEL || body.length > 262144)) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Warp experiment key is model-scoped" }));
+        return;
+      }
+      WARP_TRACE.begin({ testPrincipal: req.warpTestPrincipal === true, request: req,
+        response: res, body: parsed, protocol: "chat_completions" });
       synthesizeMetadataUserId(parsed, req);
 
       if (handleProfileRequest(req, res, parsed, "chat_completions")) return;
