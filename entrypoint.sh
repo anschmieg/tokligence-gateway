@@ -55,6 +55,11 @@ if [ "${CODEX_PROXY_ENABLED:-false}" = "true" ]; then
 fi
 
 # Compile Tokligence and OAuth-proxy configs from the single routing policy.
+# Separate ephemeral local-management authority; never reuse the public API key.
+if [ -z "${CODEX_MANAGEMENT_KEY:-}" ]; then
+  CODEX_MANAGEMENT_KEY="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
+  export CODEX_MANAGEMENT_KEY
+fi
 node /app/compile-config.mjs
 
 if [ "${CODEX_PROXY_ENABLED:-false}" = "true" ]; then

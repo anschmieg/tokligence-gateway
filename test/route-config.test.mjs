@@ -1,18 +1,52 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import {
   compileOAuthProxyYaml,
   compileTokligenceIni,
   configuredModels,
+  enabledProviders,
   matchConfiguredProvider,
   parseRoutingConfig,
   providerEnabled,
+  quotaObserverProviders,
   resolveConfiguredAlias,
 } from "../route-config.mjs";
 
 const config = parseRoutingConfig(fs.readFileSync("gateway.routes.yaml", "utf8"));
+
+test("config compiler restores private permissions on existing generated OAuth config", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "tgw-private-config-"));
+  const target = path.join(root, "data/cliproxy/config.yaml");
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, "old config", { mode: 0o644 });
+  try {
+    const run = spawnSync(process.execPath, ["compile-config.mjs"], {
+      cwd: process.cwd(), encoding: "utf8", env: {
+        ...process.env,
+        CONFIG_OUTPUT_ROOT: root,
+        TOKLIGENCE_AUTH_SECRET: "fixture-public",
+        TOKLIGENCE_ADMIN_SECRET: "fixture-admin",
+        CODEX_MANAGEMENT_KEY: "fixture-private-management",
+      },
+    });
+    assert.equal(run.status, 0, run.stderr);
+    assert.equal(fs.statSync(target).mode & 0o077, 0);
+    assert.match(fs.readFileSync(target, "utf8"), /fixture-private-management/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Mistral session credentials enable quota observation without enabling inference routing", () => {
+  const env = { MISTRAL_SESSION_FILE: "/private/mistral-session.json" };
+  const mistral = config.providers.find((provider) => provider.id === "mistral");
+  assert.equal(providerEnabled(mistral, env), false);
+  assert.equal(quotaObserverProviders(config, env).some((provider) => provider.id === "mistral"), true);
+  assert.equal(enabledProviders(config, env).some((provider) => provider.id === "mistral"), false);
+});
 
 test("routing policy preserves current provider prefixes", () => {
   assert.equal(matchConfiguredProvider(config, "openrouter/free"), "openrouter");

@@ -6,14 +6,15 @@
 
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
+import { probeMistralSubscription } from "./mistral-subscription-quota.mjs";
 
 const MAX_RESPONSE_BYTES = 64 * 1024;
 
-function fetchJson({ method = "GET", protocol = "https:", hostname, port, path, headers = {}, timeout = 12000 }) {
+function fetchJson({ method = "GET", protocol = "https:", hostname, port, path, headers = {}, timeout = 12000, body, signal }) {
   return new Promise((resolve, reject) => {
     const request = protocol === "http:" ? httpRequest : httpsRequest;
     const req = request(
-      { method, protocol, hostname, port, path, headers, timeout },
+      { method, protocol, hostname, port, path, headers, timeout, signal },
       (res) => {
         const chunks = [];
         let size = 0;
@@ -38,7 +39,7 @@ function fetchJson({ method = "GET", protocol = "https:", hostname, port, path, 
     );
     req.on("timeout", () => req.destroy(new Error("timeout")));
     req.on("error", reject);
-    req.end();
+    req.end(body);
   });
 }
 
@@ -173,6 +174,13 @@ export async function probeOpenRouter(apiKey, baseUrl = "https://openrouter.ai/a
 // Mistral — authoritative usage requires a separate Admin API key.
 export async function probeMistral(apiKey, baseUrl = "https://api.mistral.ai/v1", options = {}) {
   const observed = options.observedUsage;
+  const subscriptionProbe = options.mistralSubscriptionProbe || probeMistralSubscription;
+  const subscription = await subscriptionProbe({ file: options.mistralSessionFile });
+  const attachSubscription = (result) => {
+    result.detail ||= {};
+    result.detail.quota_signals = [...(result.detail.quota_signals || []), subscription];
+    return result;
+  };
   const adminApiKey = options.adminApiKey;
   if (adminApiKey) {
     try {
@@ -180,16 +188,19 @@ export async function probeMistral(apiKey, baseUrl = "https://api.mistral.ai/v1"
       const adminBase = pathname.endsWith("/admin") ? pathname : `${pathname}/admin`;
       const { month, year } = monthYear(options.now || new Date());
       const headers = { "x-api-key": adminApiKey };
-      const [usageRes, spendRes] = await Promise.all([
-        fetchJson({ protocol, hostname, port, path: `${adminBase}/usage?month=${month}&year=${year}`, headers }),
-        fetchJson({ protocol, hostname, port, path: `${adminBase}/spend-limit`, headers }),
+      const [usageRes, spendRes, rateRes] = await Promise.all([
+        fetchJson({ protocol, hostname, port, path: adminBase + "/usage?month=" + month + "&year=" + year, headers }),
+        fetchJson({ protocol, hostname, port, path: adminBase + "/spend-limit", headers }),
+        fetchJson({ protocol, hostname, port, path: adminBase + "/rate-limit", headers }).catch(() => null),
       ]);
       const usage = usageRes.body?.data ?? usageRes.body;
       const spend = spendRes.body?.data ?? spendRes.body;
-      const used = firstNumber(usage?.total, usage?.amount, usage?.used, usage?.usage, usage?.total_cost) ?? 0;
-      const limit = firstNumber(spend?.limit, spend?.amount, spend?.monthly_limit, spend?.value);
-      const currency = usage?.currency || spend?.currency || "USD";
-      return ok("mistral", {
+      const limits = spend?.limits ?? spend;
+      const used = firstNumber(usage?.total, usage?.amount, usage?.used, usage?.usage, usage?.total_cost);
+      const limit = firstNumber(limits?.limit, limits?.amount, limits?.monthly_limit, limits?.value);
+      const rateLimits = rateRes?.body?.data ?? rateRes?.body ?? null;
+      const currency = usage?.currency || spend?.currency || limits?.currency || "USD";
+      return attachSubscription(ok("mistral", {
         account: "Mistral account",
         used,
         limit,
@@ -197,13 +208,13 @@ export async function probeMistral(apiKey, baseUrl = "https://api.mistral.ai/v1"
         limitLabel: limit == null ? "spend limit unknown" : undefined,
         unit: currency,
         ...(currency === "USD" ? { currency: "USD" } : {}),
-      }, attachObserved({ month, year }, observed));
+      }, attachObserved({ month, year, rate_limits: rateLimits, observed_rate_limits: options.mistralObservedRateLimits || null }, observed)));
     } catch (error) {
-      return unavailable("mistral", "Mistral Admin API", error.message, attachObserved({ admin_api: true }, observed));
+      return attachSubscription(unavailable("mistral", "Mistral Admin API", error.message, attachObserved({ admin_api: true }, observed)));
     }
   }
 
-  if (!apiKey) return unavailable("mistral", "Mistral", "no API key configured", attachObserved({}, observed));
+  if (!apiKey) return attachSubscription(unavailable("mistral", "Mistral", "no API key configured", attachObserved({}, observed)));
   try {
     const { protocol, hostname, port, pathname } = baseUrlParts(baseUrl);
     await fetchJson({
@@ -211,14 +222,14 @@ export async function probeMistral(apiKey, baseUrl = "https://api.mistral.ai/v1"
       path: `${pathname}/models`,
       headers: { Authorization: `Bearer ${apiKey}` },
     });
-    return noQuotaSource(
+    return attachSubscription(noQuotaSource(
       "mistral",
       "Mistral account",
-      "Mistral usage needs MISTRAL_ADMIN_API_KEY; model API key can only prove reachability",
-      attachObserved({ reachable: true, admin_api_required: true }, observed),
-    );
+      "Mistral monthly usage is Admin API/console data; X-RateLimit-Remaining is observed only after an inference response",
+      attachObserved({ reachable: true, admin_api_required: true, observed_rate_limits: options.mistralObservedRateLimits || null }, observed),
+    ));
   } catch (error) {
-    return unavailable("mistral", "Mistral", error.message, attachObserved({}, observed));
+    return attachSubscription(unavailable("mistral", "Mistral", error.message, attachObserved({}, observed)));
   }
 }
 
@@ -309,7 +320,68 @@ export async function probeModal(apiKey, baseUrl = "https://api.us-west-2.modal.
   );
 }
 
-export function probeCodexOauth(provider, context = {}) {
+export async function probeCodexOauth(provider, context = {}) {
+  const key = context.codexManagementKey;
+  if (key) {
+    try {
+      const url = new URL(context.codexManagementBaseUrl || "http://127.0.0.1:8317");
+      if (url.protocol !== "http:" || !["127.0.0.1", "[::1]"].includes(url.hostname) || url.username || url.password) throw new Error("management requires literal loopback HTTP");
+      const controller = new AbortController();
+      const deadline = setTimeout(() => controller.abort(), 15000);
+      deadline.unref?.();
+      const call = (path, body) => fetchJson({
+        protocol: url.protocol, hostname: url.hostname.replace(/^\[|\]$/g, ""), port: url.port,
+        path: `/v0/management/${path}`, method: body ? "POST" : "GET",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        body: body ? JSON.stringify(body) : undefined,
+        timeout: 10000,
+        signal: controller.signal,
+      });
+      try {
+        const listing = await call("auth-files");
+        const files = listing.body?.files;
+        if (!Array.isArray(files)) throw new Error("invalid credential listing");
+        const selected = files.filter(f => (f.provider || f.type) === "codex" && !f.disabled && f.auth_index);
+        const accounts = new Array(Math.min(selected.length, 32));
+        let cursor = 0;
+        const worker = async () => {
+          while (!controller.signal.aborted) {
+            const index = cursor++;
+            if (index >= accounts.length) return;
+            const file = selected[index];
+            try {
+              const header = { Authorization: "Bearer $TOKEN$", Accept: "application/json" };
+              const accountId = file.id_token?.chatgpt_account_id;
+              if (typeof accountId === "string") header["Chatgpt-Account-Id"] = accountId;
+              const reply = await call("api-call", { auth_index: file.auth_index, method: "GET", url: "https://chatgpt.com/backend-api/wham/usage", header });
+              if (reply.body?.status_code !== 200) throw new Error("quota request failed");
+              const data = JSON.parse(reply.body.body);
+              const windows = [];
+              for (const name of ["primary_window", "secondary_window"]) {
+                const w = data.rate_limit?.[name];
+                if (typeof w?.used_percent !== "number" || !Number.isFinite(w.used_percent) || w.used_percent < 0 || w.used_percent > 100) continue;
+                const reset = numberOrNull(w.reset_at);
+                const resetAt = reset != null && reset > 0 && reset <= 8.64e12 ? reset : null;
+                const duration = numberOrNull(w.limit_window_seconds);
+                const limitWindowSeconds = duration != null && duration > 0 && duration <= 31_536_000 ? duration : null;
+                windows.push({ name, used_percent: w.used_percent, reset_at: resetAt, limit_window_seconds: limitWindowSeconds });
+              }
+              accounts[index] = { label: `Codex account ${index + 1}`, windows, available: windows.length > 0 };
+            } catch { accounts[index] = { label: `Codex account ${index + 1}`, available: false, windows: [] }; }
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(4, accounts.length) }, worker));
+        for (let index = 0; index < accounts.length; index++) accounts[index] ||= { label: `Codex account ${index + 1}`, available: false, windows: [] };
+        const values = accounts.flatMap(a => a.windows.map(w => w.used_percent));
+        const details = { accounts, totalAccounts: selected.length, truncated: selected.length > accounts.length, incomplete: accounts.some(a => !a.available) || selected.length > accounts.length };
+        if (!values.length) return unavailable("codex-oauth", "Codex OAuth credential pool", "No Codex quota windows are currently available", attachObserved(details, context.observedUsage));
+      // No pooled percentage: windows belong to separate credentials with different limits.
+        return ok("codex-oauth", { account: "Codex OAuth credential pool", used: null, limit: null, unit: "percent", limitLabel: "per-account windows" }, attachObserved({ accounts, totalAccounts: selected.length, truncated: selected.length > accounts.length, incomplete: accounts.some(a => !a.available) || selected.length > accounts.length }, context.observedUsage));
+      } finally { clearTimeout(deadline); controller.abort(); }
+    } catch {
+      return unavailable("codex-oauth", "Codex OAuth credential pool", "Codex quota unavailable; check local management configuration or credential status", attachObserved({}, context.observedUsage));
+    }
+  }
   return noQuotaSource(
     "codex-oauth",
     "Codex OAuth credential pool",
@@ -402,6 +474,8 @@ export async function probeProviderQuota(provider, context = {}) {
       return probeMistral(context.mistralKey, context.mistralBaseUrl, {
         ...withObserved,
         adminApiKey: context.mistralAdminApiKey,
+        mistralSessionFile: context.mistralSessionFile,
+        mistralObservedRateLimits: context.mistralObservedRateLimits,
       });
     case "opencode-go":
       return probeOpenCodeGo(context.opencodeKey, context.opencodeBaseUrl, withObserved);
@@ -430,7 +504,19 @@ export async function probeProviderQuota(provider, context = {}) {
 
 export async function probeAllProviderQuota(enabledProviders, context) {
   const entries = await Promise.allSettled(
-    enabledProviders.map((provider) => probeProviderQuota(provider, context)),
+    enabledProviders.map(async (provider) => {
+      const load = () => probeProviderQuota(provider, context);
+      const result = context?.quotaCache && ["mistral", "codex-oauth"].includes(provider.id)
+        ? await context.quotaCache.get(provider.id, load)
+        : await load();
+      if (result.detail && context?.observedUsageByProvider?.[provider.id]) {
+        result.detail.observed_usage = context.observedUsageByProvider[provider.id];
+      }
+      if (result.provider === "mistral" && result.detail && context?.mistralObservedRateLimits) {
+        result.detail.observed_rate_limits = { ...context.mistralObservedRateLimits };
+      }
+      return result;
+    }),
   );
   return entries.map((entry, index) =>
     entry.status === "fulfilled"

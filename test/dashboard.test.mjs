@@ -18,6 +18,24 @@ import {
 } from "../quota.mjs";
 
 const config = parseRoutingConfig(fs.readFileSync("gateway.routes.yaml", "utf8"));
+const dashboardHtml = fs.readFileSync("dashboard.html", "utf8");
+
+test("dashboard distinguishes unofficial Vibe quota and per-account Codex windows", () => {
+  assert.match(dashboardHtml, /signal\.label \|\| "Quota"/);
+  assert.match(dashboardHtml, /signal\.status === "stale"/);
+  assert.match(dashboardHtml, /stale quota data/);
+  assert.match(dashboardHtml, /quota signal/);
+  assert.match(dashboardHtml, /account\.label \|\| "Codex account"/);
+  assert.match(dashboardHtml, /window\.used_percent/);
+  assert.match(dashboardHtml, /Only the first 32 active Codex credentials were checked/);
+  assert.match(dashboardHtml, /esc\(detailLines\.join/);
+  assert.match(dashboardHtml, /k === "quota_signals" \|\| k === "accounts"/);
+});
+
+test("dashboard escapes provider-supplied metric values before HTML insertion", () => {
+  assert.match(dashboardHtml, /esc\(fmt\(q\.used, q\.unit\)\)/);
+  assert.match(dashboardHtml, /esc\(pct\) \+ "% used<\/span>"/);
+});
 
 test("RoutingPreferences rejects unknown aliases and unconfigured providers", () => {
   const prefs = new RoutingPreferences(config, { readonly: true, env: {} });
@@ -119,7 +137,7 @@ test("quota probes show informational cards for providers without quota endpoint
   assert.match(cline.detail.note, /no aggregate quota endpoint|authenticated OAuth adapter/);
   assert.equal(cline.error, undefined);
 
-  const codex = probeCodexOauth();
+  const codex = await probeCodexOauth();
   assert.equal(codex.provider, "codex-oauth");
   assert.equal(codex.available, false);
   assert.equal(codex.source, "unreported");
@@ -225,4 +243,3 @@ test("dashboard exposes Cline OAuth controls without token fields", () => {
   assert.doesNotMatch(html, /q\.limit\s*==\s*null\s*\?\s*["']unmetered["']/);
   assert.doesNotMatch(html, /accessToken|refreshToken|device_code/);
 });
-

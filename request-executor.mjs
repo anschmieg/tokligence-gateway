@@ -150,7 +150,23 @@ async function readSnippet(response, limit = 300) {
   }
 }
 
-export async function executeRoutePlan({ plan, req, res, path, body, env = process.env, runtimeState = {}, adapters = {}, affinityKey = null }) {
+export function observeUpstreamResponse(response, candidate, callback) {
+  if (typeof callback !== "function") return;
+  const chunks = [];
+  let size = 0;
+  response.on("data", chunk => {
+    if (size >= 1024 * 1024) return;
+    const bytes = Buffer.from(chunk);
+    chunks.push(bytes);
+    size += bytes.length;
+    if (size > 1024 * 1024) chunks.length = 0;
+  });
+  response.once("end", () => {
+    try { callback({ provider: candidate.provider.id, model: candidate.upstreamModel, headers: response.headers || {}, chunks }); } catch {}
+  });
+}
+
+export async function executeRoutePlan({ plan, req, res, path, body, env = process.env, runtimeState = {}, adapters = {}, affinityKey = null, onUpstreamResponse }) {
   const requestId = randomUUID();
   const aborter = new AbortController();
   const timeout = setTimeout(() => aborter.abort(new Error("upstream deadline exceeded")), Math.max(plan.deadline - Date.now(), 1));
@@ -183,6 +199,7 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
           runtimeState.cooldowns?.set(`${candidate.provider.id}:${candidate.model?.id || candidate.upstreamModel}:${candidate.protocol}`, Date.now() + cooldown);
           continue;
         }
+        observeUpstreamResponse(response, candidate, onUpstreamResponse);
         if (codec) {
           await respondWithCodec({ response, codec, res, status, requestId, model: candidate.upstreamModel, provider: candidate.provider.id, publicModel: plan.publicModel, signal: aborter.signal });
           if (affinityKey && plan.profile && runtimeState.affinity) {

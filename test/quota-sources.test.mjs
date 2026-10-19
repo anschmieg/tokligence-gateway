@@ -74,16 +74,35 @@ test("Mistral uses Admin API usage and spend-limit when admin key is configured"
       res.end(JSON.stringify({ limit: 40, currency: "USD" }));
       return;
     }
+    if (req.url === "/v1/admin/rate-limit") {
+      res.end(JSON.stringify({ requests_per_second: 10, tokens_limits_by_model: [{ model: "mistral-large-latest", tokens_per_minute: 200000, tokens_per_month: 5000000 }] }));
+      return;
+    }
     res.end(JSON.stringify({ data: [] }));
   }, async (baseUrl) => {
-    const result = await probeMistral("model-key", `${baseUrl}/v1`, { adminApiKey: "admin-key", now: new Date("2026-09-02T12:00:00Z") });
+    const result = await probeMistral("model-key", `${baseUrl}/v1`, { adminApiKey: "admin-key", now: new Date("2026-09-02T12:00:00Z"), mistralObservedRateLimits: { remaining: "tokens=1200", observed_at: "2026-09-02T12:00:00.000Z" } });
     assert.equal(result.available, true);
     assert.equal(result.used, 12.5);
     assert.equal(result.limit, 40);
     assert.equal(result.limitKind, "finite");
     assert.equal(result.percentUsed, 31.25);
-    assert.deepEqual(seen, ["/v1/admin/usage?month=9&year=2026", "/v1/admin/spend-limit"]);
+    assert.equal(result.detail.rate_limits.requests_per_second, 10);
+    assert.equal(result.detail.quota_signals[0].label, "Unofficial Vibe subscription quota");
+    assert.equal(result.detail.quota_signals[0].status, "unconfigured");
+    assert.deepEqual(result.detail.observed_rate_limits, { remaining: "tokens=1200", observed_at: "2026-09-02T12:00:00.000Z" });
+    assert.deepEqual(result.detail.rate_limits.tokens_limits_by_model, [{ model: "mistral-large-latest", tokens_per_minute: 200000, tokens_per_month: 5000000 }]);
+    assert.deepEqual(seen, ["/v1/admin/usage?month=9&year=2026", "/v1/admin/spend-limit", "/v1/admin/rate-limit"]);
   });
+});
+
+test("Mistral quota keeps unofficial subscription percentage separate from Admin billing", async () => {
+  const result = await probeMistral(null, "https://api.mistral.ai/v1", {
+    mistralSubscriptionProbe: async () => ({ id: "mistral-vibe-monthly", label: "Unofficial Vibe subscription quota", source: "unofficial-console", status: "fresh", percentUsed: 42.5, resetAt: "2026-11-01T00:00:00.000Z" }),
+  });
+  assert.equal(result.used, undefined);
+  assert.equal(result.percentUsed, undefined);
+  assert.equal(result.detail.quota_signals[0].percentUsed, 42.5);
+  assert.equal(result.detail.quota_signals[0].source, "unofficial-console");
 });
 
 test("Cline OAuth quota uses account balance/usages when adapter exposes it", async () => {

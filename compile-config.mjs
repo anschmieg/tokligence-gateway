@@ -24,6 +24,7 @@ function write(absolutePath, content) {
   const destination = outputPath(absolutePath);
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   fs.writeFileSync(destination, content, { mode: 0o600 });
+  fs.chmodSync(destination, 0o600);
 }
 
 write("/app/config/settings.ini", "environment=dev\n");

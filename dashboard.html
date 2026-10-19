@@ -261,10 +261,16 @@ function limitLabel(q) {
 function quotaCard(q) {
   var el = document.createElement("div");
   el.className = "card";
-  var pct = q.percentUsed;
+  var pct = q.percentUsed == null ? null : Number(q.percentUsed);
+  if (!isFinite(pct) || pct < 0 || pct > 100) pct = null;
+  var hasFreshQuotaSignal = Array.isArray(q.detail && q.detail.quota_signals) && q.detail.quota_signals.some(function(signal){ return signal.status === "fresh" && signal.percentUsed != null; });
   var badge, bar = "";
-  if (q.available && pct != null) {
-    badge = '<span class="badge ' + (pct >= 90 ? "warn" : "ok") + '">' + pct + "% used</span>";
+  if (q.status === "stale") {
+    badge = '<span class="badge warn">stale quota data</span>';
+  } else if (hasFreshQuotaSignal) {
+    badge = '<span class="badge ok">quota signal</span>';
+  } else if (q.available && pct != null) {
+    badge = '<span class="badge ' + (pct >= 90 ? "warn" : "ok") + '">' + esc(pct) + "% used</span>";
     bar = '<div class="bar"><i class="' + (pct >= 90 ? "warn" : "") + '" style="width:' + Math.min(100, pct) + '%"></i></div>';
   } else if (q.available) {
     badge = '<span class="badge ok">reachable</span>';
@@ -273,15 +279,31 @@ function quotaCard(q) {
   } else {
     badge = '<span class="badge off">no quota source</span>';
   }
-  var used = q.used == null ? "—" : fmt(q.used, q.unit);
+  var used = q.used == null ? "—" : esc(fmt(q.used, q.unit));
   var limit = limitLabel(q);
   var detailLines = [];
   if (q.detail && typeof q.detail === "object") {
     Object.keys(q.detail).forEach(function(k){
       if (/secret|key|token|api_key/i.test(k)) return;
+      if (k === "quota_signals" || k === "accounts") return;
       var v = q.detail[k];
       detailLines.push(k + ": " + (typeof v === "string" ? v : JSON.stringify(v)));
     });
+    (q.detail.quota_signals || []).forEach(function(signal){
+      var value = signal.percentUsed == null ? "unavailable" : signal.percentUsed + "% used";
+      var status = signal.status === "stale" ? " (stale)" : signal.status === "unconfigured" ? " (not configured)" : signal.status === "unavailable" ? " (unavailable)" : "";
+      detailLines.push((signal.label || "Quota") + ": " + value + status + (signal.resetAt ? "; resets " + signal.resetAt : ""));
+    });
+    (q.detail.accounts || []).forEach(function(account){
+      (account.windows || []).forEach(function(window){
+        var value = window.used_percent == null ? "usage unavailable" : window.used_percent + "% used";
+        var reset = Number(window.reset_at);
+        var resetAt = Number.isFinite(reset) && reset > 0 && reset <= 8640000000000 ? new Date(reset * 1000).toISOString() : "";
+        detailLines.push((account.label || "Codex account") + " — " + window.name + ": " + value + (resetAt ? "; resets " + resetAt : ""));
+      });
+    });
+    if (q.detail.truncated) detailLines.push("Only the first 32 active Codex credentials were checked.");
+    if (q.detail.incomplete) detailLines.push("Some Codex credential quota windows are unavailable.");
   }
   var detailHtml = detailLines.length ? '<div class="detail">' + esc(detailLines.join("\\n")) + "</div>" : "";
   el.innerHTML =

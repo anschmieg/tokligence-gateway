@@ -86,8 +86,9 @@ performs identity check; otherwise enter `TOKLIGENCE_ADMIN_SECRET` (or pass it
 in the URL hash as `#token=<secret>`). The dashboard has two sections:
 
 - **Provider quota / usage** — probes each enabled provider for how much of its
-  quota/balance has been consumed (OpenRouter spend vs. cap, Mistral
-  reachability, MiniMax balance where available) using `quota.mjs`. Providers
+  quota/balance has been consumed (OpenRouter spend vs. cap, optional unofficial
+  Mistral Vibe percentage, per-account Codex windows, MiniMax balance where available)
+  using `quota.mjs`. Providers
   without a working balance API report themselves as *reachable* or
   *unavailable* rather than failing the page. No credentials are ever shown.
 - **Routing preferences** — lets you re-target capability profiles / aliases to
@@ -360,6 +361,18 @@ MISTRAL_API_BASE=https://api.mistral.ai/v1
 Models can be requested with the `mistral/` prefix or bare Mistral IDs, for example `mistral/mistral-large-latest` or `mistral-large-latest`. The proxy discovers available models from Mistral's `/v1/models` endpoint and falls back to the configured model list when discovery is unavailable.
 
 Streaming is supported on `/v1/chat/completions`. The Anthropic Messages and OpenAI Responses endpoints are translated to Mistral's OpenAI-compatible chat completions and returned in the requested format.
+
+### Mistral Vibe quota display (unofficial)
+
+The dashboard can optionally show the monthly Vibe subscription usage percentage from Mistral's web-console endpoint. This is separate from API billing, Admin API spend, response rate-limit headers, and tokens observed by this gateway. The endpoint is unofficial and may change; no live account validation is implied.
+
+Mount a private JSON file inside the container and set `MISTRAL_SESSION_FILE` to its path. Required shape:
+
+```json
+{"csrfToken":"<CSRF token>","sessionCookies":{"ory_session_console":"<session cookie>"}}
+```
+
+Restrict the file to the process owner (`chmod 600`), mount it read-only, and rotate/remove it when the console session expires. Only the CSRF token and `ory_session_*` cookies are accepted; the observer contacts a fixed Mistral HTTPS endpoint, refuses redirects, and never logs or returns these values. The gateway does not extract cookies from a browser. See [`docs/design/quota-observation.md`](docs/design/quota-observation.md) for the security and freshness behavior.
 
 ## Claude Code wrapper
 

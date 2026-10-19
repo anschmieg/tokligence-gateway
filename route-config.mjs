@@ -193,6 +193,14 @@ export function enabledProviders(config, env = process.env) {
   return config.providers.filter((provider) => providerEnabled(provider, env));
 }
 
+export function quotaObserverProviders(config, env = process.env) {
+  const providers = enabledProviders(config, env);
+  const mistral = providerById(config, "mistral");
+  if (mistral && (env.MISTRAL_SESSION_FILE || env.MISTRAL_ADMIN_API_KEY)
+    && !providers.some((provider) => provider.id === "mistral")) providers.push(mistral);
+  return providers;
+}
+
 export function providerById(config, id) {
   return config.providers.find((provider) => provider.id === id) || null;
 }
@@ -287,7 +295,7 @@ export function compileOAuthProxyYaml(config, env = process.env) {
     port: 8317,
     "remote-management": {
       "allow-remote": false,
-      "secret-key": "",
+      "secret-key": env.CODEX_MANAGEMENT_KEY || "",
       "disable-control-panel": true,
     },
     "auth-dir": provider.auth_dir || "/data/cliproxy/auth",

@@ -22,6 +22,7 @@ import {
   loadRoutingConfig,
   matchConfiguredProvider,
   providerById,
+  quotaObserverProviders,
   providerEnabled,
   profileByModel,
   publicRoutingConfig,
@@ -29,6 +30,7 @@ import {
 } from "./route-config.mjs";
 import { probeAllProviderQuota } from "./quota.mjs";
 import { createObservedUsageStore } from "./usage-observer.mjs";
+import { createQuotaCache } from "./quota-cache.mjs";
 import { RoutingPreferences, sanitizedPreferences } from "./preferences.mjs";
 import { DASHBOARD_HTML } from "./dashboard.mjs";
 import { cloudflareAccessConfigured, isValidCloudflareAccessToken } from "./cloudflare-access.mjs";
@@ -71,6 +73,7 @@ const OPENCODE_URL = providerBaseUrl("opencode-go");
 
 const MISTRAL_KEY = providerApiKey("mistral");
 const MISTRAL_URL = providerBaseUrl("mistral");
+const MISTRAL_RATE_LIMIT_OBSERVATION = { remaining: null, observed_at: null };
 
 function loadOAuthAdapterConfig() {
   const provider = providerById(ROUTING, "codex-oauth");
@@ -452,6 +455,7 @@ const PREFERENCES = new RoutingPreferences(ROUTING, {
   readonly: process.env.ROUTING_PREFERENCES_READONLY === "1",
 });
 const OBSERVED_USAGE = createObservedUsageStore();
+const QUOTA_CACHE = createQuotaCache();
 
 function topLevelOrUpstreamApiKey(id, upstream = "anthropic") {
   const provider = providerById(ROUTING, id);
@@ -474,17 +478,29 @@ function recordModelObservedUsage(model, data) {
   if (provider) recordObservedUsage(provider, model, data);
 }
 
+function recordMistralRateLimitObservation(headers) {
+  const remaining = headers?.["x-ratelimit-remaining"];
+  if (remaining == null || typeof remaining !== "string" || remaining.length > 256 || /[\r\n\x00]/.test(remaining)) return;
+  MISTRAL_RATE_LIMIT_OBSERVATION.remaining = remaining;
+  MISTRAL_RATE_LIMIT_OBSERVATION.observed_at = new Date().toISOString();
+}
+
 function recordObservedEvent(provider, model, code) {
   OBSERVED_USAGE.recordEvent(provider, model, code);
 }
 
 function quotaContext() {
   return {
+    quotaCache: QUOTA_CACHE,
+    codexManagementKey: process.env.CODEX_MANAGEMENT_KEY,
+    codexManagementBaseUrl: CODEX.baseUrl?.origin,
     openrouterKey: providerApiKey("openrouter"),
     openrouterBaseUrl: providerBaseUrl("openrouter")?.toString() || "https://openrouter.ai/api/v1",
     mistralKey: providerApiKey("mistral"),
     mistralAdminApiKey: process.env.MISTRAL_ADMIN_API_KEY,
+    mistralSessionFile: process.env.MISTRAL_SESSION_FILE,
     mistralBaseUrl: providerBaseUrl("mistral")?.toString() || "https://api.mistral.ai/v1",
+    mistralObservedRateLimits: MISTRAL_RATE_LIMIT_OBSERVATION,
     opencodeKey: providerApiKey("opencode-go"),
     opencodeBaseUrl: providerBaseUrl("opencode-go")?.toString() || "https://opencode.ai",
     minimaxKey: topLevelOrUpstreamApiKey("tokligence", "anthropic"),
@@ -497,7 +513,7 @@ function quotaContext() {
 }
 
 async function refreshRoutingQuotas() {
-  const providers = ROUTING.providers.filter((provider) => providerEnabled(provider, process.env));
+  const providers = quotaObserverProviders(ROUTING, process.env);
   const results = await probeAllProviderQuota(providers, quotaContext());
   for (const result of results) PROFILE_RUNTIME_STATE.quotas.set(result.provider, result);
 }
@@ -553,6 +569,10 @@ function handleProfileRequest(req, res, parsed, protocol) {
     runtimeState: PROFILE_RUNTIME_STATE,
     adapters: { [CLINE_OAUTH_PROVIDER?.id]: CLINE_OAUTH },
     affinityKey: routingAffinityKey(req),
+    onUpstreamResponse: ({ provider, model, headers, chunks }) => {
+      if (provider === "mistral") recordMistralRateLimitObservation(headers);
+      recordUsageFromResponseChunks(provider, model, headers, chunks);
+    },
   }).catch((error) => {
     // The client gets a generic message on purpose, but the operator needs the
     // real cause: this path is how every routed provider, Zen included, reaches
@@ -969,6 +989,7 @@ function recordUsageFromResponseChunks(provider, model, headers, chunks) {
 }
 
 function pipeAndRecordUsage(provider, model, upstream, res) {
+  if (provider === "mistral") recordMistralRateLimitObservation(upstream.headers);
   const chunks = [];
   upstream.on("data", (chunk) => {
     if (chunks.reduce((sum, current) => sum + current.length, 0) < 1024 * 1024) chunks.push(chunk);
@@ -1297,7 +1318,7 @@ const server = http.createServer((req, res) => {
 
     // Admin status used by the dashboard.
     if (req.method === "GET" && url.pathname === "/admin/status") {
-      const enabled = ROUTING.providers.filter((provider) => providerEnabled(provider));
+      const enabled = quotaObserverProviders(ROUTING, process.env);
       const configured = enabled.map((provider) => ({ id: provider.id, adapter: provider.adapter }));
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
@@ -1313,7 +1334,7 @@ const server = http.createServer((req, res) => {
 
     // Live quota/balance for every enabled provider.
     if (req.method === "GET" && url.pathname === "/admin/quota") {
-      const enabled = ROUTING.providers.filter((provider) => providerEnabled(provider));
+      const enabled = quotaObserverProviders(ROUTING, process.env);
       probeAllProviderQuota(enabled, quotaContext())
         .then((data) => {
           res.writeHead(200, { "Content-Type": "application/json" });
@@ -1665,7 +1686,7 @@ const server = http.createServer((req, res) => {
 
         const upstream = https.request(options, (upRes) => {
           res.writeHead(upRes.statusCode, upRes.headers);
-          pipeAndRecordUsage("opencode-go", model, upRes, res);
+          pipeAndRecordUsage("mistral", model, upRes, res);
         });
 
         upstream.on("error", (err) => {

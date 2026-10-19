@@ -10,3 +10,6 @@ gateway.preferences.yaml
 
 # Local OpenCode Zen credential - never commit.
 .zen-oauth.json
+
+# Local Mistral console session credentials; never commit.
+.mistral-session.json
