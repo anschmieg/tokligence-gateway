@@ -104,9 +104,12 @@ test("enabled class routing prepends a window-safe cheap target and retains sess
     requestClass: "subagent",
     body: { messages: [{ role: "user", content: "hello" }] },
   }, env, { cooldowns: new Map() });
+  // The cheap target leads, then the session chain in profile order. An
+  // Anthropic request can now reach the OpenAI-protocol providers through
+  // translation, so Cline (the profile's first candidate) comes next.
   assert.deepEqual(plan.candidates.slice(0, 2).map(({ provider, upstreamModel }) => [provider.id, upstreamModel]), [
     ["mistral", "mistral-medium-3-5"],
-    ["mistral", "mistral-small-latest"],
+    ["cline-oauth", "cline/cline-free/deepseek-v4.1-flash"],
   ]);
 });
 
@@ -176,4 +179,47 @@ test("role aliases fall back to their full candidate list if no unused family re
   }, env, { cooldowns: new Map(), modelHistory });
   assert.ok(plan.candidates.length > 2);
   assert.deepEqual(plan.candidates.slice(0, 2).map(({ family }) => family), ["family-a", "family-b"]);
+});
+
+test("an Anthropic request reaches an OpenAI-protocol provider through translation", () => {
+  const plan = buildRoutePlan(config, {
+    model: "groq/llama-3.3-70b-versatile",
+    protocol: "messages",
+    body: { messages: [{ role: "user", content: "hello" }] },
+  }, { ...env, GROQ_API_KEY: "groq-key" }, { cooldowns: new Map() });
+  assert.equal(plan.error, undefined);
+  const [candidate] = plan.candidates;
+  assert.equal(candidate.provider.id, "groq");
+  assert.equal(candidate.upstreamModel, "llama-3.3-70b-versatile");
+  assert.equal(candidate.translate, "anthropic-from-openai");
+  assert.equal(candidate.native, false);
+});
+
+test("a profile exposes its OpenAI-protocol candidates to Anthropic callers", () => {
+  const plan = buildRoutePlan(config, {
+    model: "agent-default",
+    protocol: "messages",
+    body: { messages: [{ role: "user", content: "hello" }] },
+  }, { ...env, GROQ_API_KEY: "groq-key" }, { cooldowns: new Map() });
+  const groq = plan.candidates.find(({ provider }) => provider.id === "groq");
+  assert.equal(groq.translate, "anthropic-from-openai");
+  assert.equal(groq.upstreamModel, "llama-3.3-70b-versatile");
+});
+
+test("a provider that opts out of translation keeps its own lane", () => {
+  const plan = buildRoutePlan(config, {
+    model: "glm-5",
+    protocol: "messages",
+    body: { messages: [{ role: "user", content: "hello" }] },
+  }, { ...env, MODAL_GLM5_API_KEY: "modal-key" }, { cooldowns: new Map() });
+  assert.equal(plan, null);
+});
+
+test("a provider with native Anthropic support is served by pass-through", () => {
+  const plan = buildRoutePlan(config, {
+    model: "mistral-medium-3-5",
+    protocol: "messages",
+    body: { messages: [{ role: "user", content: "hello" }] },
+  }, { ...env, MISTRAL_API_KEY: "mistral-key" }, { cooldowns: new Map() });
+  assert.equal(plan, null);
 });

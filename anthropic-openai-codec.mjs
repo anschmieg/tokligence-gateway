@@ -34,16 +34,17 @@ function toolChoiceToOpenAI(choice) {
   return undefined;
 }
 
-export function anthropicToOpenAI(request, { gateTools = [] } = {}) {
+export function anthropicToOpenAI(request, { gateTools = [], forceStream = true } = {}) {
   const out = {};
   for (const key of ["model", "max_tokens", "temperature", "top_p", "user"]) {
     if (request?.[key] !== undefined) out[key] = request[key];
   }
   if (typeof request?.max_tokens !== "number") out.max_tokens = 4096;
   if (Array.isArray(request?.stop_sequences) && request.stop_sequences.length) out.stop = request.stop_sequences;
-  // Zen refuses to answer a free-tier request that is not streaming.
-  out.stream = true;
-  out.stream_options = { include_usage: true };
+  // Zen refuses to answer a free-tier request that is not streaming, so its
+  // caller forces it. A generic upstream follows the client instead.
+  out.stream = forceStream === true || request?.stream === true;
+  if (out.stream) out.stream_options = { include_usage: true };
 
   const messages = [];
   const system = textOf(request?.system).trim();

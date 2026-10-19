@@ -23,8 +23,37 @@ function requestTokenEstimate(body) {
   return Math.ceil(Buffer.byteLength(JSON.stringify(body || {}), "utf8") / 4);
 }
 
-function candidateSupports(provider, reference, required, body) {
-  if (!supportsFeatures(providerCapabilities(provider), required)) return false;
+// Adapters that can execute a plain OpenAI chat-completions request. A
+// provider on one of these is reachable from /v1/messages even when it never
+// declared the messages protocol, because the gateway translates the request
+// and the reply. Adapters with their own request pipeline (Codex, Copilot,
+// Zen) are excluded: they already own their protocol handling and must not be
+// handed a translated body.
+const TRANSLATING_ADAPTERS = new Set(["middleware", "openai-compatible", "cline-oauth"]);
+
+// A profile or route may address a model as `<provider>/<id>` while the
+// provider's catalog stores the bare id. Strip the prefix only when the
+// remainder is a declared model, so ids that genuinely contain a slash
+// (nvidia/nemotron-*, cline/cline-free/*) are left untouched.
+function resolveUpstreamModel(provider, requested) {
+  const prefix = `${provider.id}/`;
+  if (typeof requested !== "string" || !requested.toLowerCase().startsWith(prefix.toLowerCase())) {
+    return requested;
+  }
+  const bare = requested.slice(prefix.length);
+  return provider.models?.some(({ id }) => id === bare) ? bare : requested;
+}
+
+function candidateSupports(provider, reference, required, body, translated = false) {
+  const capabilities = providerCapabilities(provider);
+  // A translated lane serves the Anthropic surface on top of chat completions;
+  // the protocol is therefore supported, and thinking cannot be carried across,
+  // so a thinking request is served without it rather than refused.
+  const effective = translated
+    ? { ...required, protocol: capabilities.protocols.includes(required.protocol) ? required.protocol : "messages", reasoning: false }
+    : required;
+  if (translated) capabilities.protocols = [...capabilities.protocols, effective.protocol];
+  if (!supportsFeatures(capabilities, effective)) return false;
   const limit = reference.context_window || provider.metadata?.context_window;
   return !limit || requestTokenEstimate(body) <= Number(limit);
 }
@@ -58,6 +87,19 @@ function reorderByQuota(candidates, runtimeState) {
     .map(({ candidate }) => candidate);
 }
 
+// Returns undefined when the provider serves the protocol natively, a
+// translation marker when it can be served through chat completions, and null
+// when it cannot serve the request at all.
+function translationFor(provider, protocol) {
+  const protocols = Array.isArray(provider.protocols) && provider.protocols.length
+    ? provider.protocols
+    : ["chat_completions"];
+  if (protocols.includes(protocol)) return undefined;
+  if (provider.messages_translation === false) return null;
+  if (protocol === "messages" && protocols.includes("chat_completions")) return "anthropic-from-openai";
+  return null;
+}
+
 const CLASS_ROUTING_CLASSES = new Set(["subagent", "workflow", "auxiliary"]);
 const CLAUDE_AGENT_TYPES = new Set(["Explore", "fork", "teammate", "custom"]);
 
@@ -71,15 +113,18 @@ function cheapClassCandidate(config, profile, requestClass, agentType, protocol,
   const model = provider.models.find(({ id }) => id === modelId);
   const window = Number(model?.context_window || provider.metadata?.context_window || 0);
   const floor = Number(profile.context_window || 0);
-  if (!model || !floor || !window || window < floor) return null;
+  const translate = translationFor(provider, protocol);
+  if (!model || !floor || !window || window < floor || translate === null) return null;
+  if (translate && !TRANSLATING_ADAPTERS.has(provider.adapter)) return null;
   if (circuitOpen(runtimeState, provider.id, model.id, protocol)) return null;
-  if (!candidateSupports(provider, model, required, body)) return null;
+  if (!candidateSupports(provider, model, required, body, Boolean(translate))) return null;
   return {
     provider,
     model,
     upstreamModel: model.id,
     protocol,
-    native: true,
+    native: translate !== "anthropic-from-openai",
+    ...(translate ? { translate } : {}),
     family: model.family || provider.metadata?.family,
   };
 }
@@ -94,15 +139,18 @@ export function buildRoutePlan(config, { model, protocol, body, requestClass = n
     for (const reference of role.candidates) {
       const provider = providerById(config, reference.provider);
       if (!provider || !providerEnabled(provider, env)) continue;
+      const translate = translationFor(provider, protocol);
+      if (translate === null || (translate && !TRANSLATING_ADAPTERS.has(provider.adapter))) continue;
       if (circuitOpen(runtimeState, provider.id, reference.model, protocol)) continue;
       const modelConfig = provider.models.find(({ id }) => id === reference.model);
-      if (!modelConfig || !candidateSupports(provider, reference, required, body)) continue;
+      if (!modelConfig || !candidateSupports(provider, reference, required, body, Boolean(translate))) continue;
       candidates.push({
         provider,
         model: modelConfig,
-        upstreamModel: modelConfig.id,
+        upstreamModel: resolveUpstreamModel(provider, modelConfig.id),
         protocol,
-        native: true,
+        native: translate !== "anthropic-from-openai",
+        ...(translate ? { translate } : {}),
         family: reference.family,
       });
     }
@@ -143,6 +191,42 @@ export function buildRoutePlan(config, { model, protocol, body, requestClass = n
     const providerId = matchConfiguredProvider(config, model);
     const provider = providerById(config, providerId);
     if (!provider) return null;
+    // An Anthropic caller can be served by a chat-completions provider through
+    // translation. This is what makes /v1/messages work for every configured
+    // model instead of only the two that declare the messages protocol.
+    const directTranslate = translationFor(provider, protocol);
+    if (directTranslate === "anthropic-from-openai" && TRANSLATING_ADAPTERS.has(provider.adapter)) {
+      if (!providerEnabled(provider, env)) return null;
+      const resolvedModel = resolveUpstreamModel(provider, model);
+      const modelConfig = provider.models.find(({ id }) => id === resolvedModel) || { id: resolvedModel };
+      const required = inspectRequestFeatures(protocol, body);
+      if (!candidateSupports(provider, modelConfig, required, body, true)) {
+        return {
+          error: {
+            status: 400,
+            code: "model_cannot_serve_messages",
+            message: `${provider.id}/${model} cannot serve this Anthropic request (missing capability or context window)`,
+          },
+        };
+      }
+      return {
+        requestedModel: model,
+        publicModel: model,
+        profile: null,
+        required,
+        deadline: Date.now() + Number(env.GATEWAY_REQUEST_TIMEOUT_MS || 120000),
+        maxAttempts: 1,
+        candidates: [{
+          provider,
+          model: modelConfig,
+          upstreamModel: modelConfig.id,
+          protocol,
+          native: false,
+          translate: directTranslate,
+          family: modelConfig.family || provider.metadata?.family,
+        }],
+      };
+    }
     if (provider.adapter === "opencode-zen") {
       // Direct model requests for Zen are routed through the adapter so the
       // free-tier gate (OAuth token, OpenCode identity, real session, streaming,
@@ -189,18 +273,17 @@ export function buildRoutePlan(config, { model, protocol, body, requestClass = n
   for (const reference of profile.candidates) {
     const provider = providerById(config, reference.provider);
     if (!provider || !providerEnabled(provider, env)) continue;
-    const protocols = Array.isArray(provider.protocols) && provider.protocols.length
-      ? provider.protocols
-      : ["chat_completions"];
-    if (!protocols.includes(protocol)) continue;
+    const translate = translationFor(provider, protocol);
+    if (translate === null || (translate && !TRANSLATING_ADAPTERS.has(provider.adapter))) continue;
     if (circuitOpen(runtimeState, provider.id, reference.model, protocol)) continue;
-    if (!candidateSupports(provider, reference, required, body)) continue;
+    if (!candidateSupports(provider, reference, required, body, Boolean(translate))) continue;
     candidates.push({
       provider,
       model: { id: reference.model },
-      upstreamModel: reference.model,
+      upstreamModel: resolveUpstreamModel(provider, reference.model),
       protocol,
-      native: true,
+      native: translate !== "anthropic-from-openai",
+      ...(translate ? { translate } : {}),
       family: reference.family || provider.models.find(({ id }) => id === reference.model)?.family || provider.metadata?.family,
     });
   }

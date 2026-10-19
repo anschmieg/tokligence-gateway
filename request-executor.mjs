@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { startAttempt } from "./provider-adapters.mjs";
-import { collectAnthropicStream, createAnthropicStreamCodec, createSseChunkReader } from "./anthropic-openai-codec.mjs";
-import { respondWithAnthropicPassthrough } from "./anthropic-passthrough.mjs";
+import {
+  collectAnthropicStream,
+  createAnthropicStreamCodec,
+  createSseChunkReader,
+  openaiToAnthropicMessage,
+} from "./anthropic-openai-codec.mjs";
+import { anthropicMessageToSse, respondWithAnthropicPassthrough } from "./anthropic-passthrough.mjs";
 
 // Errors whose allowance is gone until a periodic reset (e.g. a daily free
 // quota) get a long cooldown; transient limits (per-minute rate limits,
@@ -104,16 +109,46 @@ function firstStreamChunk(response, signal) {
 // Anthropic server-sent events, or folded into one message when the caller
 // asked for a single response. Used when the upstream only speaks OpenAI.
 async function respondWithCodec({ response, codec, res, status, requestId, model, provider, publicModel, signal }) {
-  const reader = createSseChunkReader();
-  const encoder = createAnthropicStreamCodec({ model });
-  const first = await firstStreamChunk(response, signal);
-  response.setEncoding("utf8");
   const base = {
     "x-gateway-request-id": requestId,
     "x-gateway-model": publicModel || model,
     "x-gateway-provider": provider,
     "x-gateway-upstream-model": model,
   };
+  // A translated upstream answers in whichever shape it was asked for: JSON for
+  // a non-streaming caller, SSE for a streaming one. Either way the caller gets
+  // an Anthropic reply, and a streaming caller never receives a bare JSON body.
+  const contentType = String(response.headers?.["content-type"] || "");
+  if (!contentType.includes("text/event-stream")) {
+    const raw = await readBodyText(response, signal, 32 * 1024 * 1024);
+    let completion;
+    try {
+      completion = JSON.parse(raw);
+    } catch {
+      res.writeHead(502, { ...base, "content-type": "application/json" });
+      res.end(JSON.stringify({ type: "error", error: { type: "api_error", message: "Upstream returned an unreadable body" } }));
+      return;
+    }
+    if (completion?.error) {
+      res.writeHead(status, { ...base, "content-type": "application/json" });
+      res.end(JSON.stringify({ type: "error", error: { type: "api_error", message: String(completion.error.message || "Upstream error") } }));
+      return;
+    }
+    const message = openaiToAnthropicMessage(completion, { model });
+    if (codec.stream) {
+      res.writeHead(status, { ...base, "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive" });
+      res.end(anthropicMessageToSse(message));
+      return;
+    }
+    res.writeHead(status, { ...base, "content-type": "application/json" });
+    res.end(JSON.stringify(message));
+    return;
+  }
+
+  const reader = createSseChunkReader();
+  const encoder = createAnthropicStreamCodec({ model });
+  const first = await firstStreamChunk(response, signal);
+  response.setEncoding("utf8");
 
   if (codec.stream) {
     res.writeHead(status, { ...base, "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive" });

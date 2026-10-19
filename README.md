@@ -387,6 +387,27 @@ Role aliases are addressed as `model: "role/<name>"`, for example
 window from its model entry; the published window is the minimum across
 candidates, and the configured profile is appended as a fallback.
 
+## Anthropic Messages for every model
+
+`POST /v1/messages` is Anthropic-compatible for the whole catalog, not only for
+the providers that speak Messages natively.
+
+- `mistral` and `opencode-zen` declare the `messages` protocol and are served by
+  pass-through (Zen translates internally behind its free-tier gate).
+- Every other OpenAI-protocol provider (Google AI Studio, NVIDIA, Cerebras,
+  Together, Groq, Nous, OpenRouter, ...) is reached through translation: the
+  request becomes a chat-completions call and the reply becomes Anthropic
+  content blocks, JSON for a non-streaming caller and Anthropic server-sent
+  events for a streaming one.
+- `tokligence` (MiniMax), `codex-oauth` and `copilot-auto` keep their dedicated
+  lanes, and `modal` sets `messages_translation: false` because GLM reports its
+  answer through `reasoning_content`, which the translation would drop.
+
+Translation carries system instructions, text, images, tool definitions,
+`tool_use`/`tool_result` and `tool_choice`, and follows the caller's `stream`
+flag. Anthropic betas such as `compaction` are not translated and remain
+filtered by the provider beta allow-list.
+
 ## Claude Code wrapper
 
 The client can keep using Claude's built-in model classes:

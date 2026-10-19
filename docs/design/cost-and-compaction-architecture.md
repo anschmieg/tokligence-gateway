@@ -33,7 +33,7 @@ three distinct translation surfaces, not one:
 
 | surface | who does it | notes |
 |---|---|---|
-| Messages <-> chat completions | `protocol-codecs.mjs` (~30 lines), `anthropic-openai-codec.mjs` (~350), `openai-stream.mjs` | serves ~15 OpenAI-protocol providers (mistral, groq, cerebras, together, nvidia, google, openrouter, nous, modal) |
+| Messages <-> chat completions | `protocol-codecs.mjs` (~30 lines), `anthropic-openai-codec.mjs` (~350), `openai-stream.mjs` | makes `/v1/messages` universal: every provider that declares `chat_completions` is reachable through translation (groq, cerebras, together, nvidia, google, openrouter, nous, cline), and `modal` opts out with `messages_translation: false` |
 | The Codex lane | **not gateway code**: `codex-oauth` is `adapter: oauth-proxy` pointing at CLIProxyAPI v7.3.20 on loopback | CLIProxyAPI owns OAuth, refresh, credential selection, session affinity, retry, the Anthropic->Codex translation, the Responses surface, and Codex remote compaction (`POST /v1/responses/compact`, plus the `remote_compaction_v2` `compaction_trigger` it does not yet answer - upstream issues #4848, #3085) |
 | Anthropic pass-through, Zen gate, cline/copilot adapters, tokligence backend | gateway modules | `anthropic-passthrough.mjs` normalises non-conforming Anthropic responses |
 

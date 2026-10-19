@@ -371,3 +371,93 @@ test("Anthropic beta allow-list gates headers and paired compaction fields at th
   assert.equal(seen[1].headers["anthropic-beta"], undefined);
   assert.equal(seen[1].body.compaction, undefined);
 });
+
+test("an Anthropic client reaches an OpenAI-only provider through translation", async (t) => {
+  const seen = [];
+  const upstream = http.createServer(async (req, res) => {
+    const body = await jsonRequest(req);
+    seen.push({ path: req.url, headers: req.headers, body });
+    if (body.stream) {
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.end([
+        "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Hel\"},\"finish_reason\":null}]}\n\n",
+        "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":null}]}\n\n",
+        "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2}}\n\n",
+        "data: [DONE]\n\n",
+      ].join(""));
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      id: "chatcmpl-1",
+      object: "chat.completion",
+      model: body.model,
+      choices: [{ index: 0, message: { role: "assistant", content: "Hello" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 5, completion_tokens: 2 },
+    }));
+  });
+  const upstreamPort = await listen(upstream);
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tgw-translate-route-"));
+  const configPath = path.join(dir, "routes.yaml");
+  const config = [
+    "version: 1", "access:", "  public_secret_env: PUBLIC_SECRET", "  admin_secret_env: ADMIN_SECRET",
+    "providers:", "  - id: openai-lane", "    adapter: middleware", "    default: true",
+    "    api_key_env: OPENAI_LANE_KEY", "    base_url_env: OPENAI_LANE_BASE_URL",
+    "    default_base_url: https://invalid.example", "    protocols: [chat_completions]",
+    "    models:", "      - id: gpt-test", "        context_window: 200000",
+    "    metadata:", "      capabilities: [text, tool_calling]",
+    "profiles:", "  noop:", "    context_window: 128000", "    candidates:",
+    "      - provider: openai-lane", "        model: gpt-test",
+    "aliases: []",
+  ].join("\n");
+  await fs.writeFile(configPath, config, { mode: 0o600 });
+  const child = spawn(process.execPath, ["tgw-proxy.mjs"], {
+    cwd: projectRoot,
+    env: {
+      ...process.env, ROUTING_CONFIG_PATH: configPath, PROXY_PORT: "0", TGW_HOST: "127.0.0.1", TGW_PORT: "1",
+      PUBLIC_SECRET: "public-secret", ADMIN_SECRET: "admin-secret",
+      OPENAI_LANE_BASE_URL: `http://127.0.0.1:${upstreamPort}/v1`, OPENAI_LANE_KEY: "lane-key",
+      OPENAI_API_KEY: "", OPENROUTER_API_KEY: "", OPENCODE_API_KEY: "", MODAL_GLM5_API_KEY: "",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  t.after(async () => {
+    child.kill("SIGTERM");
+    await close(upstream);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+  const port = await waitForProxy(child);
+  const url = `http://127.0.0.1:${port}/v1/messages`;
+  const headers = {
+    Authorization: "Bearer sk-ant-public-secret", "Content-Type": "application/json",
+    "anthropic-version": "2023-06-01",
+  };
+
+  const single = await fetch(url, { method: "POST", headers, body: JSON.stringify({
+    model: "gpt-test", max_tokens: 64, system: "be brief", messages: [{ role: "user", content: "hi" }],
+  }) });
+  assert.equal(single.status, 200);
+  const message = await single.json();
+  assert.equal(message.type, "message");
+  assert.equal(message.role, "assistant");
+  assert.equal(message.content[0].text, "Hello");
+  assert.equal(message.usage.output_tokens, 2);
+  assert.equal(seen[0].path, "/v1/chat/completions");
+  assert.equal(seen[0].headers.authorization, "Bearer lane-key");
+  assert.equal(seen[0].headers["anthropic-version"], undefined);
+  assert.equal(seen[0].body.stream, false);
+  assert.deepEqual(seen[0].body.messages, [{ role: "system", content: "be brief" }, { role: "user", content: "hi" }]);
+
+  const streamed = await fetch(url, { method: "POST", headers, body: JSON.stringify({
+    model: "gpt-test", max_tokens: 64, stream: true, messages: [{ role: "user", content: "hi" }],
+  }) });
+  assert.equal(streamed.status, 200);
+  assert.match(streamed.headers.get("content-type"), /text\/event-stream/);
+  const sse = await streamed.text();
+  assert.match(sse, /event: message_start/);
+  assert.match(sse, /event: content_block_delta/);
+  assert.match(sse, /Hel/);
+  assert.match(sse, /event: message_stop/);
+  assert.equal(seen[1].path, "/v1/chat/completions");
+  assert.equal(seen[1].body.stream, true);
+});

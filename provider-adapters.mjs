@@ -96,7 +96,9 @@ async function zenAttempt(candidate, { body, env }) {
   const orgId = credential?.metadata?.orgID || env.OPENCODE_ZEN_ORG_ID || "";
   // Zen serves the free tier on chat completions only, so an Anthropic caller is
   // translated rather than forwarded.
-  const upstream = candidate.protocol === "messages" ? anthropicToOpenAI(request, { gateTools: GATE_TOOLS }) : request;
+  const upstream = candidate.protocol === "messages"
+    ? anthropicToOpenAI(request, { gateTools: GATE_TOOLS, forceStream: true })
+    : request;
   const shaped = shapeZenRequest(upstream, { gateTools: GATE_TOOLS });
   return {
     body: Buffer.from(JSON.stringify(shaped)),
@@ -113,7 +115,40 @@ async function zenAttempt(candidate, { body, env }) {
   };
 }
 
-function requestUrl(candidate, path, env) {
+// Serves an Anthropic Messages caller from an OpenAI chat-completions
+// upstream. Every provider that speaks chat completions is reachable from
+// /v1/messages this way; only genuinely Anthropic-protocol upstreams use the
+// native pass-through instead.
+function translatedRequest(body) {
+  const request = Buffer.isBuffer(body) ? JSON.parse(body.toString("utf8")) : body;
+  const upstreamBody = anthropicToOpenAI(request, { forceStream: false });
+  return {
+    upstreamBody,
+    codec: { kind: "anthropic-from-openai", stream: upstreamBody.stream === true },
+  };
+}
+
+async function translatedAttempt(candidate, { upstreamBody, path, req, env, signal, codec }) {
+  const target = requestUrl(candidate, path, env, { suffix: "chat/completions" });
+  const payload = Buffer.from(JSON.stringify(upstreamBody));
+  const headers = {
+    "content-type": "application/json",
+    "content-length": String(payload.length),
+    ...candidate.provider.headers,
+  };
+  for (const name of FORWARD_HEADERS) if (req.headers[name] !== undefined) headers[name] = req.headers[name];
+  delete headers["anthropic-beta"];
+  delete headers["anthropic-version"];
+  if (candidate.provider.api_key_env && env[candidate.provider.api_key_env]) {
+    headers.authorization = `Bearer ${env[candidate.provider.api_key_env]}`;
+  } else if (req.headers.authorization) {
+    headers.authorization = req.headers.authorization;
+  }
+  const { response, upstream } = await send({ target, headers, body: payload, signal });
+  return { response, upstream, target, codec };
+}
+
+function requestUrl(candidate, path, env, { suffix: forcedSuffix } = {}) {
   const incoming = new URL(path, "http://gateway.local");
   if (candidate.provider.adapter === "oauth-proxy") {
     const target = new URL(env[candidate.provider.external_base_url_env] || "http://127.0.0.1:8317");
@@ -124,7 +159,7 @@ function requestUrl(candidate, path, env) {
   const base = baseUrl(candidate.provider, env);
   if (!base) throw new Error("Provider is not configured");
   const target = new URL(base.toString());
-  const suffix = endpointSuffix(incoming.pathname);
+  const suffix = forcedSuffix || endpointSuffix(incoming.pathname);
   if (candidate.provider.adapter === "opencode-zen") {
     // Free-tier traffic never reaches Zen's Anthropic or Responses routes.
     target.pathname = `${target.pathname.replace(/\/$/, "")}/chat/completions`;
@@ -201,11 +236,21 @@ function sendThroughProxy({ target, headers, body, signal, proxy }) {
 }
 
 export async function startAttempt({ candidate, req, path, body, env = process.env, signal, adapters = {} }) {
+  // Translation happens on the body before any adapter sees it: an Anthropic
+  // caller is served by an OpenAI upstream, so the adapter must receive the
+  // OpenAI request, and the caller receives the Anthropic reply.
+  const translation = candidate.translate === "anthropic-from-openai" ? translatedRequest(body) : null;
+  const attemptBody = translation ? Buffer.from(JSON.stringify(translation.upstreamBody)) : body;
+
   if (candidate.provider.adapter === "cline-oauth") {
     const adapter = adapters[candidate.provider.id];
     if (!adapter) throw new Error("Cline OAuth adapter is not configured");
-    const response = await adapter.createChatCompletion(JSON.parse(body.toString()), { signal });
-    return { response, upstream: response, target: null, codec: null };
+    const response = await adapter.createChatCompletion(JSON.parse(attemptBody.toString()), { signal });
+    return { response, upstream: response, target: null, codec: translation?.codec ?? null };
+  }
+
+  if (translation) {
+    return translatedAttempt(candidate, { upstreamBody: translation.upstreamBody, path, req, env, signal, codec: translation.codec });
   }
 
   if (candidate.provider.adapter === "opencode-zen") {

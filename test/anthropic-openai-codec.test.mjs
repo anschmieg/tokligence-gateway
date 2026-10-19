@@ -136,3 +136,13 @@ test("compaction blocks and compaction accounting survive stream collection", ()
   assert.equal(message.stop_reason, "compaction");
   assert.deepEqual(message.usage, { input_tokens: 0, output_tokens: 0, iterations: 2 });
 });
+
+test("a generic upstream follows the caller's streaming choice", () => {
+  const nonStream = anthropicToOpenAI({ stream: false, messages: [{ role: "user", content: "hi" }] }, { forceStream: false });
+  assert.equal(nonStream.stream, false);
+  assert.equal(nonStream.stream_options, undefined);
+
+  const streamed = anthropicToOpenAI({ stream: true, messages: [{ role: "user", content: "hi" }] }, { forceStream: false });
+  assert.equal(streamed.stream, true);
+  assert.deepEqual(streamed.stream_options, { include_usage: true });
+});

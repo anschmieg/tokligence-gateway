@@ -292,6 +292,9 @@ providers:
   # === LEGACY ===
   - id: modal
     adapter: middleware
+    # GLM on Modal reports its real answer through reasoning_content, which the
+    # Anthropic translation would drop, so this lane keeps its dedicated handler.
+    messages_translation: false
     api_key_env: MODAL_GLM5_API_KEY
     base_url_env: MODAL_GLM5_API_BASE
     default_base_url: https://api.us-west-2.modal.direct/v1/chat/completions

@@ -205,3 +205,22 @@ test("role aliases require family and verified windows and publish the minimum w
   assert.equal(role.avoid_recent_families, true);
   assert.throws(() => parseRoutingConfig(source.replace("context_window: 256000", "context_window: 0")), /requires a verified context_window/);
 });
+
+test("a provider may opt out of Anthropic translation with a boolean flag", () => {
+  const base = [
+    "version: 1", "access:", "  public_secret_env: PUBLIC", "  admin_secret_env: ADMIN",
+    "providers:", "  - id: test", "    adapter: middleware", "    default: true",
+    "    messages_translation: false", "    models:", "      - id: m", "aliases: []",
+  ].join("\n");
+  const parsed = parseRoutingConfig(base);
+  assert.equal(parsed.providers[0].messages_translation, false);
+  assert.throws(
+    () => parseRoutingConfig(base.replace("messages_translation: false", "messages_translation: sometimes")),
+    /messages_translation must be a boolean/,
+  );
+});
+
+test("the Modal lane opts out of Anthropic translation", () => {
+  const modal = config.providers.find(({ id }) => id === "modal");
+  assert.equal(modal.messages_translation, false);
+});

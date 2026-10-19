@@ -87,6 +87,9 @@ export function parseRoutingConfig(source) {
     if (!VALID_ADAPTERS.has(adapter)) {
       throw new Error(`providers[${index}].adapter is not supported: ${adapter}`);
     }
+    if (provider.messages_translation != null && typeof provider.messages_translation !== "boolean") {
+      throw new Error(`providers[${index}].messages_translation must be a boolean`);
+    }
     const betaAllowlist = provider.anthropic_beta_allowlist ?? [];
     if (!Array.isArray(betaAllowlist) || betaAllowlist.some((value) => typeof value !== "string" || !value.trim())) {
       throw new Error(`providers[${index}].anthropic_beta_allowlist must contain only non-empty strings`);
