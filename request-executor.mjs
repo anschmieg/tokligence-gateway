@@ -150,6 +150,24 @@ async function readSnippet(response, limit = 300) {
   }
 }
 
+const MAX_MODEL_HISTORY_SESSIONS = 1000;
+const MAX_MODEL_HISTORY_FAMILIES = 16;
+const MODEL_HISTORY_TTL_MS = Number(process.env.ROUTING_ROLE_HISTORY_TTL_MS || 60 * 60 * 1000);
+
+export function recordModelFamily(runtimeState, affinityKey, candidate) {
+  if (!affinityKey || typeof candidate?.family !== "string" || !candidate.family) return;
+  if (!(runtimeState.modelHistory instanceof Map)) runtimeState.modelHistory = new Map();
+  const now = Date.now();
+  const previous = runtimeState.modelHistory.get(affinityKey);
+  const families = previous && previous.updatedAt + MODEL_HISTORY_TTL_MS > now ? previous.families : [];
+  const next = [...families.filter((family) => family !== candidate.family), candidate.family].slice(-MAX_MODEL_HISTORY_FAMILIES);
+  runtimeState.modelHistory.delete(affinityKey);
+  runtimeState.modelHistory.set(affinityKey, { families: next, updatedAt: now });
+  while (runtimeState.modelHistory.size > MAX_MODEL_HISTORY_SESSIONS) {
+    runtimeState.modelHistory.delete(runtimeState.modelHistory.keys().next().value);
+  }
+}
+
 export function observeUpstreamResponse(response, candidate, callback) {
   if (typeof callback !== "function") return;
   const chunks = [];
@@ -166,7 +184,7 @@ export function observeUpstreamResponse(response, candidate, callback) {
   });
 }
 
-export async function executeRoutePlan({ plan, req, res, path, body, env = process.env, runtimeState = {}, adapters = {}, affinityKey = null, onUpstreamResponse }) {
+export async function executeRoutePlan({ plan, req, res, path, body, env = process.env, runtimeState = {}, adapters = {}, affinityKey = null, historyKey = undefined, onUpstreamResponse }) {
   const requestId = randomUUID();
   const aborter = new AbortController();
   const timeout = setTimeout(() => aborter.abort(new Error("upstream deadline exceeded")), Math.max(plan.deadline - Date.now(), 1));
@@ -209,6 +227,7 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
               updatedAt: Date.now(),
             });
           }
+          recordModelFamily(runtimeState, historyKey === undefined ? affinityKey : historyKey, candidate);
           return { committed: true, requestId, provider: candidate.provider.id, attempts: plan.candidates.indexOf(candidate) + 1, translated: codec.kind };
         }
         const headers = { ...response.headers, "x-gateway-request-id": requestId, "x-gateway-model": plan.publicModel, "x-gateway-provider": candidate.provider.id, "x-gateway-upstream-model": candidate.upstreamModel };
@@ -245,6 +264,7 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
             updatedAt: Date.now(),
           });
         }
+        recordModelFamily(runtimeState, historyKey === undefined ? affinityKey : historyKey, candidate);
         return { committed: true, requestId, provider: candidate.provider.id, attempts: plan.candidates.indexOf(candidate) + 1 };
       } catch (error) {
         if (aborter.signal.aborted) break;

@@ -87,6 +87,13 @@ export function parseRoutingConfig(source) {
     if (!VALID_ADAPTERS.has(adapter)) {
       throw new Error(`providers[${index}].adapter is not supported: ${adapter}`);
     }
+    const betaAllowlist = provider.anthropic_beta_allowlist ?? [];
+    if (!Array.isArray(betaAllowlist) || betaAllowlist.some((value) => typeof value !== "string" || !value.trim())) {
+      throw new Error(`providers[${index}].anthropic_beta_allowlist must contain only non-empty strings`);
+    }
+    if (betaAllowlist.length && ["oauth-proxy", "opencode-zen", "cline-oauth", "copilot-sdk", "tokligence"].includes(adapter)) {
+      throw new Error(`providers[${index}] cannot allow Anthropic betas on the ${adapter} adapter`);
+    }
     const normalizedProvider = adapter === "cline-oauth"
       ? normalizeClineOAuthProvider(provider, index)
       : provider;
@@ -132,6 +139,7 @@ export function parseRoutingConfig(source) {
       return {
         provider,
         model: requireString(candidate?.model, `profile ${id}.candidates[${candidateIndex}].model`),
+        ...(candidate?.family ? { family: requireString(candidate.family, `profile ${id}.candidates[${candidateIndex}].family`) } : {}),
       };
     });
     const max_attempts = value?.max_attempts == null ? candidates.length : Number(value.max_attempts);
@@ -142,6 +150,39 @@ export function parseRoutingConfig(source) {
   });
   const profileIds = new Set(profiles.map(({ id }) => id.toLowerCase()));
   if (profileIds.size !== profiles.length) throw new Error("profile IDs must be unique case-insensitively");
+
+  const roles = Object.entries(raw.roles || {}).map(([roleName, value], index) => {
+    const name = requireString(roleName, `roles[${index}].name`);
+    if (name.includes("/")) throw new Error(`role ${name} name must not include a slash`);
+    if (!Array.isArray(value?.candidates) || value.candidates.length === 0) {
+      throw new Error(`role ${name}.candidates must not be empty`);
+    }
+    const candidates = value.candidates.map((candidate, candidateIndex) => {
+      const providerId = requireString(candidate?.provider, `role ${name}.candidates[${candidateIndex}].provider`);
+      const provider = providerById({ providers }, providerId);
+      if (!provider) throw new Error(`role ${name} references unknown provider: ${providerId}`);
+      const modelId = requireString(candidate?.model, `role ${name}.candidates[${candidateIndex}].model`);
+      const model = provider.models.find(({ id }) => id === modelId);
+      if (!model) throw new Error(`role ${name} references unknown model ${providerId}/${modelId}`);
+      const family = requireString(candidate?.family, `role ${name}.candidates[${candidateIndex}].family`);
+      const context_window = Number(candidate.context_window || model.context_window || provider.metadata?.context_window || 0);
+      if (!Number.isSafeInteger(context_window) || context_window <= 0) {
+        throw new Error(`role ${name} candidate ${providerId}/${modelId} requires a verified context_window`);
+      }
+      return { provider: providerId, model: modelId, family, context_window };
+    });
+    const fallback = requireString(value?.fallback, `role ${name}.fallback`);
+    if (!profiles.some(({ id }) => id.toLowerCase() === fallback.toLowerCase())) {
+      throw new Error(`role ${name}.fallback must reference a configured profile`);
+    }
+    const max_attempts = value?.max_attempts == null ? candidates.length : Number(value.max_attempts);
+    if (!Number.isSafeInteger(max_attempts) || max_attempts < 1 || max_attempts > candidates.length) {
+      throw new Error(`role ${name}.max_attempts must be between 1 and ${candidates.length}`);
+    }
+    return { id: `role/${name}`, candidates, max_attempts, fallback, context_window: Math.min(...candidates.map(({ context_window }) => context_window)), avoid_recent_families: value?.avoid_recent_families !== false };
+  });
+  const roleIds = new Set(roles.map(({ id }) => id.toLowerCase()));
+  if (roleIds.size !== roles.length) throw new Error("role IDs must be unique case-insensitively");
 
   if (!Array.isArray(raw.aliases)) throw new Error("routing config aliases must be a list");
   const aliases = raw.aliases.map((value, index) => {
@@ -161,7 +202,34 @@ export function parseRoutingConfig(source) {
     };
   });
 
-  return { version: 1, access, providers, routes, profiles, aliases, model_picker: raw.model_picker || {} };
+  const rawClassRouting = raw.classRouting || {};
+  if (rawClassRouting.enabled != null && typeof rawClassRouting.enabled !== "boolean") {
+    throw new Error("classRouting.enabled must be a boolean");
+  }
+  let cheapPolicyModel = null;
+  if (rawClassRouting.cheapPolicyModel != null) {
+    const targetProviderId = requireString(rawClassRouting.cheapPolicyModel.provider, "classRouting.cheapPolicyModel.provider");
+    const targetModelId = requireString(rawClassRouting.cheapPolicyModel.model, "classRouting.cheapPolicyModel.model");
+    const targetProvider = providerById({ providers }, targetProviderId);
+    if (!targetProvider || !targetProvider.models.some(({ id }) => id === targetModelId)) {
+      throw new Error("classRouting.cheapPolicyModel must reference a configured provider model");
+    }
+    if (targetProvider.adapter === "oauth-proxy") {
+      throw new Error("classRouting.cheapPolicyModel cannot target an oauth-proxy");
+    }
+    const targetModel = targetProvider.models.find(({ id }) => id === targetModelId);
+    const targetWindow = Number(targetModel.context_window || targetProvider.metadata?.context_window || 0);
+    if (rawClassRouting.enabled === true && (!Number.isSafeInteger(targetWindow) || targetWindow <= 0)) {
+      throw new Error("classRouting.cheapPolicyModel requires a verified context_window when enabled");
+    }
+    cheapPolicyModel = { provider: targetProviderId, model: targetModelId };
+  }
+  if (rawClassRouting.enabled === true && !cheapPolicyModel) {
+    throw new Error("classRouting.enabled requires classRouting.cheapPolicyModel");
+  }
+  const classRouting = { enabled: rawClassRouting.enabled === true, cheapPolicyModel };
+
+  return { version: 1, access, providers, routes, profiles, roles, aliases, model_picker: raw.model_picker || {}, classRouting };
 }
 
 export function loadRoutingConfig(path) {
@@ -208,6 +276,11 @@ export function providerById(config, id) {
 export function profileByModel(config, model) {
   if (!model) return null;
   return (config.profiles || []).find(({ id }) => id.toLowerCase() === String(model).toLowerCase()) || null;
+}
+
+export function roleByModel(config, model) {
+  if (!model) return null;
+  return (config.roles || []).find(({ id }) => id.toLowerCase() === String(model).toLowerCase()) || null;
 }
 
 export function configuredModels(config, env = process.env) {

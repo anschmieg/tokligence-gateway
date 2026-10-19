@@ -7,6 +7,17 @@ access:
   public_secret_env: TOKLIGENCE_AUTH_SECRET
   admin_secret_env: TOKLIGENCE_ADMIN_SECRET
 
+# Class-based model substitution: delegated (subagent/workflow) and auxiliary
+# turns try a cheap target first, then fall back to the session profile chain.
+# The target needs a documented context window at or above the profile floor;
+# Mistral Medium 3.5 is 256k, so the 128k agent profiles qualify. Direct Codex
+# model requests are not profile requests and keep their own lane.
+classRouting:
+  enabled: true
+  cheapPolicyModel:
+    provider: mistral
+    model: mistral-medium-3-5
+
 providers:
   - id: tokligence
     adapter: tokligence
@@ -34,14 +45,19 @@ providers:
     auth_dir: /data/cliproxy/auth
     models:
       - id: gpt-5.6-luna
+        family: openai
         context_window: 1050000
       - id: gpt-5.6-terra
+        family: openai
         context_window: 1050000
       - id: gpt-5.6-sol
+        family: openai
         context_window: 1050000
       - id: gpt-6-luna
+        family: openai
         context_window: 1050000
       - id: gpt-6-sol
+        family: openai
         context_window: 1050000
     credential_pool:
       strategy: round-robin
@@ -60,6 +76,7 @@ providers:
     enabled_env: COPILOT_AUTO_ENABLED
     models:
       - id: copilot-auto
+        family: github
         context_window: 272000
     metadata:
       cost_class: subscription
@@ -91,16 +108,30 @@ providers:
     api_key_env: MISTRAL_API_KEY
     base_url_env: MISTRAL_API_BASE
     default_base_url: https://api.mistral.ai/v1
+    protocols: [chat_completions, messages]
     discover_models: true
     models:
-      - mistral-large-latest
-      - mistral-small-latest
-      - mistral-medium-3-5
-      - pixtral-large-latest
-      - pixtral-12b-latest
-      - codestral-latest
-      - ministral-8b-latest
-      - ministral-3b-latest
+      - id: mistral-large-latest
+        family: mistral
+      - id: mistral-small-latest
+        family: mistral
+      - id: mistral-medium-3-5
+        family: mistral
+        # Mistral docs: Mistral Medium 3.5 has a 256k context window.
+        context_window: 256000
+      - id: pixtral-large-latest
+        family: pixtral
+      - id: pixtral-12b-latest
+        family: pixtral
+      - id: codestral-latest
+        family: codestral
+        context_window: 128000
+      - id: ministral-8b-latest
+        family: ministral
+        context_window: 256000
+      - id: ministral-3b-latest
+        family: ministral
+        context_window: 256000
     metadata:
       cost_class: subscription
       capabilities: [coding, reasoning, tool_calling, vision]
@@ -114,9 +145,12 @@ providers:
     base_url_env: GOOGLE_AI_STUDIO_API_BASE
     protocols: [chat_completions]
     models:
-      - gemini-3.1-pro-latest
-      - gemini-3-flash-latest
-      - gemini-2.5-pro-preview
+      - id: gemini-3.1-pro-latest
+        family: gemini
+      - id: gemini-3-flash-latest
+        family: gemini
+      - id: gemini-2.5-pro-preview
+        family: gemini
     metadata:
       cost_class: subscription
       capabilities: [text, vision, tool_calling]
@@ -131,10 +165,14 @@ providers:
     base_url_env: NVIDIA_API_BASE
     protocols: [chat_completions]
     models:
-      - nvidia/nemotron-3-ultra-550b-a55b
-      - nvidia/nemotron-3-super-120b-a12b
-      - nvidia/glm-5.2
-      - poolside/laguna-xs-2.1
+      - id: nvidia/nemotron-3-ultra-550b-a55b
+        family: nemotron
+      - id: nvidia/nemotron-3-super-120b-a12b
+        family: nemotron
+      - id: nvidia/glm-5.2
+        family: glm
+      - id: poolside/laguna-xs-2.1
+        family: laguna
     metadata:
       cost_class: free
       capabilities: [coding, reasoning, tool_calling]
@@ -150,8 +188,10 @@ providers:
     discover_models: true
     models:
       - id: gpt-oss-120b
+        family: gpt-oss
         context_window: 65536
       - id: gemma-4-31b
+        family: gemma
         context_window: 65536
     metadata:
       cost_class: free
@@ -169,6 +209,7 @@ providers:
     discover_models: true
     models:
       - id: Prism-ML/Ternary-Bonsai-27B
+        family: bonsai
         context_window: 262144
     metadata:
       cost_class: free
@@ -186,8 +227,10 @@ providers:
     discover_models: true
     models:
       - id: llama-3.3-70b-versatile
+        family: llama
         context_window: 131072
       - id: openai/gpt-oss-120b
+        family: gpt-oss
         context_window: 131072
     metadata:
       cost_class: free
@@ -203,9 +246,12 @@ providers:
     base_url_env: NOUS_API_BASE
     protocols: [chat_completions]
     models:
-      - nousresearch/laguna-xs-2.1
-      - nousresearch/laguna-s-2.1
-      - stepfun/step-3.7-flash
+      - id: nousresearch/laguna-xs-2.1
+        family: laguna
+      - id: nousresearch/laguna-s-2.1
+        family: laguna
+      - id: stepfun/step-3.7-flash
+        family: stepfun
     metadata:
       cost_class: free
       capabilities: [coding, tool_calling]
@@ -222,8 +268,10 @@ providers:
     protocols: [chat_completions]
     discover_models: true
     models:
-      - deepseek/deepseek-v4-flash
-      - deepseek/deepseek-v4-pro
+      - id: deepseek/deepseek-v4-flash
+        family: deepseek
+      - id: deepseek/deepseek-v4-pro
+        family: deepseek
     catalog:
       zero_price_only: true
       paid_allowlist:
@@ -508,6 +556,33 @@ profiles:
       - provider: openrouter
         model: openrouter/free
     max_attempts: 16
+
+# Role aliases are addressed as `role/<name>`. Candidates must declare a
+# verified context window (taken from the model entry) and a family; the
+# published window is the minimum across candidates.
+roles:
+  review-strong:
+    fallback: agent-default
+    candidates:
+      - provider: mistral
+        model: mistral-medium-3-5
+        family: mistral
+      - provider: together
+        model: Prism-ML/Ternary-Bonsai-27B
+        family: bonsai
+      - provider: groq
+        model: openai/gpt-oss-120b
+        family: gpt-oss
+
+  review-fast:
+    fallback: agentic-worker
+    candidates:
+      - provider: groq
+        model: openai/gpt-oss-120b
+        family: gpt-oss
+      - provider: mistral
+        model: ministral-8b-latest
+        family: ministral
 
 aliases:
   # Tiered Capability Profiles (Waterfall Failover)

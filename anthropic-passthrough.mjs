@@ -28,6 +28,7 @@ const LEGAL_BLOCK_TYPES = new Set([
   "mcp_tool_use",
   "mcp_tool_result",
   "documentation",
+  "compaction",
 ]);
 
 const MAX_PASSTHROUGH_BYTES = 32 * 1024 * 1024;
@@ -244,7 +245,7 @@ export function anthropicMessageToSse(message) {
 
   emit("message_delta", {
     delta: { stop_reason: message.stop_reason || "end_turn", stop_sequence: null },
-    usage: { input_tokens: inputTokens, output_tokens: outputTokens },
+    usage: { ...usage, input_tokens: inputTokens, output_tokens: outputTokens },
   });
   emit("message_stop", {});
   return frames.join("");

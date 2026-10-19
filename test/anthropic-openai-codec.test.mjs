@@ -123,3 +123,16 @@ test("the SSE reader tolerates split frames and drops the done marker", () => {
   assert.deepEqual(reader.push('data: {"a":1}\n\ndata: {"b"'), ['{"a":1}']);
   assert.deepEqual(reader.push(':2}\n\ndata: [DONE]\n\n'), ['{"b":2}']);
 });
+
+test("compaction blocks and compaction accounting survive stream collection", () => {
+  const summary = { type: "compaction", content: "summary text", signature: "signed-opaque-value" };
+  const message = collectAnthropicStream([[
+    `event: message_start\ndata: ${JSON.stringify({ type: "message_start", message: { id: "msg_compact", model: "claude-test", role: "assistant", content: [], usage: { input_tokens: 0, output_tokens: 0 } } })}\n\n`,
+    `event: content_block_start\ndata: ${JSON.stringify({ type: "content_block_start", index: 0, content_block: summary })}\n\n`,
+    `event: content_block_stop\ndata: ${JSON.stringify({ type: "content_block_stop", index: 0 })}\n\n`,
+    `event: message_delta\ndata: ${JSON.stringify({ type: "message_delta", delta: { stop_reason: "compaction", stop_sequence: null }, usage: { input_tokens: 0, output_tokens: 0, iterations: 2 } })}\n\n`,
+  ].join("")]);
+  assert.deepEqual(message.content, [summary]);
+  assert.equal(message.stop_reason, "compaction");
+  assert.deepEqual(message.usage, { input_tokens: 0, output_tokens: 0, iterations: 2 });
+});

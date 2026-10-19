@@ -298,6 +298,10 @@ export function collectAnthropicStream(events) {
   message.content = [...blocks.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([, block]) => {
+      if (block.type === "compaction") {
+        const { json: _json, ...preserved } = block;
+        return preserved;
+      }
       if (block.type === "tool_use") {
         let input = {};
         try {
@@ -309,7 +313,7 @@ export function collectAnthropicStream(events) {
       }
       return { type: "text", text: block.text || "" };
     })
-    .filter((block) => block.type === "tool_use" || block.text);
+    .filter((block) => block.type === "tool_use" || block.type === "compaction" || block.text);
   return message;
 }
 

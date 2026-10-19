@@ -374,6 +374,19 @@ Mount a private JSON file inside the container and set `MISTRAL_SESSION_FILE` to
 
 Restrict the file to the process owner (`chmod 600`), mount it read-only, and rotate/remove it when the console session expires. Only the CSRF token and `ory_session_*` cookies are accepted; the observer contacts a fixed Mistral HTTPS endpoint, refuses redirects, and never logs or returns these values. The gateway does not extract cookies from a browser. See [`docs/design/quota-observation.md`](docs/design/quota-observation.md) for the security and freshness behavior.
 
+### Role aliases and class routing
+
+`gateway.routes.yaml` enables class routing for delegated turns: requests that
+carry `x-claude-code-request-class: subagent|workflow|auxiliary` try
+`mistral/mistral-medium-3-5` first and fall back to the profile chain. `main` and
+`compaction` are unchanged. A cheap target must declare a context window at or
+above the profile floor; without one, startup validation fails.
+
+Role aliases are addressed as `model: "role/<name>"`, for example
+`role/review-strong`. Each candidate declares a `family` and inherits a verified
+window from its model entry; the published window is the minimum across
+candidates, and the configured profile is appended as a fallback.
+
 ## Claude Code wrapper
 
 The client can keep using Claude's built-in model classes:

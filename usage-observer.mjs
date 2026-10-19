@@ -16,6 +16,8 @@ function emptyBucket() {
   return {
     requests: 0,
     input_tokens: 0,
+    cache_read_input_tokens: 0,
+    cache_creation_input_tokens: 0,
     output_tokens: 0,
     total_tokens: 0,
     cost: 0,
@@ -29,6 +31,8 @@ function emptyModelBucket() {
   return {
     requests: 0,
     input_tokens: 0,
+    cache_read_input_tokens: 0,
+    cache_creation_input_tokens: 0,
     output_tokens: 0,
     total_tokens: 0,
     cost: 0,
@@ -38,17 +42,28 @@ function emptyModelBucket() {
 }
 
 export function extractUsage(data) {
-  const usage = data?.usage ?? data;
+  const usage = data?.usage ?? data?.response?.usage ?? data;
   if (!usage || typeof usage !== "object") return null;
-  const inputTokens = numberOrNull(usage.prompt_tokens ?? usage.input_tokens ?? usage.inputTokens) ?? 0;
-  const outputTokens = numberOrNull(usage.completion_tokens ?? usage.output_tokens ?? usage.outputTokens) ?? 0;
-  const totalTokens = numberOrNull(usage.total_tokens ?? usage.totalTokens) ?? inputTokens + outputTokens;
+  const iterationInputTokens = Array.isArray(usage.iterations)
+    ? usage.iterations.reduce((sum, iteration) => sum + (numberOrNull(iteration?.input_tokens) ?? 0), 0)
+    : 0;
+  const iterationOutputTokens = Array.isArray(usage.iterations)
+    ? usage.iterations.reduce((sum, iteration) => sum + (numberOrNull(iteration?.output_tokens) ?? 0), 0)
+    : 0;
+  const inputTokens = (numberOrNull(usage.prompt_tokens ?? usage.input_tokens ?? usage.inputTokens) ?? 0) + iterationInputTokens;
+  const outputTokens = (numberOrNull(usage.completion_tokens ?? usage.output_tokens ?? usage.outputTokens) ?? 0) + iterationOutputTokens;
+  const reportedTotalTokens = numberOrNull(usage.total_tokens ?? usage.totalTokens);
+  const totalTokens = Math.max(reportedTotalTokens ?? 0, inputTokens + outputTokens);
+  const cacheReadInputTokens = numberOrNull(usage.cache_read_input_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? usage.input_tokens_details?.cached_tokens) ?? 0;
+  const cacheCreationInputTokens = numberOrNull(usage.cache_creation_input_tokens ?? usage.prompt_tokens_details?.cache_creation_tokens ?? usage.input_tokens_details?.cache_write_tokens) ?? 0;
   const cost = numberOrNull(usage.cost ?? usage.total_cost ?? usage.credits_used);
-  if (!inputTokens && !outputTokens && !totalTokens && cost == null) return null;
+  if (!inputTokens && !outputTokens && !totalTokens && !cacheReadInputTokens && !cacheCreationInputTokens && cost == null) return null;
   return {
     inputTokens,
     outputTokens,
     totalTokens,
+    cacheReadInputTokens,
+    cacheCreationInputTokens,
     cost,
   };
 }
@@ -102,6 +117,8 @@ export function createObservedUsageStore({
       for (const target of [pair.bucket, pair.modelBucket]) {
         target.requests += 1;
         target.input_tokens += usage.inputTokens;
+        target.cache_read_input_tokens += usage.cacheReadInputTokens;
+        target.cache_creation_input_tokens += usage.cacheCreationInputTokens;
         target.output_tokens += usage.outputTokens;
         target.total_tokens += usage.totalTokens;
         if (usage.cost != null) target.cost = roundMoney(target.cost + usage.cost);

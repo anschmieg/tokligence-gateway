@@ -72,6 +72,20 @@ test("reasoning survives when the caller asked for extended thinking", () => {
   assert.deepEqual(message.content[1], { type: "text", text: "OK" });
 });
 
+test("signed compaction blocks and the compaction stop reason survive normalization", () => {
+  const summary = { type: "compaction", content: "signed summary", signature: "opaque-signature" };
+  const source = { type: "message", content: [summary], stop_reason: "compaction", usage: { input_tokens: 0, output_tokens: 0, iterations: 3 } };
+  const { message, changed } = normalizeAnthropicMessage(source);
+  assert.equal(changed, false);
+  assert.deepEqual(message.content, [summary]);
+  assert.equal(message.stop_reason, "compaction");
+  assert.deepEqual(message.usage, source.usage);
+  const folded = collectAnthropicStream([anthropicMessageToSse(message)]);
+  assert.deepEqual(folded.content, [summary]);
+  assert.equal(folded.stop_reason, "compaction");
+  assert.deepEqual(folded.usage, source.usage);
+});
+
 test("a conforming message is reported unchanged", () => {
   const conforming = { ...MISSHAPED, content: [{ type: "text", text: "OK" }] };
   const { message, changed } = normalizeAnthropicMessage(conforming);

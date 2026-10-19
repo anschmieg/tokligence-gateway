@@ -1,6 +1,6 @@
 # Cost and compaction architecture
 
-Status: **proposed**. Design only; nothing here is implemented yet.
+Status: **phase 0 and phase 1 implemented; phase 2 gated.** Class routing is active for delegated/auxiliary turns and two role aliases are configured. Cold-resume routing remains evidence-gated as noted below.
 Scope: how agent work is routed, and how long conversations are kept cheap,
 across Claude Code, Codex CLI, OpenCode and T3 Code.
 
@@ -83,39 +83,40 @@ Conclusion: Claude Code's traffic is cache-affine through the gateway **today**,
 because it sends `metadata.user_id`. Clients that send only the header are not,
 and pay full price on every turn.
 
-### 3.4 Request classes are available and unused
+### 3.4 Request classes are available and partially used
 
 Claude Code sends `x-claude-code-request-class` with one of `main`, `subagent`,
 `workflow`, `compaction`, `auxiliary`, gated behind
 `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`. It also sends `x-claude-code-agent-type`
-(`Explore`, `fork`, `teammate`, `custom`) on delegated turns. The current
-settings set neither hint header, and the gateway has no notion of request
-classes, so a compaction call is served by the session model at full price.
+(`Explore`, `fork`, `teammate`, `custom`) on delegated turns. The shared Claude settings and both gateway launch wrappers set
+`CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`. The gateway passes request-class and
+agent-type hints into route planning. Class-based substitution is implemented
+for delegated and auxiliary classes. It is now enabled against Mistral Medium
+3.5, whose 256k window is documented upstream and clears the 128k profile floor.
 
 ### 3.5 Compaction primitives upstream
 
-**Anthropic** (server-side, in-turn):
+**Anthropic** exposes two distinct features that must not be conflated:
 
-```jsonc
-// request
-"context_management": {"edits": [
-  {"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 100000}}
-]}
-// beta header: compact-2026-01-12 (or compact-2026-09-04)
-```
+- **Context editing** uses `context_management` with the
+  `context-management-2025-06-27` beta to clear old tool results or thinking
+  blocks. It does not write a signed conversation summary.
+- **On-demand summary compaction** uses the `compact-2026-09-04` beta and a
+  top-level `compaction: {type: summarize}` request field. The API returns one
+  complete `compaction` content block with text and a signature, and
+  `stop_reason: compaction`. The client must preserve that block exactly and
+  send the beta again on every later request carrying it. In a stream, the
+  complete block arrives in `content_block_start` with no deltas. Top-level
+  input/output usage is zero; the billed work is reported in `usage.iterations`.
+  `compaction` and `context_management` cannot be used on the same request; if
+  both are present, the gateway keeps the explicit summary request and strips
+  `context_management` before forwarding.
 
-Minimum trigger threshold is 50,000 tokens. The reply is a message with
-`stop_reason: "compaction"`, the summary in `content[0].content`,
-`usage.input_tokens` and `usage.output_tokens` reported as 0, and the real cost
-in `usage.iterations`. The client replaces its history with that response.
-`compact_before_next_turn()` and a `compact_*` edit are mutually exclusive on
-one request, and the compaction request itself excludes `context_management`,
-forced `tool_choice` and the output format.
-
-Cache TTL is exact and documented on this side: `cache_control:
-{type:"ephemeral", ttl:"5m"|"1h"}`, 5m default, 1h behind
-`extended-cache-ttl-2025-04-11`; `cache-diagnosis-2026-04-07` reports misses.
-
+Prompt-cache usage also has separate `cache_read_input_tokens` and
+`cache_creation_input_tokens` fields; include them with input/output tokens when
+estimating the next request's context size. The documented Anthropic cache TTL is
+5m by default, with 1h behind `extended-cache-ttl-2025-04-11`; this is not a
+cache-warmth signal for other providers.
 **OpenAI**: `context_management: [{"type":"compaction","compact_threshold":N}]`
 inside a Responses call, plus a standalone `responses.compact(model, input)`
 whose `output` is passed forward as-is. For codex models the artifact is an
@@ -189,44 +190,65 @@ the session model and log the miss.
 **Failure handling.** Any routing error or target failure falls back to the
 session model. Routing must never lose a turn.
 
-**Class routing state.** Model substitution onto a cheap policy model is
-specified in this section but not yet wired into model selection: it is opt-in
-and disabled by default, because no cheap model in the current fleet clears the
-window floor against 1M-window session models, so substituting one would either
-be a no-op or risk routing a codex-bound request off the codex lane. Enable it
-by adding `classRouting.cheapPolicyModel` to `gateway.routes.yaml` once a cheap
-target with `context_window >=` the session model's window exists; the window
-floor rule and session-model fallback apply.
+**Class routing state.** Opt-in model substitution is wired for `subagent`,
+`workflow` and `auxiliary` request classes. The target is configured as
+`classRouting.cheapPolicyModel`; candidate window metadata must be explicit and
+at least the requested profile floor. Missing/undersized metadata is a no-op,
+and the original profile chain remains after the target as fallback.
+`classRouting.enabled` is true in the checked-in config and the target is
+`mistral/mistral-medium-3-5` (documented 256k window). A target without verified
+window metadata fails startup validation rather than degrading silently.
+`main` and `compaction` remain on the ordinary route: warm/cold status is not yet
+measured reliably enough to make the table's conditional compaction choice.
+Direct Codex model requests (`gpt-6-sol` and friends) are not profile requests,
+and their 1.05M window exceeds every configured cheap target, so the window floor
+keeps them on their own lane.
 
-**Phase 2 — role aliases.** Harness files name a role
-(`model: role/review-strong`); the gateway resolves it using family diversity,
-quota state, health and cost, and publishes the alias with the **minimum window
-across its candidates** so the client's metadata stays honest. This is where two
-things the harness cannot express become possible: "the reviewer must be a
-different family than the implementer" (needs the session's model history) and
-quota-aware shifting (needs cross-machine consumption).
+**Phase 2 — role aliases.** The gateway now accepts role names such as
+`model: role/review-strong` through the `roles` configuration. Each candidate
+must name a configured provider/model, an explicit family, and a verified
+context window; the published virtual model uses the **minimum window across
+its candidates**. Candidate order uses current health/cooldown and quota state.
+A bounded, in-memory family history keyed by authenticated session lets the
+planner prefer a family not recently used by that session; if no diverse family
+is available, role candidates remain available and the configured profile is
+appended as a safe fallback. Two roles are configured: `role/review-strong`
+(mistral, bonsai, gpt-oss) and `role/review-fast` (gpt-oss, ministral). Provider
+model entries now declare `family`, which is what makes diversity measurable.
 
 ### 5.4 Provider compaction via the beta
 
-Where the upstream is Anthropic-protocol and honours it, enablement is either
-the client sending it (Claude Code with experimental betas allowed) or the
-gateway injecting `context_management` plus the beta header for clients that do
-not know the beta.
+Where the upstream is Anthropic-protocol and honours it, the client may send
+the beta. The gateway currently implements route-gated pass-through only; it
+does not synthesize beta headers or compaction request fields. It filters client
+beta tokens against a provider-level
+`anthropic_beta_allowlist`, strips paired `context_management` or `compaction`
+fields when the corresponding beta is not admitted, and rejects allow-lists on
+Codex, MiniMax (`tokligence`) and other translated adapters. MiniMax's official
+Anthropic-compatibility docs state that `context_management` is ignored and do
+not document on-demand compaction, so this route is explicitly ineligible; no
+configured provider currently supports the compaction beta. A direct Anthropic
+provider is not configured. The global Claude experimental-beta disable flag
+has been removed; route policy, not a global client kill switch, controls
+pass-through.
+
+Sources: [Anthropic on-demand compaction](https://platform.claude.com/docs/en/build-with-claude/compaction-on-demand),
+[MiniMax Anthropic SDK compatibility](https://platform.minimax.io/docs/api-reference/text-anthropic-api).
 
 Rules:
 
-- **Never inject when the request already carries a `compact_*` edit.** One
-  compaction per request, per the API's own rule.
+- If gateway-side injection is added later, never synthesize `compaction` when
+  the request already contains `compaction` or `context_management`; Anthropic
+  rejects combining the two. Injection is not currently implemented.
 - **Per-route allow-list.** The Anthropic compact beta is an Anthropic-server
   feature, so it belongs to Anthropic-protocol upstreams only. It is *not* the
   Codex lane's mechanism: that lane has its own, in the Responses protocol (see
   below). So the beta is never injected towards the Codex lane, and
   `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` can be relaxed per-lane rather
   than globally.
-- **Pass the outcome through untouched.** A compaction reply is a normal
-  Anthropic message whose stop reason is `compaction`. The Anthropic normaliser
-  must treat that as first-class and never "fix" a compaction message into an
-  answer.
+- **Pass the outcome through untouched.** Signed `compaction` blocks and the
+  `compaction` stop reason are first-class in the Anthropic normaliser; a
+  regression test confirms the block, signature and usage survive unchanged.
 - Where the client replaces its history with the returned summary, no state is
   stored anywhere.
 
@@ -332,15 +354,21 @@ full-price turn escapes on the Codex lane.
    the wire.) Not a foundation until proven.
 4. Does Codex CLI inbound parity matter? If yes, that is the strongest reason to
    host the Codex lane on shunt.
-5. Exact cold threshold per provider, learned from the cache counters.
+5. Exact cold threshold per provider, learned from cache counters. The gateway
+   now captures bounded Codex session intervals and aggregate cache counters,
+   but the Codex OAuth lane has no authoritative quota denominator in the
+   gateway's `/admin/quota` API. OpenAI API cache-retention documentation is not
+   evidence for ChatGPT subscription traffic through CLIProxyAPI. A controlled
+   staged probe still needs a baseline quota reading and must stay within the
+   user-approved 0.1–0.2% per stage / 1–2% total budget.
 
 ## 8. Phases
 
 | phase | content | state stored |
 |---|---|---|
-| 0 | affinity fix (session headers forwarded - done; body identity synthesis done), Codex compaction pass-through (done), hint headers (client-side), class-aware routing (opt-in; disabled by default until a cheap policy model whose context window clears the floor is configured), per-route beta allow-list, budget/quota baseline | session id + timestamp |
-| 1 | role aliases with family diversity, quota-aware governor, window-floor rule in the picker | none added |
-| 2 | cold-resume hardening: harness-compaction routing (from phase 0) plus the gateway rewrite only if spike 2 says it is needed | bounded in-memory summary cache |
+| 0 | affinity and Codex compaction pass-through (done); Claude hint headers and beta allow-list implemented; MiniMax route explicitly ineligible per upstream docs; no direct Anthropic provider configured; class-routing foundation implemented but disabled pending verified target/window; aggregate and bounded session-interval cache measurement implemented, savings measurement pending | hashed session key in bounded memory; usage aggregates as before |
+| 1 | role-alias framework, family diversity history, quota-aware ordering and minimum-window metadata implemented; no role candidate set is configured yet | bounded in-memory family history |
+| 2 | cold-resume hardening: cache observation implemented; routing still gated until controlled sampling establishes a trustworthy signal; gateway rewrite only if spike 2 justifies it | no transcripts; session observation keys are hashed and memory-only; the existing aggregate usage store remains persistent |
 | 3 (optional) | Codex-lane swap to shunt + transport; eager warm compaction only if resume latency warrants it | — |
 
 ## 9. Success criteria

@@ -91,3 +91,89 @@ test("route planner keeps a successful model sticky within a profile", () => {
   assert.equal(plan.candidates[0].provider.id, "mistral");
   assert.equal(plan.candidates[0].upstreamModel, "mistral-medium-3-5");
 });
+
+test("enabled class routing prepends a window-safe cheap target and retains session fallbacks", () => {
+  const routed = structuredClone(config);
+  routed.classRouting = { enabled: true, cheapPolicyModel: { provider: "mistral", model: "mistral-medium-3-5" } };
+  const mistral = routed.providers.find(({ id }) => id === "mistral");
+  routed.profiles.find(({ id }) => id === "agent-default").candidates.splice(13, 0, { provider: "mistral", model: "mistral-small-latest" });
+  mistral.models.find(({ id }) => id === "mistral-medium-3-5").context_window = 128000;
+  const plan = buildRoutePlan(routed, {
+    model: "agent-default",
+    protocol: "messages",
+    requestClass: "subagent",
+    body: { messages: [{ role: "user", content: "hello" }] },
+  }, env, { cooldowns: new Map() });
+  assert.deepEqual(plan.candidates.slice(0, 2).map(({ provider, upstreamModel }) => [provider.id, upstreamModel]), [
+    ["mistral", "mistral-medium-3-5"],
+    ["mistral", "mistral-small-latest"],
+  ]);
+});
+
+test("class routing keeps the session route when cheap target window is unknown or below floor", () => {
+  for (const window of [undefined, 127999]) {
+    const routed = structuredClone(config);
+    routed.classRouting = { enabled: true, cheapPolicyModel: { provider: "mistral", model: "mistral-medium-3-5" } };
+    const mistral = routed.providers.find(({ id }) => id === "mistral");
+    const model = mistral.models.find(({ id }) => id === "mistral-medium-3-5");
+    if (window === undefined) delete model.context_window;
+    else model.context_window = window;
+    const plan = buildRoutePlan(routed, {
+      model: "agent-default", protocol: "chat_completions", requestClass: "workflow",
+      body: { messages: [{ role: "user", content: "hello" }] },
+    }, env, { cooldowns: new Map() });
+    assert.equal(plan.candidates[0].provider.id, "cline-oauth");
+  }
+});
+
+
+test("unrecognized agent-type hints cannot activate class routing", () => {
+  const routed = structuredClone(config);
+  routed.classRouting = { enabled: true, cheapPolicyModel: { provider: "mistral", model: "mistral-medium-3-5" } };
+  const mistral = routed.providers.find(({ id }) => id === "mistral");
+  mistral.models.find(({ id }) => id === "mistral-medium-3-5").context_window = 128000;
+  const plan = buildRoutePlan(routed, {
+    model: "agent-default", protocol: "chat_completions", requestClass: "subagent",
+    agentType: "invented", body: { messages: [{ role: "user", content: "hello" }] },
+  }, env, { cooldowns: new Map() });
+  assert.equal(plan.candidates[0].provider.id, "cline-oauth");
+});
+
+
+test("role aliases select a family unused by recent session models and retain profile fallback", () => {
+  const routed = structuredClone(config);
+  routed.roles = [{
+    id: "role/review-strong", max_attempts: 2, context_window: 128000, avoid_recent_families: true, fallback: "agent-default",
+    candidates: [
+      { provider: "mistral", model: "mistral-medium-3-5", family: "family-a", context_window: 128000 },
+      { provider: "openrouter", model: "deepseek/deepseek-v4-flash", family: "family-b", context_window: 128000 },
+    ],
+  }];
+  const modelHistory = new Map([["session-1", { families: ["family-a"], updatedAt: Date.now() }]]);
+  const plan = buildRoutePlan(routed, {
+    model: "role/review-strong", protocol: "chat_completions", affinityKey: "session-1",
+    body: { messages: [{ role: "user", content: "review" }] },
+  }, env, { cooldowns: new Map(), modelHistory });
+  assert.equal(plan.error, undefined);
+  assert.equal(plan.candidates[0].family, "family-b");
+  assert.ok(plan.candidates.some(({ provider }) => provider.id === "cline-oauth"));
+  assert.equal(plan.publicModel, "role/review-strong");
+});
+
+test("role aliases fall back to their full candidate list if no unused family remains", () => {
+  const routed = structuredClone(config);
+  routed.roles = [{
+    id: "role/review-strong", max_attempts: 2, context_window: 128000, avoid_recent_families: true, fallback: "agent-default",
+    candidates: [
+      { provider: "mistral", model: "mistral-medium-3-5", family: "family-a", context_window: 128000 },
+      { provider: "openrouter", model: "deepseek/deepseek-v4-flash", family: "family-b", context_window: 128000 },
+    ],
+  }];
+  const modelHistory = new Map([["session-1", { families: ["family-a", "family-b"], updatedAt: Date.now() }]]);
+  const plan = buildRoutePlan(routed, {
+    model: "role/review-strong", protocol: "chat_completions", affinityKey: "session-1",
+    body: { messages: [{ role: "user", content: "review" }] },
+  }, env, { cooldowns: new Map(), modelHistory });
+  assert.ok(plan.candidates.length > 2);
+  assert.deepEqual(plan.candidates.slice(0, 2).map(({ family }) => family), ["family-a", "family-b"]);
+});

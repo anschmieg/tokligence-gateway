@@ -138,3 +138,70 @@ test("invalid policies fail during startup validation", () => {
     /model_cache_ttl_ms must be between 0 and 300000/,
   );
 });
+
+test("Anthropic beta allow-lists are validated and forbidden on protocol-translation lanes", () => {
+  const base = [
+    "version: 1", "access:", "  public_secret_env: PUBLIC", "  admin_secret_env: ADMIN",
+    "providers:", "  - id: test", "    adapter: openai-compatible", "    default: true",
+    "    protocols: [messages]", "    anthropic_beta_allowlist: [compact-2026-09-04]", "aliases: []",
+  ].join("\n");
+  const allowed = parseRoutingConfig(base);
+  assert.deepEqual(allowed.providers[0].anthropic_beta_allowlist, ["compact-2026-09-04"]);
+  assert.throws(() => parseRoutingConfig(base.replace("openai-compatible", "oauth-proxy")), /cannot allow Anthropic betas/);
+  assert.throws(() => parseRoutingConfig(base.replace("openai-compatible", "tokligence")), /cannot allow Anthropic betas/);
+  assert.throws(() => parseRoutingConfig(base.replace("compact-2026-09-04", "42")), /anthropic_beta_allowlist must contain only non-empty strings/);
+});
+
+
+test("class routing is opt-in and targets only configured provider models", () => {
+  const source = fs.readFileSync("gateway.routes.yaml", "utf8");
+  // A disabled block stays a valid, inert configuration.
+  const disabled = source.replace(
+    "classRouting:\n  enabled: true",
+    "classRouting:\n  enabled: false",
+  );
+  assert.equal(parseRoutingConfig(disabled).classRouting.enabled, false);
+  // Enabling without a verified window must fail during startup validation.
+  const noWindow = disabled.replace("        context_window: 256000\n", "");
+  assert.throws(
+    () => parseRoutingConfig(noWindow.replace("  enabled: false", "  enabled: true")),
+    /requires a verified context_window/,
+  );
+  assert.throws(() => parseRoutingConfig(source.replace("provider: mistral\n    model: mistral-medium-3-5", "provider: codex-oauth\n    model: gpt-5.6-terra")), /cannot target an oauth-proxy/);
+  assert.throws(() => parseRoutingConfig(source.replace("model: mistral-medium-3-5\n", "model: not-configured\n")), /must reference a configured provider model/);
+});
+
+
+test("the shipped routing policy enables class routing with a documented window target", () => {
+  assert.equal(config.classRouting.enabled, true);
+  assert.deepEqual(config.classRouting.cheapPolicyModel, { provider: "mistral", model: "mistral-medium-3-5" });
+  const mistral = config.providers.find(({ id }) => id === "mistral");
+  const target = mistral.models.find(({ id }) => id === "mistral-medium-3-5");
+  assert.equal(target.context_window, 256000);
+});
+
+test("shipped role aliases publish their minimum candidate window", () => {
+  const role = config.roles.find(({ id }) => id === "role/review-strong");
+  assert.ok(role);
+  assert.equal(role.context_window, 131072);
+  assert.equal(role.fallback, "agent-default");
+  assert.deepEqual(role.candidates.map(({ family }) => family), ["mistral", "bonsai", "gpt-oss"]);
+});
+
+test("role aliases require family and verified windows and publish the minimum window", () => {
+  const source = [
+    "version: 1", "access:", "  public_secret_env: PUBLIC", "  admin_secret_env: ADMIN",
+    "providers:", "  - id: test", "    adapter: middleware", "    default: true",
+    "    protocols: [chat_completions]", "    models:", "      - id: light", "        context_window: 128000",
+    "      - id: strong", "        context_window: 256000", "aliases: []", "profiles:",
+    "  session-default:", "    context_window: 128000", "    candidates:",
+    "      - provider: test", "        model: light", "roles:",
+    "  review-strong:", "    fallback: session-default", "    candidates:", "      - provider: test", "        model: light", "        family: family-a",
+    "      - provider: test", "        model: strong", "        family: family-b",
+  ].join("\n");
+  const role = parseRoutingConfig(source).roles[0];
+  assert.equal(role.id, "role/review-strong");
+  assert.equal(role.context_window, 128000);
+  assert.equal(role.avoid_recent_families, true);
+  assert.throws(() => parseRoutingConfig(source.replace("context_window: 256000", "context_window: 0")), /requires a verified context_window/);
+});

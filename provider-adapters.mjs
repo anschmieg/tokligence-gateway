@@ -5,7 +5,25 @@ import { GATE_TOOLS, shapeZenRequest, zenHeaders } from "./opencode-zen-gate.mjs
 import { createTokenProvider } from "./opencode-zen-credential.mjs";
 import { createSessionPool } from "./opencode-zen-session.mjs";
 
-const FORWARD_HEADERS = ["accept", "anthropic-beta", "anthropic-version", "content-type", "user-agent", "x-request-id"];
+const FORWARD_HEADERS = ["accept", "anthropic-version", "content-type", "user-agent", "x-request-id"];
+
+export function applyAnthropicBetaPolicy(body, header, allowlist = []) {
+  const selectedHeader = allowedAnthropicBeta(header, allowlist);
+  const selected = new Set((selectedHeader || "").split(",").map((value) => value.trim()).filter(Boolean));
+  const payload = Buffer.isBuffer(body) ? JSON.parse(body.toString("utf8")) : structuredClone(body);
+  if (![...selected].some((value) => value.startsWith("context-management-")) || payload.compaction != null) {
+    delete payload.context_management;
+  }
+  if (![...selected].some((value) => value.startsWith("compact-"))) delete payload.compaction;
+  return { body: Buffer.from(JSON.stringify(payload)), header: selectedHeader };
+}
+
+export function allowedAnthropicBeta(header, allowlist = []) {
+  if (typeof header !== "string" || !Array.isArray(allowlist)) return undefined;
+  const allowed = new Set(allowlist.filter((value) => typeof value === "string"));
+  const selected = header.split(",").map((value) => value.trim()).filter((value) => value && allowed.has(value));
+  return selected.length ? selected.join(", ") : undefined;
+}
 
 // Forwarded to the self-hosted Codex lane only: CLIProxyAPI keys credential
 // affinity on these session headers, and a missed affinity costs a prompt-cache
@@ -198,8 +216,12 @@ export async function startAttempt({ candidate, req, path, body, env = process.e
   }
 
   const target = requestUrl(candidate, path, env);
+  const betaPolicy = candidate.protocol === "messages" ? applyAnthropicBetaPolicy(body, req.headers["anthropic-beta"], candidate.provider.anthropic_beta_allowlist) : { body, header: undefined };
+  body = betaPolicy.body;
   const headers = { "content-type": "application/json", "content-length": String(body.length), ...candidate.provider.headers };
   for (const name of FORWARD_HEADERS) if (req.headers[name] !== undefined) headers[name] = req.headers[name];
+  delete headers["anthropic-beta"];
+  if (betaPolicy.header) headers["anthropic-beta"] = betaPolicy.header;
   if (candidate.provider.adapter === "oauth-proxy") {
     for (const name of OAUTH_PROXY_FORWARD_HEADERS) {
       if (req.headers[name] !== undefined) headers[name] = req.headers[name];

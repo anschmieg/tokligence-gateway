@@ -47,7 +47,7 @@ COPY --from=cliproxy /usr/local/bin/cli-proxy-api /usr/local/bin/cli-proxy-api
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
-COPY tgw-proxy.mjs openai-stream.mjs sanitize-headers.mjs routing-planner.mjs request-executor.mjs provider-adapters.mjs protocol-codecs.mjs cline-oauth.mjs usage-observer.mjs quota-cache.mjs ./
+COPY tgw-proxy.mjs openai-stream.mjs sanitize-headers.mjs routing-planner.mjs request-executor.mjs provider-adapters.mjs protocol-codecs.mjs cline-oauth.mjs usage-observer.mjs cache-observer.mjs quota-cache.mjs ./
 COPY gateway-config.mjs ./
 COPY route-config.mjs compile-config.mjs gateway.routes.yaml ./
 COPY quota.mjs mistral-subscription-quota.mjs preferences.mjs dashboard.mjs dashboard.html cloudflare-access.mjs model-catalog.mjs copilot-auto.mjs ./

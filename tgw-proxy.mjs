@@ -31,6 +31,7 @@ import {
 import { probeAllProviderQuota } from "./quota.mjs";
 import { createObservedUsageStore } from "./usage-observer.mjs";
 import { createQuotaCache } from "./quota-cache.mjs";
+import { createSessionCacheObserver } from "./cache-observer.mjs";
 import { RoutingPreferences, sanitizedPreferences } from "./preferences.mjs";
 import { DASHBOARD_HTML } from "./dashboard.mjs";
 import { cloudflareAccessConfigured, isValidCloudflareAccessToken } from "./cloudflare-access.mjs";
@@ -51,7 +52,8 @@ const TGW_PORT   = Number(process.env.TGW_PORT || 8081);
 const DEBUG = process.env.TGW_DEBUG === "1";
 const ROUTING_CONFIG_PATH = path.resolve(process.env.ROUTING_CONFIG_PATH || "gateway.routes.yaml");
 const ROUTING = loadRoutingConfig(ROUTING_CONFIG_PATH);
-const PROFILE_RUNTIME_STATE = { cooldowns: new Map(), affinity: new Map(), quotas: new Map() };
+const PROFILE_RUNTIME_STATE = { cooldowns: new Map(), affinity: new Map(), quotas: new Map(), modelHistory: new Map() };
+const SESSION_CACHE_OBSERVER = createSessionCacheObserver();
 
 function providerApiKey(id) {
   const provider = providerById(ROUTING, id);
@@ -245,6 +247,17 @@ function registerRoutingProfiles() {
       display_name: `Routing profile: ${profile.id}`,
       description: `Tokligence routing profile with ${(profile.candidates || []).length} candidates`,
       context_window,
+      supported_reasoning_levels: [],
+      supports_reasoning_summaries: false,
+      supports_parallel_tool_calls: false,
+    });
+  }
+  for (const role of ROUTING.roles || []) {
+    registerModel(role.id, "tokligence", {
+      source: "role",
+      display_name: `Role alias: ${role.id.slice("role/".length)}`,
+      description: `Role alias with ${role.candidates.length} family-diverse candidates`,
+      context_window: role.context_window,
       supported_reasoning_levels: [],
       supports_reasoning_summaries: false,
       supports_parallel_tool_calls: false,
@@ -547,9 +560,19 @@ function sendClineError(res, error) {
 
 function handleProfileRequest(req, res, parsed, protocol) {
   const profile = profileByModel(ROUTING, parsed?.model);
+  const affinityKey = routingAffinityKey(req, parsed);
+  const historyKey = routingModelHistoryKey(req, parsed);
   const plan = buildRoutePlan(
     ROUTING,
-    { model: parsed.model, protocol, body: parsed, affinityKey: routingAffinityKey(req) },
+    {
+      model: parsed.model,
+      protocol,
+      body: parsed,
+      requestClass: req.headers["x-claude-code-request-class"],
+      agentType: req.headers["x-claude-code-agent-type"],
+      affinityKey,
+      historyKey,
+    },
     process.env,
     PROFILE_RUNTIME_STATE,
   );
@@ -568,7 +591,8 @@ function handleProfileRequest(req, res, parsed, protocol) {
     env: process.env,
     runtimeState: PROFILE_RUNTIME_STATE,
     adapters: { [CLINE_OAUTH_PROVIDER?.id]: CLINE_OAUTH },
-    affinityKey: routingAffinityKey(req),
+    affinityKey,
+    historyKey,
     onUpstreamResponse: ({ provider, model, headers, chunks }) => {
       if (provider === "mistral") recordMistralRateLimitObservation(headers);
       recordUsageFromResponseChunks(provider, model, headers, chunks);
@@ -843,11 +867,33 @@ function copilotCallerKey(req) {
   return createHash("sha256").update(String(req.headers["authorization"] || "")).digest("base64url");
 }
 
-function routingAffinityKey(req) {
-  // Bind affinity to the authenticated principal without retaining the token.
+function routingSessionId(req, body = null) {
+  return req.headers["x-claude-code-session-id"]
+    || req.headers["session-id"]
+    || req.headers.session_id
+    || req.headers["x-session-id"]
+    || req.headers["x-session-affinity"]
+    || req.headers["x-client-request-id"]
+    || req.headers["x-task-id"]
+    || body?.metadata?.user_id?.session_id
+    || body?.prompt_cache_key
+    || null;
+}
+
+function principalSessionKey(req, session) {
   const principal = String(req.headers["authorization"] || "");
-  const session = String(req.headers["x-session-id"] || req.headers["x-task-id"] || "default");
-  return createHash("sha256").update(`${principal}\0${session}`).digest("base64url");
+  return createHash("sha256").update(`${principal}\0${String(session)}`).digest("base64url");
+}
+
+function routingAffinityKey(req, body = null) {
+  // Preserve legacy fallback stickiness for clients that supply no session id.
+  return principalSessionKey(req, routingSessionId(req, body) || "default");
+}
+
+function routingModelHistoryKey(req, body = null) {
+  // Family diversity is strictly session-scoped; never share it across sessions.
+  const session = routingSessionId(req, body);
+  return session ? principalSessionKey(req, session) : null;
 }
 
 async function validateAdminAuth(req) {
@@ -920,6 +966,10 @@ const CODEX_FORWARD_HEADERS = [
 ];
 
 function proxyToCodex(req, res, body) {
+  let parsedBody = null;
+  try { parsedBody = JSON.parse(body.toString("utf8")); } catch {}
+  const model = String(parsedBody?.model || "unknown");
+  const sessionKeyHash = routingModelHistoryKey(req, parsedBody);
   const target = codexUpstreamUrl(CODEX, req.url);
   const client = target.protocol === "https:" ? https : http;
   const headers = {
@@ -939,7 +989,7 @@ function proxyToCodex(req, res, body) {
     headers,
   }, (upRes) => {
     res.writeHead(upRes.statusCode || 502, upRes.headers);
-    upRes.pipe(res);
+    pipeAndRecordUsage("codex-oauth", model, upRes, res, sessionKeyHash);
   });
 
   upstream.on("error", (err) => {
@@ -970,25 +1020,32 @@ function handleCodexRoute(req, res, parsed, model) {
   return false;
 }
 
-function recordUsageFromResponseChunks(provider, model, headers, chunks) {
+function recordUsageFromResponseChunks(provider, model, headers, chunks, sessionKeyHash = null) {
   const text = Buffer.concat(chunks).toString();
   const contentType = String(headers?.["content-type"] || headers?.["Content-Type"] || "");
+  let latestUsage = null;
   if (contentType.includes("text/event-stream") || text.includes("data:")) {
     for (const line of text.split(/\r?\n/)) {
       const match = line.match(/^data:\s*(.+)$/);
       if (!match || match[1] === "[DONE]") continue;
       try {
-        recordObservedUsage(provider, model, JSON.parse(match[1]));
+        const event = JSON.parse(match[1]);
+        recordObservedUsage(provider, model, event);
+        if (event?.usage || event?.response?.usage) latestUsage = event;
       } catch {}
     }
-    return;
+  } else {
+    try {
+      latestUsage = JSON.parse(text);
+      recordObservedUsage(provider, model, latestUsage);
+    } catch {}
   }
-  try {
-    recordObservedUsage(provider, model, JSON.parse(text));
-  } catch {}
+  if (sessionKeyHash && latestUsage) {
+    SESSION_CACHE_OBSERVER.record(sessionKeyHash, provider, model, latestUsage);
+  }
 }
 
-function pipeAndRecordUsage(provider, model, upstream, res) {
+function pipeAndRecordUsage(provider, model, upstream, res, sessionKeyHash = null) {
   if (provider === "mistral") recordMistralRateLimitObservation(upstream.headers);
   const chunks = [];
   upstream.on("data", (chunk) => {
@@ -996,7 +1053,7 @@ function pipeAndRecordUsage(provider, model, upstream, res) {
     res.write(chunk);
   });
   upstream.once("end", () => {
-    recordUsageFromResponseChunks(provider, model, upstream.headers, chunks);
+    recordUsageFromResponseChunks(provider, model, upstream.headers, chunks, sessionKeyHash);
     res.end();
   });
   upstream.once("error", () => res.end());
@@ -1317,6 +1374,12 @@ const server = http.createServer((req, res) => {
     }
 
     // Admin status used by the dashboard.
+    if (req.method === "GET" && url.pathname === "/admin/cache-observations") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ object: "list", data: SESSION_CACHE_OBSERVER.snapshot() }));
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/admin/status") {
       const enabled = quotaObserverProviders(ROUTING, process.env);
       const configured = enabled.map((provider) => ({ id: provider.id, adapter: provider.adapter }));
