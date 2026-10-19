@@ -20,9 +20,9 @@ def report(manifest_path: Path, trace_dir: Path) -> dict:
     matrix = []
     for location, marker in sources.items():
         req = [e["trace_id"] for e in events
-               if e.get("kind") == "request" and marker in e.get("markers", ())]
+               if marker in e.get("request_markers", ())]
         res = [e["trace_id"] for e in events
-               if e.get("kind") in ("response", "stream_chunk") and marker in e.get("markers", ())]
+               if marker in e.get("response_markers", ())]
         matrix.append({
             "source": location, "marker": marker,
             "in_shell_fixture": location != "DECOY",
@@ -40,7 +40,7 @@ def report(manifest_path: Path, trace_dir: Path) -> dict:
         "observability": {
             "shell": "fixture + optional opt-in shell hooks; cannot see native reads",
             "warp_client": "not instrumented",
-            "gateway": "LiteLLM parsed pre-call hook, not original wire request",
+            "gateway": "Tokligence Node parsed, authenticated ingress after Warp backend; not raw Warp-client instructions",
             "warp_backend": "opaque",
         }
     }
