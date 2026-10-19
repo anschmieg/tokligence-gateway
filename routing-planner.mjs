@@ -1,5 +1,6 @@
 import { matchConfiguredProvider, profileByModel, providerById, providerEnabled, roleByModel } from "./route-config.mjs";
 import { inspectRequestFeatures, supportsFeatures } from "./protocol-codecs.mjs";
+import { normalizeUpstreamModel } from "./upstream-model.mjs";
 
 function circuitOpen(runtimeState, provider, model, protocol) {
   const until = runtimeState?.cooldowns?.get(`${provider}:${model}:${protocol}`) || 0;
@@ -197,7 +198,10 @@ export function buildRoutePlan(config, { model, protocol, body, requestClass = n
     const directTranslate = translationFor(provider, protocol);
     if (directTranslate === "anthropic-from-openai" && TRANSLATING_ADAPTERS.has(provider.adapter)) {
       if (!providerEnabled(provider, env)) return null;
-      const resolvedModel = resolveUpstreamModel(provider, model);
+      // The native lane for this provider rewrites the model on the way out;
+      // the translated lane has to land on the same upstream id, or an id from
+      // /v1/models works on /v1/chat/completions and fails here.
+      const resolvedModel = normalizeUpstreamModel(provider.id, resolveUpstreamModel(provider, model));
       const modelConfig = provider.models.find(({ id }) => id === resolvedModel) || { id: resolvedModel };
       const required = inspectRequestFeatures(protocol, body);
       if (!candidateSupports(provider, modelConfig, required, body, true)) {

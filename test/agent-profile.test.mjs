@@ -231,3 +231,30 @@ test("Mistral serves Anthropic callers through translation, not a lossy shim", (
   assert.equal(candidate.translate, "anthropic-from-openai");
   assert.equal(candidate.native, false);
 });
+
+test("translated Messages resolves a discovered OpenRouter id to its upstream id", () => {
+  const model = "openrouter/z-ai/glm-5.3-flash";
+  const plan = buildRoutePlan(config, {
+    model,
+    protocol: "messages",
+    body: { model, max_tokens: 32, messages: [{ role: "user", content: "ping" }] },
+  }, env, { cooldowns: new Map() });
+  assert.equal(plan.error, undefined);
+  const [candidate] = plan.candidates;
+  assert.equal(candidate.provider.id, "openrouter");
+  assert.equal(candidate.upstreamModel, "z-ai/glm-5.3-flash");
+  assert.equal(candidate.translate, "anthropic-from-openai");
+});
+
+test("translated Messages strips the namespace of a discovered Mistral id", () => {
+  const model = "mistral/mistral-large-2411";
+  const plan = buildRoutePlan(config, {
+    model,
+    protocol: "messages",
+    body: { model, max_tokens: 32, messages: [{ role: "user", content: "ping" }] },
+  }, env, { cooldowns: new Map() });
+  assert.equal(plan.error, undefined);
+  const [candidate] = plan.candidates;
+  assert.equal(candidate.provider.id, "mistral");
+  assert.equal(candidate.upstreamModel, "mistral-large-2411");
+});

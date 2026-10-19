@@ -10,6 +10,7 @@ import https from "https";
 import path from "node:path";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { sendChatCompletionResult } from "./openai-stream.mjs";
+import { resolveMistralModel, resolveOpenCodeModel, resolveOpenRouterModel } from "./upstream-model.mjs";
 import { sanitizeHeaders } from "./sanitize-headers.mjs";
 import {
   CODEX_REASONING_LEVELS,
@@ -128,11 +129,6 @@ const MINIMAX_MAP = {
 
 const MODEL_REGISTRY = new Map();
 let modelRegistryRefresh = null;
-
-const OPENROUTER_ALIASES = {
-  // Manual mapping for specific model families
-  "free": "openrouter/free",
-};
 
 function registerModel(id, provider, extra = {}) {
   if (!id) return;
@@ -625,39 +621,6 @@ function isOpenCodeModel(model) {
 
 function isOpenCodeMiniMaxModel(model) {
   return isOpenCodeModel(model) && MINIMAX_MODEL_FRAGMENT.test(model);
-}
-
-function resolveOpenRouterModel(model) {
-  if (!model) return model;
-  if (model.toLowerCase().startsWith("openrouter/")) {
-    return model.slice(11);
-  }
-  if (model.toLowerCase().startsWith("or/")) {
-    return model.slice(3);
-  }
-  for (const [prefix, target] of Object.entries(OPENROUTER_ALIASES)) {
-    if (model.toLowerCase().startsWith(prefix.toLowerCase())) {
-      return target;
-    }
-  }
-  return model;
-}
-
-function resolveOpenCodeModel(model) {
-  if (!model) return model;
-  if (model.toLowerCase().startsWith("opencode-go/")) {
-    return model.slice(12);
-  }
-  if (model.toLowerCase().startsWith("opencode-zen/")) {
-    return model.slice(13);
-  }
-  if (model.toLowerCase().startsWith("oc/")) {
-    return model.slice(3);
-  }
-  if (model.toLowerCase().startsWith("zen/")) {
-    return model.slice(4);
-  }
-  return model;
 }
 
 function getOpenCodeMessagesPath(model) {
@@ -1225,14 +1188,6 @@ function callOpenRouterOpenAI(model, messages, maxTokens) {
     req.write(body);
     req.end();
   });
-}
-
-function resolveMistralModel(model) {
-  if (!model) return model;
-  if (model.toLowerCase().startsWith("mistral/")) {
-    return model.slice(8);
-  }
-  return model;
 }
 
 function isMistralModel(model) {
