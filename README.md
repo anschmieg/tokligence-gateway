@@ -64,6 +64,13 @@ automatically. You can keep `TOKLIGENCE_ADMIN_SECRET` as a fallback for
 operators, or set it to an empty value and rely entirely on Cloudflare Access.
 Both auth methods are checked on every `/admin/*` request.
 
+## Free compute strategy inputs
+
+- **Modal** Starter includes $30/month of free compute (GPU, CPU and memory) on
+  a $0/month plan, and the `modal` provider lane already exists. Treat it as a
+  standing no-cost budget for gateway-adjacent work rather than as free hosted
+  inference. Details: [docs/modal-credits.md](docs/modal-credits.md).
+
 ## Routing policy
 
 Edit `gateway.routes.yaml` to manage providers, models, aliases, routes, and
