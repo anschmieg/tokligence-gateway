@@ -3,10 +3,11 @@ import { mkdtempSync, readFileSync, readdirSync, chmodSync, rmSync } from "node:
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { EventEmitter } from "node:events";
 import { createWarpTraceRecorder } from "../warp-context-trace.mjs";
 
-class Response {
-  constructor() { this.chunks = []; this.statusCode = 200; }
+class Response extends EventEmitter {
+  constructor() { super(); this.chunks = []; this.statusCode = 200; }
   write(value) { this.chunks.push(String(value)); return true; }
   end(value) { if (value !== undefined) this.chunks.push(String(value)); return this; }
 }
@@ -77,4 +78,24 @@ test("request without secret values in trace despite payload secret",t=>{
   const s=readFileSync(path.join(x.dir,readdirSync(x.dir)[0]),"utf8");
   assert.ok(!s.includes("supersecret0123456789"));
   assert.ok(!s.includes("Bearer"));
+});
+
+test("markers split across SSE chunks are reconstructed", t => {
+  const x=fixture(); t.after(x.close);
+  const res=new Response();
+  assert.equal(createWarpTraceRecorder(x.env).begin({testPrincipal:true,response:res,body:x.body}),true);
+  res.write("data: WARPCTX_STD");
+  res.write("ERR_AA77CC");
+  res.end(" done");
+  assert.deepEqual(events(x.dir)[0].response_markers,["WARPCTX_STDERR_AA77CC"]);
+});
+test("aborted streaming response creates one partial trace", t => {
+  const x=fixture(); t.after(x.close);
+  const res=new Response();
+  assert.equal(createWarpTraceRecorder(x.env).begin({testPrincipal:true,response:res,body:x.body}),true);
+  res.write("WARPCTX_GIT_CC11AA");
+  res.emit("close");
+  res.end();
+  assert.equal(events(x.dir).length,1);
+  assert.deepEqual(events(x.dir)[0].response_markers,["WARPCTX_GIT_CC11AA"]);
 });
