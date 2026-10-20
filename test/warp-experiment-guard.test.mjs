@@ -60,3 +60,12 @@ test("cap tokens, permit one concurrent, enforce budget and expiry", () => {
   advance(31*60*1000);
   assert.equal(guard.catalogAllowed(),false);
 });
+
+test("catalog discovery is limited and time-bound", () => {
+  const {guard,advance}=setup();
+  for(let i=0;i<12;i++) assert.equal(guard.catalogAllowed(),true);
+  assert.equal(guard.catalogAllowed(),false);
+  const expired=setup();
+  expired.advance(31*60*1000);
+  assert.equal(expired.guard.catalogAllowed(),false);
+});
