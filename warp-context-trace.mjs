@@ -100,5 +100,5 @@ export function createWarpTraceRecorder(env = process.env) {
     };
     return true;
   }
-  return { begin };
+  return { begin, isReady: () => enabled && !!model && privateDirectory(directory) };
 }
