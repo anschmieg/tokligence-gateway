@@ -649,21 +649,3 @@ aliases:
   - id: la-minimax-m2.1
     patterns: [minimax-m2.1, m2.1]
     target: MiniMax-M2.1
-
-  # Claude Code clients address Anthropic model names. This gateway has no
-  # Anthropic upstream of its own, so the tier names resolve to gateway
-  # models. The mapping matches the tier defaults the clients set for
-  # opus/sonnet/haiku/fable, so an alias and an explicit Anthropic name
-  # land on the same model.
-  - id: la-claude-opus
-    patterns: [claude-opus-*]
-    target: gpt-5.6-sol
-  - id: la-claude-sonnet
-    patterns: [claude-sonnet-*]
-    target: gpt-5.6-terra
-  - id: la-claude-haiku
-    patterns: [claude-haiku-*]
-    target: gpt-5.6-luna
-  - id: la-claude-fable
-    patterns: [claude-fable-*]
-    target: gpt-5.6-sol
