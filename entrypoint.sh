@@ -3,6 +3,14 @@ set -eu
 
 mkdir -p /app/config/dev /root/.tokligence/logs /data /data/cliproxy/auth /data/zen
 
+# Disposable synthetic Warp experiment traces. Disabled and uncreated normally.
+if [ "${WARP_TRACE_ENABLED:-0}" = "1" ]; then
+  umask 077
+  mkdir -p /data/warp-context-traces
+  chmod 0700 /data/warp-context-traces
+  umask 022
+fi
+
 # OpenCode Zen free tier needs the OAuth credential from a Console sign-in, not a
 # Console API key. The credential arrives as environment variables and is written
 # to the persistent volume; the adapter refreshes it in place before it expires.
