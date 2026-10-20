@@ -71,6 +71,20 @@ providers:
       capabilities: [coding, reasoning, tool_calling]
       quota_type: subscription
 
+  - id: chatgpt-specialist
+    adapter: chatgpt-responses
+    enabled_env: CHATGPT_RESPONSES_ENABLED
+    api_key_env: CHATGPT_SERVICE_TOKEN
+    base_url_env: CHATGPT_SERVICE_URL
+    protocols: [responses, messages, chat_completions]
+    models:
+      - id: ui-text
+        family: chatgpt-ui
+        context_window: 16000
+    metadata:
+      capabilities: [text]
+      streaming: true
+
   - id: copilot-auto
     adapter: copilot-sdk
     enabled_env: COPILOT_AUTO_ENABLED
@@ -568,6 +582,70 @@ profiles:
 # verified context window (taken from the model entry) and a family; the
 # published window is the minimum across candidates.
 roles:
+  research:
+    specialist: true
+    instructions: "Research the stated question carefully. Separate verified facts from uncertainty, explain the basis for conclusions, and do not claim tools or source citations that are not present in your response. Return a concise evidence-grounded result."
+    candidates:
+      - provider: chatgpt-specialist
+        model: ui-text
+        family: chatgpt-ui
+
+  explore:
+    specialist: true
+    instructions: "Explore only the supplied context. Explain relevant behavior and dependencies, distinguish observations from inference, and do not claim filesystem or shell access."
+    candidates:
+      - provider: chatgpt-specialist
+        model: ui-text
+        family: chatgpt-ui
+
+  plan:
+    specialist: true
+    instructions: "Produce a bounded, actionable plan from the supplied task and context. State assumptions, dependencies, and acceptance checks; do not claim that any action was executed."
+    candidates:
+      - provider: chatgpt-specialist
+        model: ui-text
+        family: chatgpt-ui
+
+  review:
+    specialist: true
+    instructions: "Critically review only the supplied material. Prioritize concrete correctness issues and evidence, distinguish confirmed defects from questions, and do not claim to run tests or inspect unavailable files."
+    candidates:
+      - provider: chatgpt-specialist
+        model: ui-text
+        family: chatgpt-ui
+
+  architecture:
+    specialist: true
+    instructions: "Analyze the supplied architecture and constraints. Compare bounded alternatives, surface tradeoffs and risks, and mark assumptions clearly. Do not imply authority to make or deploy changes."
+    candidates:
+      - provider: chatgpt-specialist
+        model: ui-text
+        family: chatgpt-ui
+
+  synthesis:
+    specialist: true
+    instructions: "Synthesize only the supplied information. Preserve important distinctions, uncertainty, and provenance; do not invent citations, usage, or missing evidence."
+    candidates:
+      - provider: chatgpt-specialist
+        model: ui-text
+        family: chatgpt-ui
+
+  explain:
+    specialist: true
+    instructions: "Explain the supplied material clearly for the intended reader. Define necessary concepts, preserve technical accuracy, and separate what is known from assumptions. Do not claim access to tools or files that were not supplied."
+    candidates:
+      - provider: chatgpt-specialist
+        model: ui-text
+        family: chatgpt-ui
+
+  reasoning:
+    specialist: true
+    instructions: "Provide a careful, bounded analysis of the supplied task and context. State assumptions, compare relevant alternatives, and give a concise conclusion without claiming implementation, external research, or unavailable evidence."
+    candidates:
+      - provider: chatgpt-specialist
+        model: ui-text
+        family: chatgpt-ui
+
   review-strong:
     fallback: agent-default
     candidates:

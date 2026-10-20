@@ -81,6 +81,9 @@ test("GET /v1/models reflects live provider endpoints and only exposes free Open
       TGW_PORT: String(tokligencePort),
       TOKLIGENCE_AUTH_SECRET: "public-secret",
       TOKLIGENCE_ADMIN_SECRET: "admin-secret",
+      CHATGPT_RESPONSES_ENABLED: "true",
+      CHATGPT_SERVICE_URL: "http://127.0.0.1:38752/v1",
+      CHATGPT_SERVICE_TOKEN: "synthetic-token",
       CODEX_PROXY_ENABLED: "false",
       OPENROUTER_API_KEY: "sk-or-test",
       OPENROUTER_API_BASE: `http://127.0.0.1:${orPort}/api/v1`,
@@ -112,6 +115,9 @@ test("GET /v1/models reflects live provider endpoints and only exposes free Open
   assert.ok(!firstIds.some((id) => id.includes("paid-flagship")), "paid OpenRouter model excluded");
   // Tokligence/gateway model is surfaced.
   assert.ok(firstIds.includes("minimax-m2.7"), "tokligence backend model present");
+  for (const name of ["research", "explore", "plan", "review", "architecture", "synthesis", "explain", "reasoning"]) {
+    assert.ok(firstIds.includes(`role/${name}`), `specialist role/${name} is discoverable`);
+  }
 
   // Simulate the provider dropping a model; the next request must reflect it.
   orModels.data = orModels.data.filter((m) => m.id !== "free-vision");

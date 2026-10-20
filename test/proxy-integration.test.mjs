@@ -55,6 +55,125 @@ function waitForProxy(child) {
   });
 }
 
+test("specialist aliases dispatch only once to synthetic Responses service, inject role guidance, and never fall back", async (t) => {
+  const received = [];
+  let failUpstream = false;
+  let responseMode = "completed";
+  let serviceMutations = 0;
+  const mutationByKey = new Map();
+  const service = http.createServer(async (req, res) => {
+    const body = await jsonRequest(req);
+    received.push({ path: req.url, headers: req.headers, body });
+    if (responseMode === "disconnect") { req.socket.destroy(); return; }
+    if (responseMode === "malformed") { res.writeHead(200, { "Content-Type": "application/json" }); res.end("{"); return; }
+    if (responseMode === "unsettled") { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ id: "resp_pending", status: "in_progress", output_text: "not done", service: { settled: false } })); return; }
+    if (responseMode === "incomplete") { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ id: "resp_incomplete", status: "incomplete", output_text: "partial", service: { settled: true } })); return; }
+    const key = req.headers["idempotency-key"];
+    const previous = mutationByKey.get(key);
+    if (!previous) serviceMutations++;
+    mutationByKey.set(key, previous || { count: serviceMutations, output: "synthetic answer" });
+    if (failUpstream) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: { message: "synthetic down" } }));
+      return;
+    }
+    if (req.url === "/v1/responses" && body.input?.includes("stream me")) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ id: "resp_stream", object: "response", status: "completed", output_text: "synthetic answer", output: [], usage: null, service: { settled: true } }));
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ id: "resp_synthetic", object: "response", status: "completed", output_text: previous?.output || "synthetic answer", output: [], usage: null, service: { settled: true } }));
+  });
+  const servicePort = await listen(service);
+  const fallbackRequests = [];
+  const fallback = http.createServer(async (req, res) => {
+    if (req.url?.endsWith("/models")) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ object: "list", data: [] }));
+      return;
+    }
+    fallbackRequests.push(await jsonRequest(req));
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ type: "message", content: [{ type: "text", text: "wrong fallback" }] }));
+  });
+  const fallbackPort = await listen(fallback);
+  const child = spawn(process.execPath, ["tgw-proxy.mjs"], {
+    cwd: projectRoot,
+    env: { ...process.env, PROXY_PORT: "0", TGW_HOST: "127.0.0.1", TGW_PORT: String(fallbackPort),
+      TOKLIGENCE_AUTH_SECRET: "public-secret", TOKLIGENCE_ADMIN_SECRET: "admin-secret",
+      CHATGPT_RESPONSES_ENABLED: "true", CHATGPT_SERVICE_URL: `http://127.0.0.1:${servicePort}/v1`, CHATGPT_SERVICE_TOKEN: "service-secret",
+      CODEX_PROXY_ENABLED: "", OPENAI_API_KEY: "", OPENROUTER_API_KEY: "", OPENCODE_API_KEY: "", MODAL_GLM5_API_KEY: "" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  t.after(async () => { child.kill("SIGTERM"); await Promise.all([close(service), close(fallback)]); });
+  const port = await waitForProxy(child);
+  const url = `http://127.0.0.1:${port}/v1/responses`;
+  const headers = { Authorization: "Bearer sk-ant-public-secret", "Content-Type": "application/json", "Idempotency-Key": "task-1-turn-1" };
+  const modelList = await (await fetch(`http://127.0.0.1:${port}/v1/models`, { headers })).json();
+  for (const role of ["research", "explore", "plan", "review", "architecture", "synthesis", "explain", "reasoning"]) {
+    assert.ok(modelList.data.some(({ id }) => id === `role/${role}`));
+  }
+  for (const role of ["research", "explore", "plan", "review", "architecture", "synthesis", "explain", "reasoning"]) {
+    const response = await fetch(url, { method: "POST", headers: { ...headers, "Idempotency-Key": `${role}-turn-1` }, body: JSON.stringify({ model: `role/${role}`, input: "Use supplied context only", instructions: "Parent task details" }) });
+    assert.equal(response.status, 200);
+    assert.equal(received.at(-1).path, "/v1/responses");
+    assert.equal(received.at(-1).headers.authorization, "Bearer service-secret");
+    assert.equal(received.at(-1).headers["idempotency-key"], `${role}-turn-1`);
+    assert.match(received.at(-1).body.input, /Visible specialist role guidance/);
+    assert.match(received.at(-1).body.input, /Parent task details/);
+    assert.equal(received.at(-1).body.stream, undefined);
+  }
+  const beforeInvalid = received.length;
+  const invalid = await fetch(url, { method: "POST", headers, body: JSON.stringify({ model: "role/research", input: [{ role: "user", content: [{ type: "input_image" }] }] }) });
+  assert.equal(invalid.status, 400);
+  assert.equal(received.length, beforeInvalid);
+  failUpstream = true;
+  const failed = await fetch(url, { method: "POST", headers: { ...headers, "Idempotency-Key": "review-fail" }, body: JSON.stringify({ model: "role/review", input: "Fail once" }) });
+  assert.equal(failed.status, 503);
+  assert.equal(received.length, beforeInvalid + 1);
+  assert.equal(fallbackRequests.length, 0);
+  failUpstream = false;
+
+  const chatUrl = `http://127.0.0.1:${port}/v1/chat/completions`;
+  const chatKey = "stable-duplicate-key";
+  const chatBody = { model: "role/review", messages: [{ role: "system", content: "Caller guidance" }, { role: "user", content: "Review this" }] };
+  const chatOnce = await fetch(chatUrl, { method: "POST", headers: { ...headers, "Idempotency-Key": chatKey }, body: JSON.stringify(chatBody) });
+  const chatOnceBody = await chatOnce.json();
+  assert.equal(chatOnceBody.choices[0].message.content, "synthetic answer");
+  const countBeforeDuplicate = received.length;
+  const mutationsBeforeDuplicate = serviceMutations;
+  const chatDuplicate = await fetch(chatUrl, { method: "POST", headers: { ...headers, "Idempotency-Key": chatKey }, body: JSON.stringify(chatBody) });
+  assert.deepEqual(await chatDuplicate.json(), chatOnceBody);
+  assert.equal(received.length, countBeforeDuplicate + 1);
+  assert.equal(serviceMutations, mutationsBeforeDuplicate);
+
+  const messagesUrl = `http://127.0.0.1:${port}/v1/messages`;
+  const messages = await fetch(messagesUrl, { method: "POST", headers: { ...headers, "Idempotency-Key": "messages-stream-key", "anthropic-version": "2023-06-01" }, body: JSON.stringify({ model: "role/explore", max_tokens: 64, stream: true, system: "Look closely", messages: [{ role: "user", content: "Explore" }] }) });
+  assert.equal(messages.status, 200);
+  assert.match(messages.headers.get("content-type"), /text\/event-stream/);
+  const messageSse = await messages.text();
+  assert.match(messageSse, /message_stop/);
+  assert.match(received.at(-1).body.input, /Look closely/);
+
+  const chatStream = await fetch(chatUrl, { method: "POST", headers: { ...headers, "Idempotency-Key": "chat-stream-key" }, body: JSON.stringify({ ...chatBody, stream: true }) });
+  assert.match(chatStream.headers.get("content-type"), /text\/event-stream/);
+  assert.match(await chatStream.text(), /data: \[DONE\]/);
+
+  const responsesStream = await fetch(url, { method: "POST", headers: { ...headers, "Idempotency-Key": "responses-stream-key" }, body: JSON.stringify({ model: "role/research", input: "stream me", stream: true }) });
+  assert.match(responsesStream.headers.get("content-type"), /text\/event-stream/);
+  assert.match(await responsesStream.text(), /response.completed/);
+
+  for (const [mode, key] of [["malformed", "malformed-key"], ["unsettled", "unsettled-key"], ["incomplete", "incomplete-key"], ["disconnect", "disconnect-key"]]) {
+    responseMode = mode;
+    const failedRequest = await fetch(url, { method: "POST", headers: { ...headers, "Idempotency-Key": key }, body: JSON.stringify({ model: "role/review", input: "No fallback" }) });
+    assert.equal(failedRequest.status, 502, mode);
+    assert.match((await failedRequest.text()).toLowerCase(), /reconcil|settled|unreadable|unavailable/);
+    assert.equal(fallbackRequests.length, 0);
+    responseMode = "completed";
+  }
+});
+
 test("the façade routes exact Codex models and preserves Claude effort", async (t) => {
   const codexRequests = [];
   let codexResponseUsageCount = 0;

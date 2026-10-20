@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { parse, stringify } from "yaml";
 
-const VALID_ADAPTERS = new Set(["tokligence", "oauth-proxy", "middleware", "copilot-sdk", "openai-compatible", "cline-oauth", "opencode-zen"]);
+const VALID_ADAPTERS = new Set(["tokligence", "oauth-proxy", "middleware", "copilot-sdk", "openai-compatible", "cline-oauth", "opencode-zen", "chatgpt-responses"]);
 
 function requireString(value, label) {
   if (typeof value !== "string" || !value.trim()) {
@@ -87,6 +87,9 @@ export function parseRoutingConfig(source) {
     if (!VALID_ADAPTERS.has(adapter)) {
       throw new Error(`providers[${index}].adapter is not supported: ${adapter}`);
     }
+    if (adapter === "chatgpt-responses" && provider.enabled_env !== "CHATGPT_RESPONSES_ENABLED") {
+      throw new Error(`providers[${index}] chatgpt-responses must use the explicit enable gate`);
+    }
     if (provider.messages_translation != null && typeof provider.messages_translation !== "boolean") {
       throw new Error(`providers[${index}].messages_translation must be a boolean`);
     }
@@ -160,6 +163,9 @@ export function parseRoutingConfig(source) {
     if (!Array.isArray(value?.candidates) || value.candidates.length === 0) {
       throw new Error(`role ${name}.candidates must not be empty`);
     }
+    if (value?.specialist === true && (value.candidates.length !== 1 || (value.max_attempts != null && Number(value.max_attempts) !== 1) || value.fallback != null)) {
+      throw new Error(`specialist role ${name} requires one candidate and no fallback`);
+    }
     const candidates = value.candidates.map((candidate, candidateIndex) => {
       const providerId = requireString(candidate?.provider, `role ${name}.candidates[${candidateIndex}].provider`);
       const provider = providerById({ providers }, providerId);
@@ -174,18 +180,29 @@ export function parseRoutingConfig(source) {
       }
       return { provider: providerId, model: modelId, family, context_window };
     });
-    const fallback = requireString(value?.fallback, `role ${name}.fallback`);
-    if (!profiles.some(({ id }) => id.toLowerCase() === fallback.toLowerCase())) {
+    const specialist = value?.specialist === true;
+    const fallback = specialist ? null : requireString(value?.fallback, `role ${name}.fallback`);
+    if (!specialist && !profiles.some(({ id }) => id.toLowerCase() === fallback.toLowerCase())) {
       throw new Error(`role ${name}.fallback must reference a configured profile`);
     }
+    const instructions = specialist ? requireString(value.instructions, `role ${name}.instructions`) : null;
     const max_attempts = value?.max_attempts == null ? candidates.length : Number(value.max_attempts);
     if (!Number.isSafeInteger(max_attempts) || max_attempts < 1 || max_attempts > candidates.length) {
       throw new Error(`role ${name}.max_attempts must be between 1 and ${candidates.length}`);
     }
-    return { id: `role/${name}`, candidates, max_attempts, fallback, context_window: Math.min(...candidates.map(({ context_window }) => context_window)), avoid_recent_families: value?.avoid_recent_families !== false };
+    if (candidates.some(({ provider: providerId }) => providerById({ providers }, providerId).adapter === "chatgpt-responses") && !specialist) {
+      throw new Error(`role ${name} using chatgpt-responses must be an explicit specialist without fallback`);
+    }
+    if (specialist && candidates.some(({ provider: providerId }) => providerById({ providers }, providerId).adapter !== "chatgpt-responses")) {
+      throw new Error(`specialist role ${name} may only use chatgpt-responses candidates`);
+    }
+    return { id: `role/${name}`, candidates, max_attempts, fallback, specialist, instructions, context_window: Math.min(...candidates.map(({ context_window }) => context_window)), avoid_recent_families: value?.avoid_recent_families !== false };
   });
   const roleIds = new Set(roles.map(({ id }) => id.toLowerCase()));
   if (roleIds.size !== roles.length) throw new Error("role IDs must be unique case-insensitively");
+  if (roles.some((role) => role.specialist && profiles.some((profile) => profile.id.toLowerCase() === role.id.toLowerCase()))) {
+    throw new Error("specialist role IDs must not collide with profile IDs");
+  }
 
   if (!Array.isArray(raw.aliases)) throw new Error("routing config aliases must be a list");
   const aliases = raw.aliases.map((value, index) => {
@@ -231,7 +248,14 @@ export function parseRoutingConfig(source) {
     throw new Error("classRouting.enabled requires classRouting.cheapPolicyModel");
   }
   const classRouting = { enabled: rawClassRouting.enabled === true, cheapPolicyModel };
-
+  for (const provider of providers.filter(({ adapter }) => adapter === "chatgpt-responses")) {
+    const usedByRole = roles.some((role) => role.specialist && role.candidates.some((candidate) => candidate.provider === provider.id));
+    if (!usedByRole || routes.some((route) => route.provider === provider.id)
+      || profiles.some((profile) => profile.candidates.some((candidate) => candidate.provider === provider.id))
+      || (classRouting.cheapPolicyModel?.provider === provider.id)) {
+      throw new Error(`provider ${provider.id} is restricted to explicit specialist roles`);
+    }
+  }
   return { version: 1, access, providers, routes, profiles, roles, aliases, model_picker: raw.model_picker || {}, classRouting };
 }
 
@@ -241,6 +265,10 @@ export function loadRoutingConfig(path) {
 
 export function providerEnabled(provider, env = process.env) {
   if (!envEnabled(provider, env)) return false;
+  if (provider.adapter === "chatgpt-responses") {
+    return env.CHATGPT_RESPONSES_ENABLED === "true"
+      && Boolean(env.CHATGPT_SERVICE_URL && env.CHATGPT_SERVICE_TOKEN);
+  }
   if (provider.adapter === "opencode-zen") {
     // The free tier is only served to an account that completed the Console
     // sign-in, so the OAuth credential is what makes this provider available.

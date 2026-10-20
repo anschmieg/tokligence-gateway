@@ -54,6 +54,7 @@ function candidateSupports(provider, reference, required, body, translated = fal
     ? { ...required, protocol: capabilities.protocols.includes(required.protocol) ? required.protocol : "messages", reasoning: false }
     : required;
   if (translated) capabilities.protocols = [...capabilities.protocols, effective.protocol];
+  if (provider.adapter === "chatgpt-responses") return false;
   if (!supportsFeatures(capabilities, effective)) return false;
   const limit = reference.context_window || provider.metadata?.context_window;
   return !limit || requestTokenEstimate(body) <= Number(limit);
@@ -136,6 +137,14 @@ export function buildRoutePlan(config, { model, protocol, body, requestClass = n
   const role = roleByModel(config, model);
   if (!profile && role) {
     const required = inspectRequestFeatures(protocol, body);
+    if (role.specialist) {
+      const provider = providerById(config, role.candidates[0].provider);
+      if (!["responses", "messages", "chat_completions"].includes(protocol)) return { error: { status: 400, code: "specialist_protocol_unsupported", message: "Unsupported specialist protocol" } };
+      if (!provider || !providerEnabled(provider, env)) return { error: { status: 503, code: "specialist_service_unavailable", message: "ChatGPT specialist service is not configured; no fallback was attempted" } };
+      if (!(provider.protocols || []).includes("responses")) return { error: { status: 503, code: "specialist_protocol_misconfigured", message: "ChatGPT specialist provider must declare its Responses backend protocol" } };
+      const model = provider.models.find(({ id }) => id === role.candidates[0].model);
+      return { requestedModel: model.id, publicModel: role.id, profile: role.id, required, deadline: Date.now() + Number(env.GATEWAY_REQUEST_TIMEOUT_MS || 120000), maxAttempts: 1, specialistInstructions: role.instructions, specialistRole: role.id.slice(5), candidates: [{ provider, model, upstreamModel: model.id, protocol, native: true, family: role.candidates[0].family, specialist: true, specialistInstructions: role.instructions, specialistRole: role.id.slice(5) }] };
+    }
     let candidates = [];
     for (const reference of role.candidates) {
       const provider = providerById(config, reference.provider);

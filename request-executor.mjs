@@ -219,6 +219,46 @@ export function observeUpstreamResponse(response, candidate, callback) {
   });
 }
 
+function specialistProtocolResponse({ protocol, document, model }) {
+  if (protocol === "responses") return document;
+  const text = typeof document.output_text === "string" ? document.output_text : "";
+  if (protocol === "messages") {
+    return { id: document.id, type: "message", role: "assistant", model, content: text ? [{ type: "text", text }] : [], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } };
+  }
+  if (protocol === "chat_completions") {
+    return { id: document.id, object: "chat.completion", created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }], usage: null };
+  }
+  return null;
+}
+
+function settledSpecialistSse(protocol, document, translated, model) {
+  const text = typeof document.output_text === "string" ? document.output_text : "";
+  if (protocol === "messages") return anthropicMessageToSse(translated);
+  if (protocol === "chat_completions") {
+    const id = document.id || `chatcmpl-${randomUUID()}`;
+    const created = Math.floor(Date.now() / 1000);
+    const chunk = (choices) => `data: ${JSON.stringify({ id, object: "chat.completion.chunk", created, model, choices })}\n\n`;
+    return chunk([{ index: 0, delta: { role: "assistant" }, finish_reason: null }])
+      + (text ? chunk([{ index: 0, delta: { content: text }, finish_reason: null }]) : "")
+      + chunk([{ index: 0, delta: {}, finish_reason: "stop" }]) + "data: [DONE]\n\n";
+  }
+  const id = document.id || `resp_${randomUUID()}`;
+  const emit = (type, payload) => `event: ${type}\ndata: ${JSON.stringify({ type, ...payload })}\n\n`;
+  const response = { ...document, id, object: "response", status: "completed", output_text: text };
+  const item = { id: `${id}_msg`, type: "message", role: "assistant", status: "completed", content: text ? [{ type: "output_text", text, annotations: [] }] : [] };
+  const events = [
+    emit("response.created", { response: { ...response, status: "in_progress" } }),
+    emit("response.output_item.added", { response_id: id, output_index: 0, item: { ...item, status: "in_progress" } }),
+  ];
+  if (text) {
+    events.push(emit("response.content_part.added", { response_id: id, item_id: item.id, output_index: 0, content_index: 0, part: { type: "output_text", text: "", annotations: [] } }));
+    events.push(emit("response.output_text.delta", { response_id: id, item_id: item.id, output_index: 0, content_index: 0, delta: text }));
+    events.push(emit("response.output_text.done", { response_id: id, item_id: item.id, output_index: 0, content_index: 0, text }));
+    events.push(emit("response.content_part.done", { response_id: id, item_id: item.id, output_index: 0, content_index: 0, part: { type: "output_text", text, annotations: [] } }));
+  }
+  return events.join("") + emit("response.output_item.done", { response_id: id, output_index: 0, item }) + emit("response.completed", { response });
+}
+
 export async function executeRoutePlan({ plan, req, res, path, body, env = process.env, runtimeState = {}, adapters = {}, affinityKey = null, historyKey = undefined, onUpstreamResponse }) {
   const requestId = randomUUID();
   const aborter = new AbortController();
@@ -233,9 +273,19 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
       if (aborter.signal.aborted) break;
       const candidateBody = Buffer.from(JSON.stringify({ ...body, model: candidate.upstreamModel }));
       try {
-        const { response, codec } = await startAttempt({ candidate, req, path, body: candidateBody, env, signal: aborter.signal, adapters });
+        const { response, codec, specialist, specialistProtocol } = await startAttempt({ candidate, req, path, body: candidateBody, env, signal: aborter.signal, adapters });
         const status = response.statusCode || 502;
         if (status < 200 || status >= 300) {
+          if (specialist) {
+            const rawError = await readBodyText(response, aborter.signal, 4096).catch(() => "");
+            let upstreamError;
+            try { upstreamError = JSON.parse(rawError); } catch {}
+            const code = upstreamError?.error?.code || upstreamError?.error?.type || "specialist_upstream_error";
+            const message = typeof upstreamError?.error?.message === "string" ? upstreamError.error.message : "ChatGPT specialist service rejected or failed the request; no retry or fallback was attempted";
+            res.writeHead(status, { "content-type": "application/json", "x-gateway-request-id": requestId, "x-gateway-provider": candidate.provider.id });
+            res.end(JSON.stringify({ error: { type: status < 500 ? "invalid_request_error" : "specialist_upstream_error", code, message } }));
+            return { committed: false, requestId, specialist: true };
+          }
           lastStatus = status;
           const detail = await readSnippet(response);
           console.error(
@@ -264,6 +314,36 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
           }
           recordModelFamily(runtimeState, historyKey === undefined ? affinityKey : historyKey, candidate);
           return { committed: true, requestId, provider: candidate.provider.id, attempts: plan.candidates.indexOf(candidate) + 1, translated: codec.kind };
+        }
+        if (specialist) {
+          // Consume the service's terminal document before exposing any protocol response.
+          const raw = await readBodyText(response, aborter.signal, 32 * 1024 * 1024);
+          let document;
+          try { document = JSON.parse(raw); } catch {
+            res.writeHead(502, { "content-type": "application/json", "x-gateway-request-id": requestId });
+            res.end(JSON.stringify({ error: { type: "specialist_invalid_response", message: "ChatGPT specialist service returned an unreadable response; reconcile the original idempotency key" } }));
+            return { committed: false, requestId, specialist: true };
+          }
+          if (document?.status !== "completed" || document?.service?.settled !== true) {
+            res.writeHead(502, { "content-type": "application/json", "x-gateway-request-id": requestId });
+            res.end(JSON.stringify({ error: { type: "specialist_unsettled", message: "ChatGPT specialist response is not durably settled; reconcile the original idempotency key before retrying" } }));
+            return { committed: false, requestId, specialist: true };
+          }
+          const translated = specialistProtocolResponse({ protocol: specialistProtocol, document, model: plan.publicModel });
+          if (!translated) {
+            res.writeHead(502, { "content-type": "application/json", "x-gateway-request-id": requestId });
+            res.end(JSON.stringify({ error: { type: "specialist_protocol_error", message: "Could not translate settled specialist response" } }));
+            return { committed: false, requestId, specialist: true };
+          }
+          const streaming = body?.stream === true;
+          if (streaming) {
+            res.writeHead(status, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive", "x-gateway-request-id": requestId, "x-gateway-model": plan.publicModel, "x-gateway-provider": candidate.provider.id });
+            res.end(settledSpecialistSse(specialistProtocol, document, translated, plan.publicModel));
+          } else {
+            res.writeHead(status, { "content-type": "application/json", "x-gateway-request-id": requestId, "x-gateway-model": plan.publicModel, "x-gateway-provider": candidate.provider.id });
+            res.end(JSON.stringify(translated));
+          }
+          return { committed: true, requestId, provider: candidate.provider.id, specialist: true };
         }
         const headers = { ...response.headers, "x-gateway-request-id": requestId, "x-gateway-model": plan.publicModel, "x-gateway-provider": candidate.provider.id, "x-gateway-upstream-model": candidate.upstreamModel };
         // An Anthropic-protocol pass-through is repaired here rather than relayed
@@ -303,6 +383,12 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
         return { committed: true, requestId, provider: candidate.provider.id, attempts: plan.candidates.indexOf(candidate) + 1 };
       } catch (error) {
         if (aborter.signal.aborted) break;
+        if (candidate.specialist) {
+          const status = Number.isInteger(error?.statusCode) ? error.statusCode : 502;
+          res.writeHead(status, { "content-type": "application/json", "x-gateway-request-id": requestId, "x-gateway-provider": candidate.provider.id });
+          res.end(JSON.stringify({ error: { type: status < 500 ? "invalid_request_error" : "specialist_upstream_error", message: status < 500 ? error.message : "ChatGPT specialist service is unavailable; no retry or fallback was attempted" } }));
+          return { committed: false, requestId, specialist: true };
+        }
         const isLastCandidate = candidate === plan.candidates[plan.candidates.length - 1];
         if (isLastCandidate && candidate.provider.adapter === "cline-oauth" && error?.status && error?.code) {
           // Nothing left to try: surface the verbatim cline error, but still

@@ -180,12 +180,35 @@ test("the shipped routing policy enables class routing with a documented window 
   assert.equal(target.context_window, 256000);
 });
 
+test("ChatGPT specialist roles stay disabled until explicitly provisioned and never join defaults", () => {
+  const provider = config.providers.find(({ id }) => id === "chatgpt-specialist");
+  assert.equal(provider.adapter, "chatgpt-responses");
+  assert.equal(providerEnabled(provider, {}), false);
+  assert.equal(providerEnabled(provider, { CHATGPT_RESPONSES_ENABLED: "true", CHATGPT_SERVICE_URL: "http://127.0.0.1:38752", CHATGPT_SERVICE_TOKEN: "test" }), true);
+  assert.equal(matchConfiguredProvider(config, "unknown-model"), "tokligence");
+  for (const name of ["research", "explore", "plan", "review", "architecture", "synthesis", "explain", "reasoning"]) {
+    const role = config.roles.find(({ id }) => id === `role/${name}`);
+    assert.equal(role.specialist, true);
+    assert.equal(role.fallback, null);
+    assert.equal(role.candidates.length, 1);
+    assert.equal(role.candidates[0].provider, "chatgpt-specialist");
+  }
+});
+
 test("shipped role aliases publish their minimum candidate window", () => {
   const role = config.roles.find(({ id }) => id === "role/review-strong");
   assert.ok(role);
   assert.equal(role.context_window, 131072);
   assert.equal(role.fallback, "agent-default");
   assert.deepEqual(role.candidates.map(({ family }) => family), ["mistral", "bonsai", "gpt-oss"]);
+});
+
+test("specialist adapter cannot be attached to generic profiles or ordinary routes", () => {
+  const source = fs.readFileSync("gateway.routes.yaml", "utf8");
+  const invalidProfile = source.replace("  agent-default:\n    context_window: 128000\n    candidates:\n      - provider: cline-oauth", "  agent-default:\n    context_window: 128000\n    candidates:\n      - provider: chatgpt-specialist\n        model: ui-text\n      - provider: cline-oauth");
+  assert.throws(() => parseRoutingConfig(invalidProfile), /provider chatgpt-specialist is restricted/);
+  const invalidRole = source.replace("  research:\n    specialist: true", "  research:\n    specialist: true\n    fallback: agent-default");
+  assert.throws(() => parseRoutingConfig(invalidRole), /specialist role research requires one candidate and no fallback/);
 });
 
 test("role aliases require family and verified windows and publish the minimum window", () => {

@@ -148,6 +148,133 @@ async function translatedAttempt(candidate, { upstreamBody, path, req, env, sign
   return { response, upstream, target, codec };
 }
 
+function invalidSpecialist(message) {
+  return Object.assign(new Error(message), { statusCode: 400 });
+}
+
+function validText(value, max, label, { empty = false } = {}) {
+  if (typeof value !== "string" || (!empty && !value.length) || value.length > max || value.includes("\0")) {
+    throw invalidSpecialist(`${label} must be bounded text`);
+  }
+}
+
+function canonicalTextInput(input) {
+  if (typeof input === "string") {
+    validText(input, 15000, "input");
+    return [{ role: "user", content: input }];
+  }
+  if (!Array.isArray(input) || !input.length || input.length > 100) throw invalidSpecialist("Input must be text or a bounded text message list");
+  let total = 0;
+  return input.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw invalidSpecialist("Only text messages are supported");
+    if (Object.keys(item).some((key) => !["type", "role", "content"].includes(key)) || (item.type && item.type !== "message") || !["user", "assistant", "system", "developer"].includes(item.role)) throw invalidSpecialist("Only labelled text messages are supported");
+    let content = item.content;
+    if (Array.isArray(content) && content.length && content.every((part) => part && typeof part === "object" && Object.keys(part).every((key) => ["type", "text"].includes(key)) && part.type === "input_text")) {
+      content = content.map((part) => { validText(part.text, 15000, "input message"); return part.text; }).join("\n");
+    }
+    validText(content, 15000, "input message");
+    total += content.length;
+    if (total > 15000) throw invalidSpecialist("Input message list exceeds the total text bound");
+    return { role: item.role, content };
+  });
+}
+
+function prepareMessagesRequest(input, candidate, idempotencyKey) {
+  if (input.instructions !== undefined && input.system !== undefined) throw invalidSpecialist("Specify system or instructions, not both");
+  const allowed = new Set(["model", "messages", "system", "instructions", "max_tokens", "stream", "metadata"]);
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw invalidSpecialist("Messages request must be an object");
+  const unsupported = Object.keys(input).find((key) => !allowed.has(key));
+  if (unsupported) throw invalidSpecialist(`Unsupported Messages field: ${unsupported}`);
+  if (!Array.isArray(input.messages) || !input.messages.length) throw invalidSpecialist("messages must be a non-empty text message list");
+  if (input.max_tokens !== undefined && (!Number.isSafeInteger(input.max_tokens) || input.max_tokens < 1 || input.max_tokens > 4096)) throw invalidSpecialist("max_tokens must be between 1 and 4096");
+  if (input.stream !== undefined && typeof input.stream !== "boolean") throw invalidSpecialist("stream must be boolean");
+  if (input.metadata !== undefined) throw invalidSpecialist("Messages metadata is unsupported by the text service");
+  let totalText = 0;
+  const messages = input.messages.map((message) => {
+    if (!message || typeof message !== "object" || Array.isArray(message) || Object.keys(message).some((key) => key !== "role" && key !== "content") || !["user", "assistant"].includes(message.role)) throw invalidSpecialist("Only user and assistant text Messages are supported");
+    validText(message.content, 15000, "message content");
+    totalText += message.content.length;
+    return { role: message.role, content: message.content };
+  });
+  if (totalText > 12000) throw invalidSpecialist("Messages history exceeds supported text bounds");
+  let parentInstructions = "";
+  const systemValue = input.system ?? input.instructions;
+  if (systemValue !== undefined && systemValue !== null) {
+    if (typeof systemValue === "string") parentInstructions = systemValue;
+    else if (Array.isArray(systemValue) && systemValue.every((part) => part && part.type === "text" && typeof part.text === "string" && Object.keys(part).every((key) => ["type", "text", "cache_control"].includes(key)))) parentInstructions = systemValue.map((part) => part.text).join("\n");
+    else throw invalidSpecialist("system must contain text only");
+    validText(parentInstructions, 4000, "system", { empty: true });
+  }
+  const maxTokensNote = input.max_tokens === undefined ? "" : `\n[Requested output token limit is advisory; the text service cannot enforce it: ${input.max_tokens}]`;
+  const visible = `[Visible specialist role guidance; user accepts visible instruction emulation, not true system priority]\n${candidate.specialistInstructions}\n[Parent-provided task guidance]\n${parentInstructions}${maxTokensNote}`;
+  const prompt = [{ role: "system", content: visible }, ...messages].map((message) => `[${message.role}]\n${message.content}`).join("\n\n");
+  validText(prompt, 15000, "prepared prompt");
+  return { body: { input: prompt }, idempotencyKey };
+}
+
+function prepareChatRequest(input, candidate, idempotencyKey) {
+  const allowed = new Set(["model", "messages", "stream", "user"]);
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw invalidSpecialist("Chat Completions request must be an object");
+  const unsupported = Object.keys(input).find((key) => !allowed.has(key));
+  if (unsupported) throw invalidSpecialist(`Unsupported Chat Completions field: ${unsupported}`);
+  if (!Array.isArray(input.messages) || !input.messages.length) throw invalidSpecialist("messages must be a non-empty text message list");
+  if (input.stream !== undefined && typeof input.stream !== "boolean") throw invalidSpecialist("stream must be boolean");
+  if (input.user !== undefined) validText(input.user, 200, "user");
+  let totalText = 0;
+  const messages = input.messages.map((message) => {
+    if (!message || typeof message !== "object" || Array.isArray(message) || Object.keys(message).some((key) => key !== "role" && key !== "content") || !["user", "assistant", "system", "developer"].includes(message.role)) throw invalidSpecialist("Only text Chat Completions messages are supported");
+    validText(message.content, 15000, "message content");
+    totalText += message.content.length;
+    return { role: message.role, content: message.content };
+  });
+  if (totalText > 12000) throw invalidSpecialist("Chat history exceeds supported text bounds");
+  const prompt = [
+    "[Visible specialist role guidance; user accepts visible instruction emulation, not true system priority]",
+    candidate.specialistInstructions,
+    "[Parent-provided task context follows in the submitted messages]",
+    ...messages.map(({ role, content }) => `[${role}]\n${content}`),
+  ].join("\n\n");
+  validText(prompt, 15000, "prepared prompt");
+  return { body: { model: input.model, input: prompt }, idempotencyKey };
+}
+
+export function prepareSpecialistRequest(input, candidate, idempotencyKey, protocol = "responses") {
+  if (typeof idempotencyKey !== "string" || !idempotencyKey.trim() || idempotencyKey.length > 200) throw invalidSpecialist("Idempotency-Key is required for ChatGPT specialist requests");
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw invalidSpecialist("Request must be an object");
+  const allowed = protocol === "responses"
+    ? new Set(["model", "input", "instructions", "stream"])
+    : protocol === "messages"
+      ? new Set(["model", "messages", "system", "instructions", "max_tokens", "stream", "metadata"])
+      : protocol === "chat_completions"
+        ? new Set(["model", "messages", "stream", "user"])
+        : new Set();
+  const unsupported = Object.keys(input).find((key) => !allowed.has(key));
+  if (unsupported) throw invalidSpecialist(`Unsupported ${protocol} field: ${unsupported}`);
+  let prepared;
+  if (protocol === "responses") {
+    if (input.stream !== undefined && typeof input.stream !== "boolean") throw invalidSpecialist("stream must be boolean");
+    if (typeof input.input !== "string" && !Array.isArray(input.input)) throw invalidSpecialist("input must be text or a text message list");
+    const request = structuredClone(input);
+    const messages = canonicalTextInput(request.input);
+    let parentInstructions = request.instructions ?? "";
+    if (typeof parentInstructions !== "string") throw invalidSpecialist("instructions must be text or null");
+    validText(parentInstructions, 4000, "instructions", { empty: true });
+    const prompt = [
+      "[Visible specialist role guidance; user accepts visible instruction emulation, not true system priority]",
+      candidate.specialistInstructions,
+      "[Parent-provided task guidance]",
+      parentInstructions,
+      ...messages.map(({ role, content }) => `[${role}]\n${content}`),
+    ].join("\n\n");
+    validText(prompt, 15000, "prepared prompt");
+    prepared = { body: { model: request.model, input: prompt }, idempotencyKey };
+  } else if (protocol === "messages") prepared = prepareMessagesRequest(input, candidate, idempotencyKey);
+  else if (protocol === "chat_completions") prepared = prepareChatRequest(input, candidate, idempotencyKey);
+  else throw invalidSpecialist("Unsupported specialist protocol");
+  if (Buffer.byteLength(JSON.stringify(prepared.body), "utf8") > 65536) throw invalidSpecialist("Prepared specialist request exceeds the service request bound");
+  return prepared;
+}
+
 function requestUrl(candidate, path, env, { suffix: forcedSuffix } = {}) {
   const incoming = new URL(path, "http://gateway.local");
   if (candidate.provider.adapter === "oauth-proxy") {
@@ -236,6 +363,25 @@ function sendThroughProxy({ target, headers, body, signal, proxy }) {
 }
 
 export async function startAttempt({ candidate, req, path, body, env = process.env, signal, adapters = {} }) {
+  if (candidate.provider.adapter === "chatgpt-responses") {
+    const endpoint = env.CHATGPT_SERVICE_URL;
+    const token = env.CHATGPT_SERVICE_TOKEN;
+    if (env.CHATGPT_RESPONSES_ENABLED !== "true" || !endpoint || !token) {
+      throw new Error("ChatGPT specialist service is not configured");
+    }
+    const suffix = candidate.protocol === "messages" ? "messages" : candidate.protocol === "chat_completions" ? "chat/completions" : candidate.protocol === "responses" ? "responses" : null;
+    if (!suffix) throw Object.assign(new Error("Unsupported ChatGPT specialist protocol"), { statusCode: 400 });
+    const target = new URL(`/v1/${suffix}`, endpoint);
+    if (!["http:", "https:"].includes(target.protocol) || target.username || target.password) {
+      throw new Error("ChatGPT specialist service URL is invalid");
+    }
+    const request = JSON.parse(Buffer.isBuffer(body) ? body.toString("utf8") : body);
+    const prepared = prepareSpecialistRequest(request, candidate, req.headers["idempotency-key"], candidate.protocol);
+    const payload = Buffer.from(JSON.stringify(prepared.body));
+    const headers = { "content-type": "application/json", "content-length": String(payload.length), authorization: `Bearer ${token}`, "idempotency-key": prepared.idempotencyKey };
+    const { response, upstream } = await send({ target, headers, body: payload, signal });
+    return { response, upstream, target, codec: null, specialist: true, specialistProtocol: candidate.protocol };
+  }
   // Translation happens on the body before any adapter sees it: an Anthropic
   // caller is served by an OpenAI upstream, so the adapter must receive the
   // OpenAI request, and the caller receives the Anthropic reply.

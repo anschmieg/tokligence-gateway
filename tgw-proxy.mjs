@@ -28,6 +28,7 @@ import {
   profileByModel,
   publicRoutingConfig,
   resolveConfiguredAlias,
+  roleByModel,
 } from "./route-config.mjs";
 import { probeAllProviderQuota } from "./quota.mjs";
 import { createObservedUsageStore } from "./usage-observer.mjs";
@@ -1775,9 +1776,11 @@ const server = http.createServer((req, res) => {
         return;
       }
 
-      synthesizeMetadataUserId(parsed, req);
-
       const model = resolveModel(parsed.model);
+      if (roleByModel(ROUTING, model)?.specialist) {
+        if (handleProfileRequest(req, res, { ...parsed, model }, "responses")) return;
+      }
+      synthesizeMetadataUserId(parsed, req);
       const messages = responsesPayloadToMessages(parsed);
 
       if (handleProfileRequest(req, res, parsed, "responses")) return;

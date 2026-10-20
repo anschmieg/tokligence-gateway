@@ -38,6 +38,25 @@ test("agent profiles preserve deterministic candidate order", () => {
   assert.equal(profileByModel(config, "AGENTIC-WORKER").candidates[0].provider, "cline-oauth");
 });
 
+test("ChatGPT specialist aliases route only to the enabled Responses service and fail closed", () => {
+  const request = { model: "role/research", input: "Compare these supplied notes", instructions: "Parent task" };
+  const unavailable = buildRoutePlan(config, { model: request.model, protocol: "responses", body: request }, env, {});
+  assert.equal(unavailable.error.code, "specialist_service_unavailable");
+  assert.equal(unavailable.candidates, undefined);
+  const enabled = buildRoutePlan(config, { model: request.model, protocol: "responses", body: request }, {
+    ...env, CHATGPT_RESPONSES_ENABLED: "true", CHATGPT_SERVICE_URL: "http://127.0.0.1:38752/v1", CHATGPT_SERVICE_TOKEN: "synthetic-token",
+  }, {});
+  assert.equal(enabled.candidates.length, 1);
+  assert.equal(enabled.candidates[0].provider.id, "chatgpt-specialist");
+  assert.equal(enabled.candidates[0].specialist, true);
+  assert.equal(enabled.candidates[0].specialistInstructions, config.roles.find(({ id }) => id === "role/research").instructions);
+  const wrongProtocol = buildRoutePlan(config, { model: request.model, protocol: "messages", body: request }, {
+    ...env, CHATGPT_RESPONSES_ENABLED: "true", CHATGPT_SERVICE_URL: "http://127.0.0.1:38752/v1", CHATGPT_SERVICE_TOKEN: "synthetic-token",
+  }, {});
+  assert.equal(wrongProtocol.error, undefined);
+  assert.equal(wrongProtocol.candidates[0].protocol, "messages");
+});
+
 test("route planner builds the ordered fallback chain", () => {
   const plan = buildRoutePlan(config, {
     model: "agent-default",

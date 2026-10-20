@@ -113,6 +113,37 @@ in the URL hash as `#token=<secret>`). The dashboard has two sections:
   `POST /admin/preferences/reset` removes all runtime overrides (it does not
   edit `gateway.routes.yaml`).
 
+### ChatGPT-backed specialist roles (opt-in)
+
+The eight published, specialist-only aliases are `role/research`, `role/explore`, `role/plan`, `role/review`, `role/architecture`, `role/synthesis`, `role/explain`, and `role/reasoning`. Their bounded task guidance is in `gateway.routes.yaml`; they are separate from the default/profile routes and broad local-tool implementer lane. Use them only for bounded work based on supplied text/context: research or exploration when evidence is supplied, planning, review of supplied material, architecture analysis, synthesis, explanation, and reasoning. The aliases do not provide client filesystem, shell, MCP, or verified ChatGPT-native tool access, and do not establish source/artifact extraction.
+
+The `chatgpt-specialist` provider uses the `chatgpt-responses` adapter. Its text-only compatibility surface accepts OpenAI Responses, Anthropic Messages, and OpenAI Chat Completions request shapes, but does not assert general API compatibility: each accepted request is normalized into text input for the service. Unsupported fields and features—including tools/tool results, multimodal input, reasoning controls, and unsupported Responses semantics—are rejected before dispatch. Visible role guidance and caller context are flattened into the service input; this is instruction emulation, not an exact system/developer-priority guarantee. Messages `max_tokens` is advisory prompt guidance, not enforced. A streaming request returns only a settled final-text event sequence, not incremental token streaming.
+
+Every child task/turn must carry a stable `Idempotency-Key`. The gateway forwards it unchanged, makes one service request, and does not retry or fall back. If delivery or settlement is ambiguous, reconcile through the service using that same key before any resubmission; this is not an end-to-end exactly-once guarantee. Only `status: completed` responses with `service.settled: true` are exposed.
+
+Configuration is opt-in and belongs in the gateway runtime only:
+
+```dotenv
+CHATGPT_RESPONSES_ENABLED=true
+CHATGPT_SERVICE_URL=http://127.0.0.1:38752/v1
+CHATGPT_SERVICE_TOKEN=replace-with-a-separate-service-token
+```
+
+The URL above is an example for a service reachable on the same host; loopback inside a container refers to that container, not the host or another container. Set a reachable service URL appropriate to the deployment network. The service token is distinct from the public gateway bearer token. Missing configuration fails explicitly; it does not route elsewhere. No runtime provisioning or live activation is part of this source change.
+
+**Delivery status:** gateway source is implemented and independently reviewed, but remains uncommitted and undeployed. No client is enabled; backend activation is deferred to the user. The last deployment attempt was blocked by Cloudflare Access before Coolify could be reached.
+
+**Client setup still required (not verified; no executable client configuration is claimed):**
+
+| Client | Remaining work |
+| --- | --- |
+| Codex | Verify a native child-task model/provider override and per-turn idempotency-header path. |
+| Claude Code | Verify native subagent model/provider override and per-turn idempotency-header path. |
+| Hermes | Verify native child-agent model/provider override and per-turn idempotency-header path. |
+| Moltis | Verify native child-agent model/provider override and per-turn idempotency-header path. |
+
+For each client, preserve parent/default model settings and local-tool agents unchanged. Before enabling a specialist child, verify that it can send a stable key for each turn and reuse that same key for an ambiguous retry, with service-side reconciliation first. These native-client seams remain unverified; do not infer support from a gateway endpoint or generic provider settings.
+
 ### Dashboard API
 
 All dashboard endpoints use the admin secret and never return credentials:
@@ -393,6 +424,10 @@ Role aliases are addressed as `model: "role/<name>"`, for example
 `role/review-strong`. Each candidate declares a `family` and inherits a verified
 window from its model entry; the published window is the minimum across
 candidates, and the configured profile is appended as a fallback.
+
+## ChatGPT-backed specialist roles
+
+See [ChatGPT-backed specialist roles (opt-in)](#chatgpt-backed-specialist-roles-opt-in) for the authoritative gateway behavior, limitations, deployment status, and per-client verification checklist.
 
 ## Anthropic Messages for every model
 
