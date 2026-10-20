@@ -827,7 +827,7 @@ function validateAndStripAuth(req) {
   // Dedicated experimental credential. Accept ONLY one test model on the
   // Chat Completions endpoint, or the public model catalog; never admin routes.
   const requestedToken = extractBearerToken(req.headers["authorization"]);
-  if (WARP_GUARD.configured && WARP_TEST_SECRET.length >= 32 &&
+  if (WARP_GUARD.configured && WARP_TRACE.isReady() && WARP_TEST_SECRET.length >= 32 &&
       AUTH_SECRET && !secretsEqual(WARP_TEST_SECRET, AUTH_SECRET) &&
       secretsEqual(requestedToken, WARP_TEST_SECRET)) {
     const pathname = new URL(req.url, "http://localhost").pathname;
