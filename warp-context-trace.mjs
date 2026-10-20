@@ -45,6 +45,7 @@ export function createWarpTraceRecorder(env = process.env) {
     const modelMarkers = tags(body);
     const outputMarkers = new Set();
     let outputBytes = 0, truncated = false, completed = false;
+    let streamTail = "";
     const writeOriginal = response.write;
     const endOriginal = response.end;
 
@@ -55,7 +56,9 @@ export function createWarpTraceRecorder(env = process.env) {
           (typeof chunk === "string" ? chunk : "");
         outputBytes += Buffer.byteLength(data);
         if (outputBytes > MAX_CAPTURE) { truncated = true; return; }
-        for (const marker of tags(data)) outputMarkers.add(marker);
+        const window = streamTail + data;
+        for (const marker of tags(window)) outputMarkers.add(marker);
+        streamTail = window.slice(-128);
       } catch { /* Logging is never allowed to break inference. */ }
     }
     function finish() {
@@ -89,6 +92,7 @@ export function createWarpTraceRecorder(env = process.env) {
         } finally { closeSync(fd); }
       } catch { /* Do not change response or routing on capture errors. */ }
     }
+    response.once("close", finish);
     response.write = function(chunk, ...args) {
       capture(chunk);
       return writeOriginal.call(this, chunk, ...args);
