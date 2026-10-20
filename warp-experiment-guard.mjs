@@ -15,10 +15,13 @@ export function createWarpExperimentGuard(env = process.env, now = () => Date.no
     Number.isFinite(expires) && expires > started && expires <= started + 60 * 60 * 1000 &&
     Number.isInteger(cap) && cap > 0 && cap <= 12;
   let consumed = 0;
+  let catalogRequests = 0;
   let inflight = 0;
   const deny = (reason, status = 403) => ({ allowed: false, reason, status });
   function catalogAllowed() {
-    return configured && now() < expires;
+    if (!configured || now() >= expires || catalogRequests >= 12) return false;
+    catalogRequests++;
+    return true;
   }
   function reserve(body, inputBytes) {
     if (!configured || now() >= expires) return deny("Warp experiment disabled or expired");
