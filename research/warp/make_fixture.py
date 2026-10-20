@@ -22,13 +22,14 @@ def create(root: Path) -> dict:
         f"# {markers['FILE']}\n"
         "def compute_total(xs):\n    return sum(xs) + 1  # intentionally wrong\n")
     (project / "test_app.py").write_text(
-        "from app import compute_total\n"
-        "def test_total():\n    assert compute_total([2, 3]) == 5\n")
+        "import unittest\nfrom app import compute_total\n"
+        "class TotalTest(unittest.TestCase):\n"
+        "    def test_total(self):\n        self.assertEqual(compute_total([2, 3]), 5)\n")
     (project / "probe.sh").write_text(
         f"#!/bin/sh\n# {markers['COMMAND']}\n"
         f"echo '{markers['STDOUT']}'\n"
         f"echo '{markers['STDERR']}' 1>&2\n"
-        "python3 -m pytest -q test_app.py || true\n")
+        "python3 -m unittest -q test_app.py\n")
     (project / "probe.sh").chmod(0o700)
     subprocess.run(["git", "init", "-q", str(project)], check=True)
     subprocess.run(["git", "-C", str(project), "add", "README.md", "app.py", "test_app.py", "probe.sh"], check=True)
