@@ -56,7 +56,7 @@ COPY quota.mjs mistral-subscription-quota.mjs preferences.mjs dashboard.mjs dash
 # OpenCode Zen adapter: protocol translation, session pool, gate conditions,
 # OAuth credential refresh.
 # Anthropic pass-through repair shares the codec it imports.
-COPY anthropic-passthrough.mjs anthropic-openai-codec.mjs opencode-zen-gate.mjs opencode-zen-credential.mjs opencode-zen-session.mjs ./
+COPY anthropic-passthrough.mjs anthropic-openai-codec.mjs sse-stream.mjs opencode-zen-gate.mjs opencode-zen-credential.mjs opencode-zen-session.mjs ./
 # Copilot-compatible catalog metadata for /v1/models.
 COPY model-catalog-metadata.mjs ./
 # Copilot SDK state must live on the mounted data volume; credentials are supplied

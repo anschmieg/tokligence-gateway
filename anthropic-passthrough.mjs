@@ -14,6 +14,7 @@
 // asked for and the upstream did not produce.
 
 import { collectAnthropicStream } from "./anthropic-openai-codec.mjs";
+import { createSseWriter, sseHeaders, endSseError } from "./sse-stream.mjs";
 
 const REASONING_TYPES = new Set(["thinking", "reasoning", "reasoning_content"]);
 
@@ -32,6 +33,7 @@ const LEGAL_BLOCK_TYPES = new Set([
 ]);
 
 const MAX_PASSTHROUGH_BYTES = 32 * 1024 * 1024;
+const MAX_SSE_FRAME_BYTES = 1024 * 1024;
 
 /** Flattens any nested textual payload into one string. */
 export function joinParts(value) {
@@ -278,7 +280,8 @@ function readAll(response, limit, signal) {
     response.on("data", onData);
     response.once("end", onEnd);
     response.once("error", onError);
-    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
@@ -326,9 +329,60 @@ function sendSse(res, status, headers, frames) {
 
 /** Splits an SSE payload into complete frames, keeping any trailing partial. */
 function splitFrames(text) {
-  const parts = text.split("\n\n");
+  const parts = text.split(/\r?\n\r?\n/);
   const trailing = parts.pop() ?? "";
   return { frames: parts.map((part) => `${part}\n\n`), trailing };
+}
+
+function normalizeSseFrame(frame) {
+  const lines = frame.split(/\r?\n/);
+  const data = lines.filter((line) => line.startsWith("data:")).map((line) => line.slice(5).replace(/^ /, ""));
+  if (!data.length) return frame;
+  let event;
+  try { event = JSON.parse(data.join("\n")); } catch { return frame; }
+  const normalized = normalizeAnthropicEvent(event);
+  return normalized.changed
+    ? `event: ${normalized.event.type || "message"}\ndata: ${JSON.stringify(normalized.event)}\n\n`
+    : frame;
+}
+
+async function streamAnthropicEvents(response, res, status, headers, signal, pingMs) {
+  const decoder = new TextDecoder();
+  let pending = "";
+  const writer = createSseWriter(res, signal, pingMs);
+  const onAbort = () => response.destroy?.(signal.reason);
+  if (signal?.aborted) onAbort();
+  else signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    res.writeHead(status, headerBasis(headers, sseHeaders()));
+    res.flushHeaders?.();
+    for await (const chunk of response) {
+      pending += decoder.decode(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk), { stream: true });
+      let start = 0;
+      const delimiter = /\r?\n\r?\n/g;
+      let match;
+      while ((match = delimiter.exec(pending)) !== null) {
+        const frame = pending.slice(start, match.index + match[0].length);
+        if (Buffer.byteLength(frame) > MAX_SSE_FRAME_BYTES) throw new Error("upstream SSE frame exceeds the gateway limit");
+        if (!await writer.write(normalizeSseFrame(frame))) return;
+        start = match.index + match[0].length;
+      }
+      pending = pending.slice(start);
+      if (Buffer.byteLength(pending) > MAX_SSE_FRAME_BYTES) throw new Error("upstream SSE frame exceeds the gateway limit");
+    }
+    pending += decoder.decode();
+    if (pending && !res.destroyed && !res.writableEnded) {
+      if (Buffer.byteLength(pending) > MAX_SSE_FRAME_BYTES) throw new Error("upstream SSE frame exceeds the gateway limit");
+      await writer.write(pending);
+    }
+    if (!res.destroyed && !res.writableEnded) res.end();
+  } catch (error) {
+    endSseError(res, signal);
+    throw error;
+  } finally {
+    writer.cleanup();
+    signal?.removeEventListener("abort", onAbort);
+  }
 }
 
 /**
@@ -346,6 +400,7 @@ export async function respondWithAnthropicPassthrough({
   wantStream,
   keepReasoning = false,
   signal,
+  pingMs = 15000,
 }) {
   const contentType = String(response.headers?.["content-type"] || "").toLowerCase();
   const contentEncoding = String(response.headers?.["content-encoding"] || "").toLowerCase();
@@ -355,28 +410,14 @@ export async function respondWithAnthropicPassthrough({
   if (!isEventStream && !contentType.includes("json")) return false;
 
   if (isEventStream) {
+    if (wantStream) {
+      await streamAnthropicEvents(response, res, status, headers, signal, pingMs);
+      return true;
+    }
     const { raw, overflow } = await readAll(response, MAX_PASSTHROUGH_BYTES, signal);
     if (overflow) { relayRawPrefixThenPipe(response, res, status, headers, raw); return true; }
     const text = raw.toString("utf8");
-    const { frames, trailing } = splitFrames(text);
-
-    if (wantStream) {
-      let rewritten = "";
-      for (const frame of frames) {
-        const line = frame.split("\n").find((candidate) => candidate.startsWith("data: "));
-        if (!line) { rewritten += frame; continue; }
-        let event;
-        try { event = JSON.parse(line.slice(6)); } catch { rewritten += frame; continue; }
-        const result = normalizeAnthropicEvent(event);
-        if (result.changed) {
-          rewritten += `event: ${result.event.type || "message"}\ndata: ${JSON.stringify(result.event)}\n\n`;
-        } else {
-          rewritten += frame;
-        }
-      }
-      sendSse(res, status, headers, rewritten + trailing);
-      return true;
-    }
+    const { frames } = splitFrames(text);
 
     // The caller asked for one message but the upstream streamed: fold it.
     const events = frames.filter((frame) => frame.includes("data: "));

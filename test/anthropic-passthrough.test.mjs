@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Readable } from "node:stream";
+import { EventEmitter, once } from "node:events";
 
 import {
   anthropicMessageToSse,
@@ -42,17 +43,19 @@ function upstream(headers) {
 }
 
 function clientResponse() {
-  return {
+  return Object.assign(new EventEmitter(), {
     statusCode: null,
     headers: null,
     body: "",
-    writeHead(status, headers) { this.statusCode = status; this.headers = headers; },
-    write(chunk) { this.body += Buffer.from(chunk).toString("utf8"); return true; },
+    writeHead(status, headers) { this.statusCode = status; this.headers = headers; this.headersSent = true; },
+    write(chunk) { this.body += Buffer.from(chunk).toString("utf8"); this.emit("write", this.body); this.onWrite?.(this.body); return true; },
     end(chunk) {
       if (chunk) this.body += Buffer.from(chunk).toString("utf8");
       this.completed = true;
+      this.writableEnded = true;
+      this.emit("finish");
     },
-  };
+  });
 }
 
 test("a sub-block array in `text` becomes a plain string block", () => {
@@ -197,6 +200,65 @@ test("a healthy upstream stream is relayed intact and an empty one is not a fail
   emptyResponse.push(null);
   assert.equal(await respondWithAnthropicPassthrough({ response: emptyResponse, res: empty, status: 200, headers, wantStream: true }), true);
   assert.equal(empty.body, "");
+});
+
+test("native SSE streams incrementally, normalizes split CRLF frames and decodes split UTF-8", async () => {
+  const res = clientResponse();
+  const response = upstream({ "content-type": "text/event-stream" });
+  const utf8 = Buffer.from('event: content_block_delta\r\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"é"}}\r\n\r\n');
+  const run = respondWithAnthropicPassthrough({ response, res, status: 200, headers: response.headers, wantStream: true });
+  response.push(utf8.subarray(0, utf8.length - 1));
+  response.push(utf8.subarray(utf8.length - 1));
+  response.push(null);
+  await run;
+  assert.match(res.body, /é/);
+  assert.equal(res.headers["x-accel-buffering"], "no");
+});
+
+test("native frames arrive before EOF and preserve fragmented UTF-8 and CRLF bytes", async () => {
+  const res = clientResponse();
+  const response = upstream({ "content-type": "text/event-stream" });
+  const frame = 'event: content_block_delta\r\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"é"}}\r\n\r\n';
+  const bytes = Buffer.from(frame);
+  const split = bytes.indexOf(Buffer.from("é")) + 1;
+  const run = respondWithAnthropicPassthrough({ response, res, status: 200, headers: response.headers, wantStream: true });
+  response.push(bytes.subarray(0, split));
+  const delivered = once(res, "write");
+  response.push(bytes.subarray(split));
+  await delivered;
+  assert.equal(res.body, frame);
+  assert.equal(res.completed, undefined);
+  response.push(null);
+  await run;
+});
+
+test("multiline native data receives the existing malformed-text repair", async () => {
+  const res = clientResponse();
+  const response = upstream({ "content-type": "text/event-stream" });
+  response.push('event: content_block_start\r\ndata: {"type":"content_block_start",\r\ndata: "index":0,"content_block":{"type":"text","text":[{"type":"text","text":"OK"}]}}\r\n\r\n');
+  response.push(null);
+  await respondWithAnthropicPassthrough({ response, res, status: 200, headers: response.headers, wantStream: true });
+  assert.match(res.body, /"text":"OK"/);
+});
+
+test("many small native frames may exceed the per-frame limit in one chunk", async () => {
+  const res = clientResponse();
+  const response = upstream({ "content-type": "text/event-stream" });
+  const frames = ': healthy\n\n'.repeat(100000);
+  response.push(frames);
+  response.push(null);
+  await respondWithAnthropicPassthrough({ response, res, status: 200, headers: response.headers, wantStream: true });
+  assert.equal(res.body, frames);
+});
+
+test("an oversized partial native frame terminates with a stream error", async () => {
+  const res = clientResponse();
+  const response = upstream({ "content-type": "text/event-stream" });
+  response.push('data: ' + 'x'.repeat(1024 * 1024));
+  response.push(null);
+  await assert.rejects(respondWithAnthropicPassthrough({ response, res, status: 200, headers: response.headers, wantStream: true }), /frame exceeds/);
+  assert.match(res.body, /event: error/);
+  assert.equal(res.completed, true);
 });
 
 test("a non-Anthropic content type is declined before the body is read", async () => {

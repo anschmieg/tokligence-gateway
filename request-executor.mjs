@@ -7,6 +7,7 @@ import {
   openaiToAnthropicMessage,
 } from "./anthropic-openai-codec.mjs";
 import { anthropicMessageToSse, respondWithAnthropicPassthrough } from "./anthropic-passthrough.mjs";
+import { createSseWriter, sseHeaders, endSseError } from "./sse-stream.mjs";
 
 // Errors whose allowance is gone until a periodic reset (e.g. a daily free
 // quota) get a long cooldown; transient limits (per-minute rate limits,
@@ -77,7 +78,8 @@ function readBodyText(response, signal, limit = 4096) {
     response.on("data", onData);
     response.once("end", onEnd);
     response.once("error", onError);
-    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
@@ -100,7 +102,8 @@ function firstStreamChunk(response, signal) {
     response.once("data", onData);
     response.once("end", onEnd);
     response.once("error", onError);
-    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
     response.resume();
   });
 }
@@ -108,7 +111,7 @@ function firstStreamChunk(response, signal) {
 // Serves an OpenAI stream to a caller that spoke the Anthropic protocol: as
 // Anthropic server-sent events, or folded into one message when the caller
 // asked for a single response. Used when the upstream only speaks OpenAI.
-async function respondWithCodec({ response, codec, res, status, requestId, model, provider, publicModel, signal }) {
+async function respondWithCodec({ response, codec, res, status, requestId, model, provider, publicModel, signal, pingMs }) {
   const base = {
     "x-gateway-request-id": requestId,
     "x-gateway-model": publicModel || model,
@@ -147,23 +150,36 @@ async function respondWithCodec({ response, codec, res, status, requestId, model
 
   const reader = createSseChunkReader();
   const encoder = createAnthropicStreamCodec({ model });
-  const first = await firstStreamChunk(response, signal);
   response.setEncoding("utf8");
 
   if (codec.stream) {
-    res.writeHead(status, { ...base, "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive" });
-    const write = (events) => { if (events.length && !res.writableEnded) res.write(events.join("")); };
-    const feed = (chunk) => { for (const payload of reader.push(String(chunk))) write(encoder.push(payload)); };
-    feed(first);
-    for await (const chunk of response) feed(chunk);
-    write(encoder.end());
-    res.end();
+    const writer = createSseWriter(res, signal, pingMs);
+    const onAbort = () => response.destroy?.(signal.reason);
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      res.writeHead(status, sseHeaders(base));
+      res.flushHeaders?.();
+      const write = async (events) => events.length ? writer.write(events.join("")) : true;
+      const feed = async (chunk) => {
+        for (const payload of reader.push(String(chunk))) if (!await write(encoder.push(payload))) return false;
+        return true;
+      };
+      for await (const chunk of response) if (!await feed(chunk)) return;
+      if (!await write(encoder.end())) return;
+      if (!res.destroyed && !res.writableEnded) res.end();
+    } catch (error) {
+      endSseError(res, signal);
+      throw error;
+    } finally {
+      writer.cleanup();
+      signal?.removeEventListener("abort", onAbort);
+    }
     return;
   }
 
   const collected = [];
   const feed = (chunk) => { for (const payload of reader.push(String(chunk))) collected.push(...encoder.push(payload)); };
-  feed(first);
   for await (const chunk of response) feed(chunk);
   collected.push(...encoder.end());
   res.writeHead(status, { ...base, "content-type": "application/json" });
@@ -261,11 +277,25 @@ function settledSpecialistSse(protocol, document, translated, model) {
 
 export async function executeRoutePlan({ plan, req, res, path, body, env = process.env, runtimeState = {}, adapters = {}, affinityKey = null, historyKey = undefined, onUpstreamResponse }) {
   const requestId = randomUUID();
+  const pingMs = Math.max(1, Number(env.GATEWAY_SSE_PING_MS) || 15000);
   const aborter = new AbortController();
-  const timeout = setTimeout(() => aborter.abort(new Error("upstream deadline exceeded")), Math.max(plan.deadline - Date.now(), 1));
-  const cancel = () => aborter.abort(new Error("client disconnected"));
+  let activeResponse;
+  const abortResponse = () => activeResponse?.destroy(aborter.signal.reason);
+  aborter.signal.addEventListener("abort", abortResponse, { once: true });
+  const timeout = setTimeout(() => aborter.abort(Object.assign(new Error("upstream deadline exceeded"), { code: "TOTAL_DEADLINE" })), Math.max(plan.deadline - Date.now(), 1));
+  const responseStartMs = Math.max(1, Number(env.GATEWAY_RESPONSE_START_TIMEOUT_MS) || 90000);
+  let responseStartExpired = false;
+  let responseStartTimer;
+  responseStartTimer = setTimeout(() => {
+    if (res.headersSent) return;
+    responseStartExpired = true;
+    aborter.abort(Object.assign(new Error("gateway response-start deadline exceeded"), { code: "RESPONSE_START_DEADLINE" }));
+  }, Math.min(responseStartMs, Math.max(plan.deadline - Date.now(), 1)));
+  responseStartTimer.unref?.();
+  const cancel = () => aborter.abort(Object.assign(new Error("client disconnected"), { code: "CLIENT_DISCONNECTED" }));
   req.once("aborted", cancel);
-  res.once("close", () => { if (!res.writableEnded) cancel(); });
+  const onClose = () => { if (!res.writableEnded) cancel(); };
+  res.once("close", onClose);
   let lastStatus = 502;
 
   try {
@@ -274,6 +304,11 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
       const candidateBody = Buffer.from(JSON.stringify({ ...body, model: candidate.upstreamModel }));
       try {
         const { response, codec, specialist, specialistProtocol } = await startAttempt({ candidate, req, path, body: candidateBody, env, signal: aborter.signal, adapters });
+        activeResponse = response;
+        if (aborter.signal.aborted) {
+          response.destroy();
+          break;
+        }
         const status = response.statusCode || 502;
         if (status < 200 || status >= 300) {
           if (specialist) {
@@ -304,7 +339,7 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
         }
         observeUpstreamResponse(response, candidate, onUpstreamResponse);
         if (codec) {
-          await respondWithCodec({ response, codec, res, status, requestId, model: candidate.upstreamModel, provider: candidate.provider.id, publicModel: plan.publicModel, signal: aborter.signal });
+          await respondWithCodec({ response, codec, res, status, requestId, model: candidate.upstreamModel, provider: candidate.provider.id, publicModel: plan.publicModel, signal: aborter.signal, pingMs });
           if (affinityKey && plan.profile && runtimeState.affinity) {
             runtimeState.affinity.set(`${affinityKey}:${plan.profile}`, {
               provider: candidate.provider.id,
@@ -361,6 +396,7 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
             wantStream: plan.required.streaming === true,
             keepReasoning,
             signal: aborter.signal,
+            pingMs,
           });
         if (!repaired) {
           if (plan.required.streaming) {
@@ -370,7 +406,28 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
           } else {
             res.writeHead(status, headers);
           }
-          response.pipe(res);
+          await new Promise((resolve, reject) => {
+            const cleanup = () => {
+              response.off("end", onEnd);
+              response.off("error", onError);
+              res.off("finish", onFinish);
+              res.off("close", onClose);
+              aborter.signal.removeEventListener("abort", onAbort);
+            };
+            const done = (fn, value) => { cleanup(); fn(value); };
+            const onEnd = () => { if (!res.destroyed && !res.writableEnded) res.end(); done(resolve); };
+            const onFinish = () => done(resolve);
+            const onClose = () => done(resolve);
+            const onError = (error) => done(reject, error);
+            const onAbort = () => { response.destroy?.(aborter.signal.reason); done(reject, aborter.signal.reason); };
+            response.once("end", onEnd);
+            response.once("error", onError);
+            res.once("finish", onFinish);
+            res.once("close", onClose);
+            aborter.signal.addEventListener("abort", onAbort, { once: true });
+            if (aborter.signal.aborted) onAbort();
+            else response.pipe(res);
+          });
         }
         if (affinityKey && plan.profile && runtimeState.affinity) {
           runtimeState.affinity.set(`${affinityKey}:${plan.profile}`, {
@@ -382,6 +439,10 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
         recordModelFamily(runtimeState, historyKey === undefined ? affinityKey : historyKey, candidate);
         return { committed: true, requestId, provider: candidate.provider.id, attempts: plan.candidates.indexOf(candidate) + 1 };
       } catch (error) {
+        if (res.headersSent) {
+          if (!res.destroyed && !res.writableEnded) res.destroy();
+          return { committed: true, requestId, provider: candidate.provider.id, attempts: plan.candidates.indexOf(candidate) + 1 };
+        }
         if (aborter.signal.aborted) break;
         if (candidate.specialist) {
           const status = Number.isInteger(error?.statusCode) ? error.statusCode : 502;
@@ -407,9 +468,19 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
     }
   } finally {
     clearTimeout(timeout);
+    clearTimeout(responseStartTimer);
     req.off("aborted", cancel);
+    res.off("close", onClose);
+    aborter.signal.removeEventListener("abort", abortResponse);
   }
-  if (!res.headersSent && !aborter.signal.aborted) {
+  if (!res.headersSent && !res.destroyed && aborter.signal.aborted && aborter.signal.reason?.code !== "CLIENT_DISCONNECTED") {
+    const timedOut = responseStartExpired || aborter.signal.reason?.code === "TOTAL_DEADLINE";
+    res.writeHead(timedOut ? 504 : failureStatus(lastStatus), { "content-type": "application/json", "x-gateway-request-id": requestId });
+    const message = timedOut
+      ? "Gateway response deadline exceeded; remote execution may still be running. Reconcile with the original idempotency key before retrying."
+      : "No eligible upstream completed the request";
+    res.end(JSON.stringify({ error: { message, type: timedOut ? "gateway_timeout" : "gateway_upstream_error", request_id: requestId, model: plan.publicModel } }));
+  } else if (!res.headersSent && !aborter.signal.aborted) {
     res.writeHead(failureStatus(lastStatus), { "content-type": "application/json", "x-gateway-request-id": requestId });
     res.end(JSON.stringify({ error: { message: "No eligible upstream completed the request", type: "gateway_upstream_error", request_id: requestId, model: plan.publicModel } }));
   }
