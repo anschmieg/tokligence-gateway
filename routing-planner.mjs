@@ -164,16 +164,25 @@ export function buildRoutePlan(config, { model, protocol, body, requestClass = n
     const required = inspectRequestFeatures(protocol, body);
     const endpoint = { messages: "/v1/messages", responses: "/v1/responses", chat_completions: "/v1/chat/completions" }[protocol];
     const candidates = [];
+    const cooledCompatibleUntil = [];
     // Catalog routes are already ordered free -> subscription -> paid. Do not
     // let sticky affinity promote a paid route above a recovered free backend.
     for (const reference of catalogModel.routes) {
       const provider = providerById(config, reference.provider);
       if (!provider || !providerEnabled(provider, env) || !reference.supported_endpoints.includes(endpoint)) continue;
-      if (circuitOpen(runtimeState, provider.id, reference.model, protocol)) continue;
       const translate = translationFor(provider, protocol);
       if (translate === null || (translate && !TRANSLATING_ADAPTERS.has(provider.adapter))) continue;
       if (!candidateSupports(provider, reference, required, body, Boolean(translate))) continue;
+      const cooldownUntil = runtimeState?.cooldowns?.get(`${provider.id}:${reference.model}:${protocol}`) || 0;
+      if (cooldownUntil > Date.now()) {
+        cooledCompatibleUntil.push(cooldownUntil);
+        continue;
+      }
       candidates.push({ provider, model: { id: reference.model }, upstreamModel: normalizeUpstreamModel(provider.id, reference.model), protocol, native: !translate, ...(translate ? { translate } : {}) });
+    }
+    if (!candidates.length && cooledCompatibleUntil.length) {
+      const retryAfter = Math.max(1, Math.ceil((Math.min(...cooledCompatibleUntil) - Date.now()) / 1000));
+      return { error: { status: 503, code: "model_routes_cooling_down", message: "Compatible backends are temporarily unavailable", retry_after: retryAfter, supported_endpoints: catalogModel.supported_endpoints } };
     }
     if (!candidates.length) return { error: { status: 400, code: "no_compatible_model_route", message: "No configured backend supports this model and request", supported_endpoints: catalogModel.supported_endpoints } };
     return { requestedModel: model, publicModel: model, profile: null, required, deadline: Date.now() + Number(env.GATEWAY_REQUEST_TIMEOUT_MS || 120000), maxAttempts: candidates.length, candidates };

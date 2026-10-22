@@ -101,6 +101,10 @@ test("catalog aliases route free-first, exclude unauthorized paid fallback, and 
   assert.equal(exhausted.status, 503);
   await exhausted.text();
   assert(!seen.some((r) => r.body.model === "poolside/laguna-s-2.1"), "no implicit paid fallback");
+  const coolingDown = await complete("poolside/laguna-s-2.1");
+  assert.equal(coolingDown.status, 503);
+  assert.match(coolingDown.headers.get("retry-after"), /^[1-9]\d*$/);
+  await coolingDown.text();
   const retired = await complete("opencode-zen/space-bunny-free");
   assert.equal(retired.status, 410);
   await retired.text();

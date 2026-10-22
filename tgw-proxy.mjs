@@ -647,7 +647,11 @@ function handleProfileRequest(req, res, parsed, protocol) {
   );
   if (!profile && !plan) return false;
   if (plan.error) {
-    res.writeHead(plan.error.status, { "Content-Type": "application/json" });
+    const headers = { "Content-Type": "application/json" };
+    if (Number.isSafeInteger(plan.error.retry_after) && plan.error.retry_after > 0) {
+      headers["Retry-After"] = String(plan.error.retry_after);
+    }
+    res.writeHead(plan.error.status, headers);
     res.end(JSON.stringify({ error: plan.error }));
     return true;
   }

@@ -163,6 +163,47 @@ test("saved canonical IDs cannot fall through to an unrelated provider before di
   assert.equal(plan.error.code, "canonical_model_unavailable");
 });
 
+test("catalog routes report retryable cooldown only when compatible routes are cooling", () => {
+  const routing = structuredClone(config);
+  const routes = [
+    { provider: "openrouter", model: "poolside/laguna-s-2.1", supported_endpoints: ["/v1/chat/completions"] },
+    { provider: "mistral", model: "mistral/codestral-latest", supported_endpoints: ["/v1/chat/completions"] },
+  ];
+  const catalogModel = { routes, supported_endpoints: ["/v1/chat/completions"] };
+  const cooldown = Date.now() + 30_000;
+  const runtimeState = { catalogModels: new Map([["canonical-test", catalogModel]]), cooldowns: new Map([
+    [`openrouter:poolside/laguna-s-2.1:chat_completions`, cooldown],
+    [`mistral:mistral/codestral-latest:chat_completions`, cooldown],
+  ]) };
+  const plan = buildRoutePlan(routing, { model: "canonical-test", protocol: "chat_completions", body: {} }, { OPENROUTER_API_KEY: "test", MISTRAL_API_KEY: "test" }, runtimeState);
+  assert.equal(plan.error.status, 503);
+  assert.equal(plan.error.code, "model_routes_cooling_down");
+  assert(Number.isInteger(plan.error.retry_after) && plan.error.retry_after > 0);
+
+  const mixed = { ...catalogModel, routes: [
+    { ...routes[1], upstream_capabilities: { function_calling: false } },
+    routes[0],
+  ] };
+  const mixedPlan = buildRoutePlan(routing, { model: "canonical-test", protocol: "chat_completions", body: { tools: [{ type: "function", function: { name: "x", parameters: { type: "object" } } }] } }, { OPENROUTER_API_KEY: "test", MISTRAL_API_KEY: "test" }, { ...runtimeState, catalogModels: new Map([["canonical-test", mixed]]), cooldowns: new Map([[`openrouter:poolside/laguna-s-2.1:chat_completions`, cooldown]]) });
+  assert.equal(mixedPlan.error.status, 503, "incompatible route plus cooled compatible route is retryable");
+
+  const partlyHealthyState = { ...runtimeState, cooldowns: new Map([
+    [`openrouter:poolside/laguna-s-2.1:chat_completions`, cooldown],
+  ]) };
+  const partlyHealthyPlan = buildRoutePlan(routing, { model: "canonical-test", protocol: "chat_completions", body: {} }, { OPENROUTER_API_KEY: "test", MISTRAL_API_KEY: "test" }, partlyHealthyState);
+  assert.equal(partlyHealthyPlan.candidates.length, 1);
+  assert.equal(partlyHealthyPlan.candidates[0].provider.id, "mistral");
+
+  const incompatible = { ...catalogModel, routes: [{ ...routes[0], upstream_capabilities: { function_calling: false } }] };
+  const incompatiblePlan = buildRoutePlan(routing, { model: "canonical-test", protocol: "chat_completions", body: { tools: [{ type: "function", function: { name: "x", parameters: { type: "object" } } }] } }, { OPENROUTER_API_KEY: "test" }, { catalogModels: new Map([["canonical-test", incompatible]]), cooldowns: runtimeState.cooldowns });
+  assert.equal(incompatiblePlan.error.status, 400);
+  assert.equal(incompatiblePlan.error.code, "no_compatible_model_route");
+
+  const unknownPlan = buildRoutePlan(routing, { model: "poolside/laguna-s-2.1", protocol: "chat_completions", body: {} }, { OPENROUTER_API_KEY: "test" }, { catalogModels: new Map() });
+  assert.equal(unknownPlan.error.status, 503);
+  assert.equal(unknownPlan.error.code, "canonical_model_unavailable");
+});
+
 test("canonical fallback respects per-model tool support and preserves the Cline Messages translator", () => {
   const rows = buildModelCatalog([
     { id: "cline/cline-free/minimax-m3.1-flash", provider: "cline-oauth", context_window: 1000000, supports_parallel_tool_calls: true },
