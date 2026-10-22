@@ -213,12 +213,11 @@ export function createAnthropicStreamCodec({ model, messageId, strictCompletion 
         if (strictCompletion) throw Object.assign(new Error("OpenCode returned malformed stream data"), { upstreamStreamError: true });
         return;
       }
-      if (data.error && strictCompletion) throw Object.assign(new Error("OpenCode returned an embedded stream error"), { upstreamStreamError: true });
-      if (data.error) return drain();
       if (!data || typeof data !== "object") {
         if (strictCompletion) throw Object.assign(new Error("OpenCode returned malformed stream data"), { upstreamStreamError: true });
         return drain();
       }
+      if (data.error) throw Object.assign(new Error("OpenCode returned an embedded stream error"), { upstreamStreamError: true });
       if (!started) {
         started = true;
         emit("message_start", {
@@ -258,7 +257,8 @@ export function createAnthropicStreamCodec({ model, messageId, strictCompletion 
     },
 
     end() {
-      if (strictCompletion && !finishReason && !terminalDone) throw Object.assign(new Error("OpenCode stream ended without a finish reason"), { upstreamStreamError: true });
+      if (strictCompletion && !finishReason && !terminalDone) throw Object.assign(new Error("OpenCode stream ended without a finish reason or terminal marker"), { upstreamStreamError: true });
+      if (strictCompletion && !semanticStarted && finishReason !== "content_filter") throw Object.assign(new Error("OpenCode stream completed without a message or tool call"), { upstreamStreamError: true });
       if (!started) {
         started = true;
         emit("message_start", {

@@ -306,21 +306,37 @@ async function respondWithCodec({ response, codec, res, status, requestId, model
   // a non-streaming caller, SSE for a streaming one. Either way the caller gets
   // an Anthropic reply, and a streaming caller never receives a bare JSON body.
   const contentType = String(response.headers?.["content-type"] || "");
+  // Translated completions must be validated before committing response headers,
+  // so an invalid upstream result can flow through the normal candidate fallback.
+  const validateCompletion = (completion) => {
+    if (completion?.error) throw Object.assign(new Error("Upstream returned an embedded completion error"), { upstreamStreamError: true });
+    const choice = completion?.choices?.[0];
+    const finish = choice?.finish_reason;
+    if (!choice || !finish || !["stop", "length", "tool_calls", "function_call", "content_filter"].includes(finish)) {
+      throw Object.assign(new Error("Upstream returned an incomplete completion"), { upstreamStreamError: true });
+    }
+    const message = choice.message || {};
+    // The current message translator emits string content and tool calls; array
+    // content is not supported there, so it must not count as semantic output.
+    const text = typeof message.content === "string" && message.content.trim().length > 0;
+    const tools = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+    if (!text && !tools && finish !== "content_filter") {
+      throw Object.assign(new Error("Upstream completed without a message or tool call"), { upstreamStreamError: true });
+    }
+  };
   if (!contentType.includes("text/event-stream")) {
     const raw = await readBodyText(response, signal, 32 * 1024 * 1024);
     let completion;
     try {
       completion = JSON.parse(raw);
     } catch {
-      res.writeHead(502, { ...base, "content-type": "application/json" });
-      res.end(JSON.stringify({ type: "error", error: { type: "api_error", message: "Upstream returned an unreadable body" } }));
-      return;
+      throw Object.assign(new Error("Upstream returned an unreadable completion body"), { upstreamStreamError: true });
     }
-    if (completion?.error || (strictCompletion && (!completion?.choices?.[0] || !completion.choices[0].finish_reason))) {
-      if (strictCompletion) response._opencodePoolStreamState = { failure: new Error("OpenCode returned an error or incomplete completion") };
-      res.writeHead(completion?.error ? status : 502, { ...base, "content-type": "application/json" });
-      res.end(JSON.stringify({ type: "error", error: { type: "api_error", message: "Upstream returned an error or incomplete completion" } }));
-      return;
+    try {
+      validateCompletion(completion);
+    } catch (error) {
+      if (strictCompletion) response._opencodePoolStreamState = { failure: error };
+      throw error;
     }
     const message = openaiToAnthropicMessage(completion, { model });
     if (codec.stream) {
@@ -694,7 +710,7 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
           return { committed: true, requestId, provider: candidate.provider.id };
         }
         if (codec) {
-          await respondWithCodec({ response, codec, res, status, requestId, model: candidate.upstreamModel, provider: candidate.provider.id, publicModel: plan.publicModel, signal: aborter.signal, pingMs, strictCompletion: Boolean(poolAccount), preflight: streamPreflight });
+          await respondWithCodec({ response, codec, res, status, requestId, model: candidate.upstreamModel, provider: candidate.provider.id, publicModel: plan.publicModel, signal: aborter.signal, pingMs, strictCompletion: true, preflight: streamPreflight });
           if (poolAccount && !aborter.signal.aborted) {
             const streamState = response._opencodePoolStreamState;
             if (streamState?.failure || streamPreflight?.error) {

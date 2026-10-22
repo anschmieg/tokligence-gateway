@@ -118,6 +118,35 @@ test("the Anthropic event stream folds back into one message", () => {
   assert.deepEqual(message.usage, { input_tokens: 4, output_tokens: 2 });
 });
 
+test("strict translated streams reject embedded errors and incomplete or empty success", () => {
+  const embedded = createAnthropicStreamCodec({ strictCompletion: true });
+  assert.throws(() => embedded.push(JSON.stringify({ error: { message: "synthetic failure" } })), /embedded stream error/);
+
+  for (const chunks of [
+    [JSON.stringify({ choices: [{ delta: { content: "partial" } }] })],
+    [JSON.stringify({ choices: [{ finish_reason: "stop" }] })],
+  ]) {
+    const codec = createAnthropicStreamCodec({ strictCompletion: true });
+    for (const chunk of chunks) codec.push(chunk);
+    assert.throws(() => codec.end(), /without a finish reason|without a message or tool call/);
+  }
+
+  const emptyFiltered = createAnthropicStreamCodec({ strictCompletion: true });
+  emptyFiltered.push(JSON.stringify({ choices: [{ finish_reason: "content_filter" }] }));
+  assert.doesNotThrow(() => emptyFiltered.end());
+});
+
+test("strict translated streams preserve tool-only output with fragmented arguments", () => {
+  const codec = createAnthropicStreamCodec({ strictCompletion: true });
+  const events = [
+    ...codec.push(JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: "call_1", function: { name: "lookup", arguments: "{\"q\":" } }] } }] })),
+    ...codec.push(JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "\"x\"}" } }] } }] })),
+    ...codec.push(JSON.stringify({ choices: [{ finish_reason: "tool_calls" }] })),
+    ...codec.end(),
+  ];
+  assert.deepEqual(collectAnthropicStream(events).content, [{ type: "tool_use", id: "call_1", name: "lookup", input: { q: "x" } }]);
+});
+
 test("the SSE reader tolerates split frames and preserves the done marker for strict stream validation", () => {
   const reader = createSseChunkReader();
   assert.deepEqual(reader.push('data: {"a":1}\n\ndata: {"b"'), ['{"a":1}']);

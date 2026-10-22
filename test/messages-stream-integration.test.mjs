@@ -128,6 +128,168 @@ test("native incomplete SSE frames keep a quiet streaming client alive with ping
   await waitFor(() => upstreamClosed);
 });
 
+test("translated non-streaming errors are rejected before headers and use candidate fallback", async (t) => {
+  let fallbackCalls = 0;
+  const failing = http.createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: { message: "synthetic upstream failure" } }));
+  });
+  const fallback = http.createServer((_req, res) => {
+    fallbackCalls += 1;
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ choices: [{ finish_reason: "length", message: { content: "recovered" } }] }));
+  });
+  const failingPort = await listen(failing);
+  const fallbackPort = await listen(fallback);
+  const candidates = [
+    makeCandidate({ id: "translated-error", adapter: "openai-compatible", port: failingPort, translate: "anthropic-from-openai" }),
+    makeCandidate({ id: "translated-healthy", adapter: "openai-compatible", port: fallbackPort, translate: "anthropic-from-openai" }),
+  ];
+  const { gateway, gatewayPort } = await fixture(t, () => {}, { candidates });
+  t.after(async () => { await close(gateway); await close(failing); await close(fallback); });
+  const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/messages`, { method: "POST", body: JSON.stringify({ ...STREAM_BODY, stream: false }) });
+  const text = await response.text();
+  assert.equal(response.status, 200);
+  assert.match(text, /recovered/);
+  assert.equal(fallbackCalls, 1);
+});
+
+test("translated non-streaming caller rejects embedded SSE error before headers", async (t) => {
+  let fallbackCalls = 0;
+  const failing = translatedServer((_req, res) => {
+    res.end(`data: ${JSON.stringify({ error: { message: "synthetic upstream failure" } })}\n\n`);
+  });
+  const fallback = http.createServer((_req, res) => {
+    fallbackCalls += 1;
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "recovered" } }] }));
+  });
+  const failingPort = await listen(failing);
+  const fallbackPort = await listen(fallback);
+  const candidates = [
+    makeCandidate({ id: "translated-sse-error", adapter: "openai-compatible", port: failingPort, translate: "anthropic-from-openai" }),
+    makeCandidate({ id: "translated-recovered", adapter: "openai-compatible", port: fallbackPort, translate: "anthropic-from-openai" }),
+  ];
+  const { gateway, gatewayPort } = await fixture(t, () => {}, { candidates });
+  t.after(async () => { await close(gateway); await close(failing); await close(fallback); });
+  const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/messages`, {
+    method: "POST",
+    body: JSON.stringify({ ...STREAM_BODY, stream: false }),
+  });
+  const message = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(message.content[0].text, "recovered");
+  assert.equal(fallbackCalls, 1);
+});
+
+test("translated valid tool-only JSON completion succeeds", async (t) => {
+  const upstream = http.createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ choices: [{ finish_reason: "tool_calls", message: { tool_calls: [{ id: "call_1", type: "function", function: { name: "lookup", arguments: "{\"q\":\"x\"}" } }] } }] }));
+  });
+  const candidate = makeCandidate({ id: "translated-tool-json", adapter: "openai-compatible", port: await listen(upstream), translate: "anthropic-from-openai" });
+  const { gateway, gatewayPort } = await fixture(t, () => {}, { candidates: [candidate] });
+  t.after(async () => { await close(gateway); await close(upstream); });
+  const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/messages`, {
+    method: "POST",
+    body: JSON.stringify({ ...STREAM_BODY, stream: false }),
+  });
+  const message = await response.json();
+  assert.equal(response.status, 200);
+  assert.deepEqual(message.content, [{ type: "tool_use", id: "call_1", name: "lookup", input: { q: "x" } }]);
+});
+
+test("translated post-commit embedded errors emit an error without fallback", async (t) => {
+  let fallbackCalls = 0;
+  const failing = translatedServer((_req, res) => {
+    res.write(OPENAI_FRAME);
+    res.end(`data: ${JSON.stringify({ error: { message: "synthetic upstream failure" } })}\n\n`);
+  });
+  const fallback = nativeServer((_req, res) => { fallbackCalls += 1; res.end(NATIVE_FRAME); });
+  const failingPort = await listen(failing);
+  const fallbackPort = await listen(fallback);
+  const candidates = [
+    makeCandidate({ id: "translated-failure", adapter: "openai-compatible", port: failingPort, translate: "anthropic-from-openai" }),
+    makeCandidate({ id: "must-not-fallback", port: fallbackPort }),
+  ];
+  const { gateway, gatewayPort } = await fixture(t, () => {}, { candidates });
+  t.after(async () => { await close(gateway); await close(failing); await close(fallback); });
+  const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/messages`, { method: "POST", body: JSON.stringify(STREAM_BODY) });
+  const text = await response.text();
+  assert.equal(response.status, 200);
+  assert.match(text, /event: error/);
+  assert.match(text, /Upstream stream failed/);
+  assert.doesNotMatch(text, /event: message_stop/);
+  assert.equal(fallbackCalls, 0);
+});
+
+test("translated empty JSON completion is rejected before headers and uses candidate fallback", async (t) => {
+  let fallbackCalls = 0;
+  const empty = http.createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "" } }] }));
+  });
+  const healthy = http.createServer((_req, res) => {
+    fallbackCalls += 1;
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "recovered" } }] }));
+  });
+  const emptyPort = await listen(empty);
+  const healthyPort = await listen(healthy);
+  const candidates = [
+    makeCandidate({ id: "translated-empty", adapter: "openai-compatible", port: emptyPort, translate: "anthropic-from-openai" }),
+    makeCandidate({ id: "translated-healthy", adapter: "openai-compatible", port: healthyPort, translate: "anthropic-from-openai" }),
+  ];
+  const { gateway, gatewayPort } = await fixture(t, () => {}, { candidates });
+  t.after(async () => { await close(gateway); await close(empty); await close(healthy); });
+  const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/messages`, {
+    method: "POST",
+    body: JSON.stringify({ ...STREAM_BODY, stream: false }),
+  });
+  const message = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(message.content[0].text, "recovered");
+  assert.equal(fallbackCalls, 1);
+});
+
+test("translated truncated SSE for a non-streaming caller falls back before headers", async (t) => {
+  let fallbackCalls = 0;
+  const truncated = translatedServer((_req, res) => res.end(OPENAI_FRAME));
+  const healthy = http.createServer((_req, res) => {
+    fallbackCalls += 1;
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "recovered" } }] }));
+  });
+  const truncatedPort = await listen(truncated);
+  const healthyPort = await listen(healthy);
+  const candidates = [
+    makeCandidate({ id: "translated-truncated-buffered", adapter: "openai-compatible", port: truncatedPort, translate: "anthropic-from-openai" }),
+    makeCandidate({ id: "translated-recovered-buffered", adapter: "openai-compatible", port: healthyPort, translate: "anthropic-from-openai" }),
+  ];
+  const { gateway, gatewayPort } = await fixture(t, () => {}, { candidates });
+  t.after(async () => { await close(gateway); await close(truncated); await close(healthy); });
+  const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/messages`, {
+    method: "POST",
+    body: JSON.stringify({ ...STREAM_BODY, stream: false }),
+  });
+  const message = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(message.content[0].text, "recovered");
+  assert.equal(fallbackCalls, 1);
+});
+
+test("translated EOF without finish reason or DONE emits a protocol error", async (t) => {
+  const upstream = translatedServer((_req, res) => res.end(OPENAI_FRAME));
+  const candidate = makeCandidate({ id: "translated-truncated", adapter: "openai-compatible", port: await listen(upstream), translate: "anthropic-from-openai" });
+  const { gateway, gatewayPort } = await fixture(t, () => {}, { candidates: [candidate] });
+  t.after(async () => { await close(gateway); await close(upstream); });
+  const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/messages`, { method: "POST", body: JSON.stringify(STREAM_BODY) });
+  const text = await response.text();
+  assert.match(text, /event: error/);
+  assert.match(text, /Upstream stream failed/);
+  assert.doesNotMatch(text, /event: message_stop/);
+});
+
 test("translated stream emits heartbeat while upstream delays its first bytes", async (t) => {
   let upstreamClosed = false;
   const upstream = translatedServer((_req, res) => {
