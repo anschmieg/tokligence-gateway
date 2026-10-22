@@ -120,8 +120,11 @@ function waitForOpenCodeSetup(promise, signal) {
 async function zenAttempt(candidate, { body, env, accountPool, stickyKey, excludedAccounts = [], signal, trace }) {
   const provider = candidate.provider;
   const request = Buffer.isBuffer(body) ? JSON.parse(body.toString("utf8")) : body;
+  const poolSelectionStarted = Date.now();
+  if (accountPool) trace?.emit("transport_phase_start", { phase: "pool_selection" });
   const account = accountPool?.select("chat", candidate.upstreamModel, stickyKey, { exclude: excludedAccounts });
-  if (accountPool && !account) throw Object.assign(new Error("No eligible OpenCode account is available"), { statusCode: 503, poolExhausted: true });
+  if (accountPool) trace?.emit("transport_phase_end", { phase: "pool_selection", outcome: account ? "ok" : "exhausted", duration_ms: Math.max(0, Date.now() - poolSelectionStarted) });
+  if (accountPool && !account) throw Object.assign(new Error("No eligible OpenCode account is available"), { statusCode: 503, poolExhausted: true, code: "OPENCODE_POOL_EXHAUSTED" });
   const poolGeneration = account ? accountPool.state.get(account.id)?.generation : null;
   const { tokens, sessions } = account ? accountPool.servicesFor(account) : zenServicesFor(provider, env);
   let minted;
@@ -389,11 +392,19 @@ function send({ target, headers, body, signal, trace, proxy }) {
   const client = target.protocol === "https:" ? https : http;
   return new Promise((resolve, reject) => {
     const requestStarted = Date.now();
+    let headersSettled = false;
+    const finishHeadersWait = (outcome) => {
+      if (headersSettled) return;
+      headersSettled = true;
+      trace?.emit("transport_phase_end", { phase: "upstream_headers_wait", outcome, duration_ms: Math.max(0, Date.now() - requestStarted) });
+    };
     trace?.emit("transport_phase_start", { phase: "connection" });
+    trace?.emit("transport_phase_start", { phase: "upstream_headers_wait" });
     let connected = false;
     const upstream = client.request(
       { protocol: target.protocol, hostname: target.hostname, port: target.port || undefined, path: `${target.pathname}${target.search}`, method: "POST", headers },
       (response) => {
+        finishHeadersWait("ok");
         if (!connected) {
           connected = true;
           trace?.emit("transport_phase_end", { phase: "connection", outcome: "ok", duration_ms: Math.max(0, Date.now() - requestStarted) });
@@ -414,6 +425,7 @@ function send({ target, headers, body, signal, trace, proxy }) {
       }
     });
     upstream.once("error", (error) => {
+      finishHeadersWait(signal?.aborted ? "cancelled" : "error");
       if (!connected) {
         connected = true;
         trace?.emit("transport_phase_end", { phase: "connection", outcome: signal?.aborted ? "cancelled" : "error", duration_ms: Math.max(0, Date.now() - requestStarted) });
@@ -438,7 +450,7 @@ function sendThroughProxy({ target, headers, body, signal, proxy, trace }) {
       port: Number(proxyUrl.port) || 80,
       method: "CONNECT",
       path: `${target.hostname}:${targetPort}`,
-      headers: { host: `${target.hostname}:${targetPort}` },
+      headers: { host: `${target.hostname}:${targetPort}`, ...(trace?.id ? { "x-gateway-request-id": trace.id } : {}) },
     });
     let connectFinished = false;
     connectReq.on("connect", (res, socket) => {
@@ -450,6 +462,14 @@ function sendThroughProxy({ target, headers, body, signal, proxy, trace }) {
       }
       const secure = target.protocol === "https:";
       const connectionStarted = Date.now();
+      let headersSettled = false;
+      const finishHeadersWait = (outcome) => {
+        if (headersSettled) return;
+        headersSettled = true;
+        trace?.emit("transport_phase_end", { phase: "upstream_headers_wait", outcome, duration_ms: Math.max(0, Date.now() - headersStarted) });
+      };
+      const headersStarted = Date.now();
+      trace?.emit("transport_phase_start", { phase: "upstream_headers_wait" });
       trace?.emit("transport_phase_start", { phase: secure ? "tls" : "connection" });
       const upstream = (secure ? https : http).request(
         {
@@ -461,7 +481,10 @@ function sendThroughProxy({ target, headers, body, signal, proxy, trace }) {
           socket,
           servername: secure ? target.hostname : undefined,
         },
-        (response) => resolve({ response, upstream }),
+        (response) => {
+          finishHeadersWait("ok");
+          resolve({ response, upstream });
+        },
       );
       let transportFinished = false;
       const finishTransport = (outcome) => {
@@ -476,6 +499,7 @@ function sendThroughProxy({ target, headers, body, signal, proxy, trace }) {
         else finishTransport("reused");
       });
       upstream.once("error", (error) => {
+        finishHeadersWait(signal?.aborted ? "cancelled" : "error");
         finishTransport(signal?.aborted ? "cancelled" : "error");
         reject(error);
       });

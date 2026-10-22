@@ -51,6 +51,13 @@ test("setup tracing exposes concurrent pending phase and late cancelled completi
   assert.ok(phases.some((item) => item.event === "setup_phase_end" && item.phase === "session_id" && item.outcome === "completed_after_cancel"));
 });
 
+test("pool exhaustion is distinguishable with a safe trace code", async () => {
+  const events = [];
+  const unavailable = { select: () => null };
+  await assert.rejects(startAttempt({ candidate, req: { headers: {} }, path: "/v1/messages", body: Buffer.from(JSON.stringify(body)), accountPool: unavailable, trace: { emit: (event, fields) => events.push({ event, ...fields }) } }), (error) => error.code === "OPENCODE_POOL_EXHAUSTED" && error.poolExhausted === true);
+  assert.ok(events.some((item) => item.phase === "pool_selection" && item.outcome === "exhausted"));
+});
+
 test("setup rejection preserves its original error identity", async () => {
   const original = Object.assign(new Error("synthetic private setup detail"), { code: "ETIMEDOUT", statusCode: 429 });
   const accountPool = pool(null, null, null, { sessionId: async () => { throw original; } });
@@ -86,10 +93,13 @@ test("direct HTTP transport records body completion before delayed upstream head
   const attempt = startAttempt({ candidate, req: { headers: {} }, path: "/v1/messages", body: Buffer.from("{}"), trace: { emit: (event, fields) => events.push({ event, ...fields }) } });
   await received;
   assert.ok(events.some((item) => item.event === "transport_phase_end" && item.phase === "body_sent"));
+  assert.ok(events.some((item) => item.event === "transport_phase_start" && item.phase === "upstream_headers_wait"));
+  assert.equal(events.some((item) => item.event === "transport_phase_end" && item.phase === "upstream_headers_wait"), false);
   assert.equal(events.some((item) => item.event === "upstream_headers"), false);
   releaseHeaders();
   const result = await attempt;
   result.response.resume();
+  assert.ok(events.some((item) => item.event === "transport_phase_end" && item.phase === "upstream_headers_wait" && item.outcome === "ok"));
   assert.ok(events.findIndex((item) => item.event === "transport_phase_end" && item.phase === "body_sent") < events.length);
 });
 
@@ -104,6 +114,7 @@ test("Zen alone uses its explicitly configured proxy across native and translate
   upstreamServer.on("connection", (socket) => { upstreamSockets.add(socket); socket.once("close", () => upstreamSockets.delete(socket)); });
   upstreamServer.listen(0, "127.0.0.1"); await once(upstreamServer, "listening");
   const connectRequests = [];
+  const gatewayRequestIds = [];
   const tunnelSockets = new Set();
   const proxyServer = http.createServer();
   proxyServer.on("connection", (socket) => { tunnelSockets.add(socket); socket.once("close", () => tunnelSockets.delete(socket)); });
@@ -111,6 +122,7 @@ test("Zen alone uses its explicitly configured proxy across native and translate
     tunnelSockets.add(clientSocket);
     clientSocket.once("close", () => tunnelSockets.delete(clientSocket));
     connectRequests.push(req.url);
+    gatewayRequestIds.push(req.headers["x-gateway-request-id"]);
     const [host, port] = req.url.split(":");
     const upstreamSocket = net.connect(Number(port), host, () => {
       tunnelSockets.add(upstreamSocket);
@@ -132,7 +144,7 @@ test("Zen alone uses its explicitly configured proxy across native and translate
 
   async function dispatch(candidate, path, requestBody, env) {
     const events = [];
-    const result = await startAttempt({ candidate, req: { headers: candidate.provider.adapter === "chatgpt-responses" ? { "idempotency-key": "fixture-key" } : {} }, path, body: Buffer.from(JSON.stringify(requestBody)), env, accountPool: candidate.provider.adapter === "opencode-zen" ? pool() : null, trace: { emit: (event, fields) => events.push({ event, ...fields }) } });
+    const result = await startAttempt({ candidate, req: { headers: candidate.provider.adapter === "chatgpt-responses" ? { "idempotency-key": "fixture-key" } : {} }, path, body: Buffer.from(JSON.stringify(requestBody)), env, accountPool: candidate.provider.adapter === "opencode-zen" ? pool() : null, trace: { id: "00000000-0000-4000-8000-000000000001", emit: (event, fields) => events.push({ event, ...fields }) } });
     const statusCode = result.response.statusCode;
     result.response.resume();
     return { events, statusCode };
@@ -149,6 +161,7 @@ test("Zen alone uses its explicitly configured proxy across native and translate
   assert.equal(specialist.statusCode, 200);
   assert.equal(zen.statusCode, 200);
   assert.deepEqual(connectRequests, [`127.0.0.1:${upstreamServer.address().port}`]);
+  assert.match(gatewayRequestIds[0], /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   for (const result of [native, translated, specialist]) assert.equal(result.events.some((item) => item.phase === "proxy_connect"), false);
   assert.ok(zen.events.some((item) => item.phase === "proxy_connect"));
   assert.equal(upstreamRequests.length, 4);

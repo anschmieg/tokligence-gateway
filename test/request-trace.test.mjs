@@ -40,6 +40,18 @@ test("request trace accepts only bounded phase diagnostics", () => {
   assert.equal(lines[2].duration_ms, undefined);
 });
 
+test("request trace allows only safe diagnostic phase and outcome enums", () => {
+  const { trace, lines } = harness();
+  trace.emit("transport_phase_end", { phase: "upstream_headers_wait", outcome: "timeout", attempt_number: 2, duration_ms: 90000, host: "private.example" });
+  trace.emit("attempt_failed", { phase: "pool_selection", outcome: "exhausted", code: "OPENCODE_POOL_EXHAUSTED", attempt_number: 3 });
+  const serialized = JSON.stringify(lines);
+  assert.match(serialized, /upstream_headers_wait/);
+  assert.match(serialized, /OPENCODE_POOL_EXHAUSTED/);
+  assert.match(serialized, /exhausted/);
+  assert.match(serialized, /attempt_number/);
+  assert.doesNotMatch(serialized, /private\.example/);
+});
+
 test("request trace drops unsafe identifiers and bounds CF-Ray", () => {
   assert.equal(safeTraceId("x".repeat(129)), null);
   assert.equal(safeTraceId("ray/with newline\n"), null);

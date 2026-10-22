@@ -474,15 +474,17 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
     candidateLoop: for (const candidate of plan.candidates) {
       if (aborter.signal.aborted) break;
       trace?.stage("attempt");
-      trace?.emit("attempt_start", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel });
       const candidateBody = Buffer.from(JSON.stringify({ ...body, model: candidate.upstreamModel }));
       const excludedAccounts = [];
       let poolAttempt = 0;
+      let attemptNumber = 0;
       let attemptResult;
       let status;
       try {
         const maxPoolAttempts = candidate.provider.adapter === "opencode-zen" && openCodeAccountPool ? openCodeAccountPool.maxAttempts : 1;
         while (true) {
+          attemptNumber += 1;
+          trace?.emit("attempt_start", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel, attempt_number: attemptNumber });
           try {
             attemptResult = await startAttemptUntilAbort({ candidate, req, path, body: candidateBody, env, signal: aborter.signal, adapters, trace, accountPool: candidate.provider.adapter === "opencode-zen" ? openCodeAccountPool : null, stickyKey: affinityKey, excludedAccounts }, attemptStarter);
           } catch (error) {
@@ -757,7 +759,7 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
         }
         lastStatus = 502;
         const safeCode = typeof error?.code === "string" && /^[A-Za-z0-9_.-]{1,64}$/.test(error.code) ? error.code : "upstream_error";
-        trace?.emit("attempt_failed", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel, code: safeCode });
+        trace?.emit("attempt_failed", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel, code: safeCode, attempt_number: attemptNumber });
         runtimeState.cooldowns?.set(`${candidate.provider.id}:${candidate.model?.id || candidate.upstreamModel}:${candidate.protocol}`, Date.now() + errorCooldownMs(error));
       }
     }
