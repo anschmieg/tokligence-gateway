@@ -29,6 +29,7 @@ only to loopback and is never exposed directly to the internet.
 - `POST /v1/messages/count_tokens` — Anthropic token counting
 - `POST /v1/responses` — OpenAI Responses
 - `POST /v1/chat/completions` — OpenAI Chat Completions
+- `POST /v1/systemone` — native OpenCode Jev typed evaluations
 
 All endpoints except `/health` require the existing gateway bearer token.
 `/admin/*` is protected by **either** a separate `TOKLIGENCE_ADMIN_SECRET`
@@ -429,6 +430,19 @@ candidates, and the configured profile is appended as a fallback.
 
 See [ChatGPT-backed specialist roles (opt-in)](#chatgpt-backed-specialist-roles-opt-in) for the authoritative gateway behavior, limitations, deployment status, and per-client verification checklist.
 
+## Native OpenCode SystemOne (Jev)
+
+`POST /v1/systemone` is a native bearer-authenticated endpoint, distinct from
+Zen chat. It accepts typed `noul`, `choice`, and `score` questions and returns
+SystemOne's native `answers` object without chat translation. See
+[`docs/systemone.md`](docs/systemone.md) for pool configuration, operational
+limits, verified OAuth evidence, API-key verification status, and rollback.
+
+The `jev-1.13-free` model is intentionally absent from chat model discovery and
+is rejected on Chat Completions, Messages, and Responses. Paid `jev-1.13` is
+accepted only when explicitly configured as eligible for an account; it is not
+used as fallback.
+
 ## Anthropic Messages for every model
 
 `POST /v1/messages` is Anthropic-compatible for the whole catalog, not only for
@@ -502,9 +516,11 @@ Tokligence.
 
 ## OpenCode Zen credential
 
-Zen's free tier is served only to an account that completed the Console sign-in,
-so this provider cannot use a Console API key: it needs the OAuth credential from
-a device login.
+Zen's free chat tier is served only to an account that completed the Console sign-in,
+so the chat gate needs an OAuth credential from a device login. Native SystemOne is
+separate: it accepts a verified Console OAuth bearer; Console API-key requests
+are supported only when explicitly configured for eligible Jev models. See
+[`docs/systemone.md`](docs/systemone.md) for account pools and native verification.
 
 ### The credential belongs to the gateway
 

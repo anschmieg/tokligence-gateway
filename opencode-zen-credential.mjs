@@ -10,6 +10,12 @@ import fs from "node:fs";
 import path from "node:path";
 
 const DEFAULT_SKEW_MS = 10 * 60 * 1000;
+const TOKEN_REFRESH_TIMEOUT_MS = 10_000;
+const TOKEN_RESPONSE_LIMIT = 64 * 1024;
+
+export function canonicalCredentialFile(file) {
+  try { return fs.realpathSync(file); } catch { return path.resolve(file); }
+}
 
 export function readCredential(file) {
   try {
@@ -21,6 +27,7 @@ export function readCredential(file) {
 }
 
 export function writeCredential(file, credential) {
+  file = canonicalCredentialFile(file);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const temporary = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(temporary, `${JSON.stringify(credential, null, 1)}\n`, { mode: 0o600 });
@@ -43,13 +50,30 @@ async function requestToken({ tokenUrl, clientId, refreshToken, fetchImpl }) {
   const response = await fetchImpl(tokenUrl, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+    signal: AbortSignal.timeout(TOKEN_REFRESH_TIMEOUT_MS),
     body: new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: refreshToken,
       ...(clientId ? { client_id: clientId } : {}),
     }).toString(),
   });
-  const text = await response.text();
+  const reader = response.body?.getReader();
+  let text = "";
+  if (reader) {
+    const chunks = [];
+    let bytes = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > TOKEN_RESPONSE_LIMIT) {
+        await reader.cancel().catch(() => {});
+        throw new Error("OpenCode Zen token refresh returned an oversized response");
+      }
+      chunks.push(Buffer.from(value));
+    }
+    text = Buffer.concat(chunks, bytes).toString("utf8");
+  }
   let payload = null;
   try {
     payload = JSON.parse(text);
@@ -57,8 +81,7 @@ async function requestToken({ tokenUrl, clientId, refreshToken, fetchImpl }) {
     payload = null;
   }
   if (!response.ok) {
-    const detail = payload?.error_description || payload?.error || text.slice(0, 200);
-    throw new Error(`OpenCode Zen token refresh failed (${response.status}): ${detail}`);
+    throw new Error(`OpenCode Zen token refresh failed (${response.status})`);
   }
   const access = payload?.access_token || payload?.access;
   if (!access) throw new Error("OpenCode Zen token refresh returned no access token");
@@ -80,7 +103,8 @@ function credentialExpiryFallback(payload) {
 
 // Single-flight token provider: concurrent requests share one refresh, and a
 // still-valid token is preferred over a failed refresh so a transient outage
-// does not take the provider down.
+// does not take the provider down. Production ownership is canonicalized by the
+// provider/account service registry; this factory remains isolated for tests.
 export function createTokenProvider({
   file,
   tokenUrl,
@@ -123,14 +147,14 @@ export function createTokenProvider({
       return await inFlight;
     } catch (error) {
       if (credentialExpiry(credential) > now()) {
-        log(`opencode-zen: refresh failed, using the current token until it expires: ${error.message}`);
+        log("opencode-zen: refresh failed, using the current token until it expires");
         return credential;
       }
       throw new Error(`${error.message}; the stored OpenCode Zen token has expired`);
     }
   };
 
-  return {
+  const provider = {
     authorization: async () => `Bearer ${(await resolve()).access}`,
     credential: resolve,
     refreshNow: async () => {
@@ -139,4 +163,5 @@ export function createTokenProvider({
       return refresh(credential);
     },
   };
+  return provider;
 }

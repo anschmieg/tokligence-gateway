@@ -155,7 +155,7 @@ export function openaiToAnthropicMessage(completion, { model } = {}) {
 // Turns OpenAI server-sent chunks into Anthropic server-sent events. Zen always
 // streams, so this is also how a non-streaming Anthropic caller is served: the
 // events are folded into one message by collectAnthropicStream.
-export function createAnthropicStreamCodec({ model, messageId } = {}) {
+export function createAnthropicStreamCodec({ model, messageId, strictCompletion = false } = {}) {
   const id = messageId || `msg_${Math.random().toString(36).slice(2, 18)}`;
   let started = false;
   let finished = false;
@@ -166,6 +166,8 @@ export function createAnthropicStreamCodec({ model, messageId } = {}) {
   const events = [];
   const usage = { input_tokens: 0, output_tokens: 0 };
   let finishReason = null;
+  let terminalDone = false;
+  let semanticStarted = false;
 
   const emit = (type, payload) => {
     events.push(`event: ${type}\ndata: ${JSON.stringify({ type, ...payload })}\n\n`);
@@ -200,11 +202,22 @@ export function createAnthropicStreamCodec({ model, messageId } = {}) {
 
   return {
     push(chunk) {
+      if (chunk === "[DONE]") {
+        terminalDone = true;
+        return drain();
+      }
       let data;
       try {
         data = JSON.parse(chunk);
       } catch {
+        if (strictCompletion) throw Object.assign(new Error("OpenCode returned malformed stream data"), { upstreamStreamError: true });
         return;
+      }
+      if (data.error && strictCompletion) throw Object.assign(new Error("OpenCode returned an embedded stream error"), { upstreamStreamError: true });
+      if (data.error) return drain();
+      if (!data || typeof data !== "object") {
+        if (strictCompletion) throw Object.assign(new Error("OpenCode returned malformed stream data"), { upstreamStreamError: true });
+        return drain();
       }
       if (!started) {
         started = true;
@@ -221,22 +234,31 @@ export function createAnthropicStreamCodec({ model, messageId } = {}) {
       const delta = choice.delta || {};
 
       if (typeof delta.content === "string" && delta.content.length) {
+        semanticStarted = true;
         openText();
         emit("content_block_delta", { index: openBlock, delta: { type: "text_delta", text: delta.content } });
       }
       for (const call of delta.tool_calls || []) {
         const index = call.index ?? 0;
         const fn = call.function || {};
+        if (fn.name || call.id || fn.arguments) semanticStarted = true;
         const block = openTool(index, fn.name || "tool", call.id || `call_${index}`);
         if (fn.arguments) {
           emit("content_block_delta", { index: block, delta: { type: "input_json_delta", partial_json: fn.arguments } });
         }
       }
+      if (strictCompletion && choice.finish_reason && !["stop", "length", "tool_calls", "function_call", "content_filter"].includes(choice.finish_reason)) {
+        throw Object.assign(new Error("OpenCode stream reported an unsuccessful finish"), { upstreamStreamError: true });
+      }
       if (choice.finish_reason) finishReason = choice.finish_reason;
+      if (choice.finish_reason === "error") {
+        return drain();
+      }
       return drain();
     },
 
     end() {
+      if (strictCompletion && !finishReason && !terminalDone) throw Object.assign(new Error("OpenCode stream ended without a finish reason"), { upstreamStreamError: true });
       if (!started) {
         started = true;
         emit("message_start", {
@@ -331,12 +353,12 @@ export function createSseChunkReader() {
         buffer = buffer.slice(index + 1);
         if (!line.startsWith("data:")) continue;
         const payload = line.slice(5).trim();
-        if (!payload || payload === "[DONE]") continue;
-        try {
+        if (!payload) continue;
+        if (payload === "[DONE]") {
           chunks.push(payload);
-        } catch {
           continue;
         }
+        chunks.push(payload);
       }
       return chunks;
     },

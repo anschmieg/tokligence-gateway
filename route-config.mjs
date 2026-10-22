@@ -103,6 +103,45 @@ export function parseRoutingConfig(source) {
     const normalizedProvider = adapter === "cline-oauth"
       ? normalizeClineOAuthProvider(provider, index)
       : provider;
+    const opencodePool = provider.opencode_pool;
+    if (opencodePool != null) {
+      if (adapter !== "opencode-zen" || !opencodePool || typeof opencodePool !== "object" || Array.isArray(opencodePool)) throw new Error(`providers[${index}].opencode_pool is only valid for opencode-zen`);
+      optionalBoundedInteger(opencodePool.max_attempts, `providers[${index}].opencode_pool.max_attempts`, 3, 1, 16);
+      if (opencodePool.accounts != null && (!Array.isArray(opencodePool.accounts) || opencodePool.accounts.length > 32)) throw new Error(`providers[${index}].opencode_pool.accounts must be a list of at most 32 entries`);
+      if (opencodePool.api_keys != null && (!Array.isArray(opencodePool.api_keys) || opencodePool.api_keys.length > 32)) throw new Error(`providers[${index}].opencode_pool.api_keys must be a list of at most 32 entries`);
+      if ((opencodePool.accounts?.length || 0) + (opencodePool.api_keys?.length || 0) > 32) throw new Error(`providers[${index}].opencode_pool supports at most 32 total accounts`);
+      const ids = new Set();
+      const credentialRefs = new Set();
+      const validatePoolEntry = (entry, entryIndex, type) => {
+        const entryLabel = `providers[${index}].opencode_pool.${type}[${entryIndex}]`;
+        const allowed = type === "accounts"
+          ? ["id", "credential_file", "credential_file_env", "chat_models", "systemone_models"]
+          : ["id", "env", "systemone_models"];
+        if (!entry || typeof entry !== "object" || Array.isArray(entry) || Object.keys(entry).some((key) => !allowed.includes(key))) throw new Error(`${entryLabel} contains unsupported fields`);
+        const accountId = requireString(entry?.id, `${entryLabel}.id`);
+        if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(accountId)) throw new Error(`${entryLabel}.id contains unsupported characters`);
+        if (ids.has(accountId)) throw new Error(`providers[${index}].opencode_pool account IDs must be unique`);
+        ids.add(accountId);
+        if (type === "accounts") {
+          if (!entry.credential_file && !entry.credential_file_env && !provider.credential_file && !provider.credential_file_env) throw new Error(`${entryLabel} requires credential_file or credential_file_env`);
+          if (entry.credential_file_env != null) requireString(entry.credential_file_env, `${entryLabel}.credential_file_env`);
+          if (entry.credential_file != null) requireString(entry.credential_file, `${entryLabel}.credential_file`);
+          const ref = entry.credential_file_env ? `env:${entry.credential_file_env}` : `file:${entry.credential_file || provider.credential_file}`;
+          if (credentialRefs.has(ref)) throw new Error(`${entryLabel} duplicates a credential reference`);
+          credentialRefs.add(ref);
+        } else requireString(entry.env, `${entryLabel}.env`);
+        const envRef = type === "accounts" ? entry.credential_file_env : entry.env;
+        if (envRef != null && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(envRef)) throw new Error(`${entryLabel} must reference an environment variable name`);
+        for (const field of ["chat_models", "systemone_models"]) {
+          if (entry[field] != null && (!Array.isArray(entry[field]) || entry[field].some((model) => typeof model !== "string" || !model.trim()))) throw new Error(`${entryLabel}.${field} must contain non-empty model IDs`);
+          if (field === "systemone_models" && (entry[field] || []).some((model) => !["jev-1.13-free", "jev-1.13"].includes(model))) throw new Error(`${entryLabel}.systemone_models contains an unsupported model`);
+          if (field === "chat_models" && (entry[field] || []).some((model) => ["jev-1.13-free", "jev-1.13"].includes(model))) throw new Error(`${entryLabel}.chat_models cannot include native SystemOne models`);
+        }
+      };
+      for (const [entryIndex, entry] of (opencodePool.accounts || []).entries()) validatePoolEntry(entry, entryIndex, "accounts");
+      for (const [entryIndex, entry] of (opencodePool.api_keys || []).entries()) validatePoolEntry(entry, entryIndex, "api_keys");
+    }
+    if (provider.systemone != null) throw new Error(`providers[${index}].systemone is unsupported; configure opencode_pool instead`);
     return {
       ...normalizedProvider,
       id,
@@ -270,18 +309,24 @@ export function providerEnabled(provider, env = process.env) {
       && Boolean(env.CHATGPT_SERVICE_URL && env.CHATGPT_SERVICE_TOKEN);
   }
   if (provider.adapter === "opencode-zen") {
-    // The free tier is only served to an account that completed the Console
-    // sign-in, so the OAuth credential is what makes this provider available.
-    const file = (provider.credential_file_env && env[provider.credential_file_env])
-      || provider.credential_file
-      || env.OPENCODE_ZEN_CREDENTIAL_FILE;
-    if (!file) return false;
-    try {
-      const credential = JSON.parse(fs.readFileSync(file, "utf8"));
-      return typeof credential?.access === "string" && credential.access.length > 0;
-    } catch {
-      return false;
-    }
+    const pool = provider.opencode_pool || {};
+    if ((pool.api_keys || []).some((entry) => env[entry.env])) return true;
+    const accounts = pool.accounts || [];
+    const credentialFiles = accounts.length
+      ? accounts.map((account) => {
+          const ref = account.credential_file_env || (account.credential_file ? null : provider.credential_file_env);
+          return (ref && env[ref]) || account.credential_file || provider.credential_file;
+        }).filter(Boolean)
+      : [(provider.credential_file_env && env[provider.credential_file_env]) || provider.credential_file || env.OPENCODE_ZEN_CREDENTIAL_FILE].filter(Boolean);
+    if (credentialFiles.some((file) => {
+      try {
+        const credential = JSON.parse(fs.readFileSync(file, "utf8"));
+        return typeof credential?.access === "string" && credential.access.length > 0;
+      } catch {
+        return false;
+      }
+    })) return true;
+    return false;
   }
   if (provider.api_key_env) return Boolean(env[provider.api_key_env]);
   if (provider.adapter === "oauth-proxy") return Boolean(env[provider.internal_api_key_env]);
@@ -314,8 +359,20 @@ export function roleByModel(config, model) {
   return (config.roles || []).find(({ id }) => id.toLowerCase() === String(model).toLowerCase()) || null;
 }
 
+export function chatModelAvailable(provider, model, env = process.env) {
+  if (provider.adapter !== "opencode-zen") return true;
+  const pool = provider.opencode_pool;
+  const accounts = pool ? (pool.accounts || []) : [{ chat_models: provider.models.map((entry) => entry.id), credential_file: provider.credential_file, credential_file_env: provider.credential_file_env }];
+  return accounts.some((account) => {
+    if (!(account.chat_models || []).includes(model)) return false;
+    const ref = account.credential_file_env || (account.credential_file ? null : provider.credential_file_env);
+    const file = (ref && env[ref]) || account.credential_file || provider.credential_file;
+    try { return Boolean(JSON.parse(fs.readFileSync(file, "utf8"))?.access); } catch { return false; }
+  });
+}
+
 export function configuredModels(config, env = process.env) {
-  return enabledProviders(config, env).flatMap((provider) => provider.models.map((model) => ({
+  return enabledProviders(config, env).flatMap((provider) => provider.models.filter((model) => chatModelAvailable(provider, model.id, env)).map((model) => ({
     ...model,
     provider: provider.id,
   })));

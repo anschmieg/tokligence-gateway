@@ -322,11 +322,8 @@ providers:
       capabilities: [coding, reasoning]
       quota_type: payg
 
-  # Zen's free tier is gated server-side: the request needs the OAuth token of a
-  # Console sign-in (a Console API key never qualifies), an OpenCode 1.18+
-  # user-agent, a session a real OpenCode client minted, streaming, and a declared
-  # tool set. The adapter satisfies all of it, and translates the Anthropic
-  # protocol because Zen only serves free traffic on chat completions.
+  # OpenCode Zen chat remains behind its account/session gate. Jev is handled
+  # separately by the native SystemOne endpoint and is not a chat model.
   - id: opencode-zen
     adapter: opencode-zen
     billing_class: subscription
@@ -341,11 +338,23 @@ providers:
     serve_command: opencode
     serve_port: 4096
     refresh_skew_ms: 600000
+    # OAuth accounts share refresh/session ownership across Zen chat and native
+    # SystemOne. Console API keys are SystemOne-only unless separately verified.
+    opencode_pool:
+      max_attempts: 3
+      accounts:
+        - id: primary-oauth
+          credential_file_env: OPENCODE_ZEN_CREDENTIAL_FILE
+          chat_models: [beam-free, deepseek-v4.1-flash-free, glm-5.3-flash-free, longcat-2.5-preview-free, mimo-v2.6-flash-free, nemotron-3.5-lightning-free, nemotron-3.5-super-vl-free, space-bunny-free]
+          systemone_models: [jev-1.13-free]
+      api_keys:
+        - id: console-api-key
+          env: OPENCODE_API_KEY
+          systemone_models: [jev-1.13-free]
     models:
       - beam-free
       - deepseek-v4.1-flash-free
       - glm-5.3-flash-free
-      - jev-1.13-free
       - longcat-2.5-preview-free
       - mimo-v2.6-flash-free
       - nemotron-3.5-lightning-free
@@ -358,6 +367,7 @@ providers:
 
 routes:
   - provider: opencode-zen
+    # Jev is served only through native /v1/systemone; do not route it through chat.
     # The exact free model ids come first: several of them (nemotron-*, glm-*,
     # deepseek-*) also exist on paid providers, and first-match-wins would send
     # a bare id to whichever route is listed first.
@@ -367,7 +377,6 @@ routes:
       - beam-free
       - deepseek-v4.1-flash-free
       - glm-5.3-flash-free
-      - jev-1.13-free
       - longcat-2.5-preview-free
       - mimo-v2.6-flash-free
       - nemotron-3.5-lightning-free

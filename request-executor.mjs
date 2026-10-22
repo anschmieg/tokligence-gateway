@@ -113,6 +113,127 @@ function startAttemptUntilAbort(options, attemptStarter) {
   });
 }
 
+// Holds a bounded stream prefix until the first semantic event. This leaves a
+// small pre-output window for account failover without replaying anything once
+// visible output has started.
+function preflightOpenCodeStream(response, signal, limit = 256 * 1024, deadlineMs = 90000) {
+  return new Promise((resolve) => {
+    const parser = createSseChunkReader();
+    const decoder = new TextDecoder();
+    let prefixText = "";
+    let bytes = 0;
+    let semantic = false;
+    let complete = false;
+    let settled = false;
+    let timer;
+    const cleanup = () => {
+      clearTimeout(timer);
+      response.off("data", onData);
+      response.off("end", onEnd);
+      response.off("error", onError);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const finish = (result, ended = false) => {
+      if (settled) return;
+      settled = true;
+      response.pause();
+      cleanup();
+      resolve({ ...result, prefixText, ended, decoder });
+    };
+    const inspect = (payload) => {
+      if (payload === "[DONE]") { complete = true; return null; }
+      let frame;
+      try { frame = JSON.parse(payload); } catch { return new Error("OpenCode stream contained malformed JSON"); }
+      if (frame?.error) return new Error("OpenCode returned an embedded stream error");
+      const choice = frame?.choices?.[0];
+      const delta = choice?.delta || {};
+      if ((typeof delta.content === "string" && delta.content.length)
+        || (typeof delta.reasoning === "string" && delta.reasoning.length)
+        || (typeof delta.reasoning_content === "string" && delta.reasoning_content.length)
+        || (Array.isArray(delta.tool_calls) && delta.tool_calls.some((call) => call?.id || call?.function?.name || call?.function?.arguments))) semantic = true;
+      if (choice?.finish_reason) {
+        if (!["stop", "length", "tool_calls", "function_call", "content_filter"].includes(choice.finish_reason)) return new Error("OpenCode stream reported an unsuccessful finish");
+        complete = true;
+        semantic = true;
+      }
+      return null;
+    };
+    const onData = (chunk) => {
+      const buffer = Buffer.from(chunk);
+      bytes += buffer.length;
+      if (bytes > limit) return finish({ retryable: !semantic && !signal?.aborted, semantic, error: new Error("OpenCode stream preamble exceeded its bound") });
+      const decoded = decoder.decode(buffer, { stream: true });
+      prefixText += decoded;
+      for (const payload of parser.push(decoded)) {
+        const error = inspect(payload);
+        if (error) return finish({ retryable: !semantic && !signal?.aborted, semantic, error });
+      }
+      if (semantic || complete) finish({ retryable: false, semantic, complete });
+    };
+    const onEnd = () => {
+      const tail = decoder.decode();
+      if (tail) {
+        if (bytes + Buffer.byteLength(tail) > limit) return finish({ retryable: !semantic, semantic, error: new Error("OpenCode stream preamble exceeded its bound") }, true);
+        prefixText += tail;
+        for (const payload of parser.push(tail)) {
+          const error = inspect(payload);
+          if (error) return finish({ retryable: !semantic, semantic, error }, true);
+        }
+      }
+      finish({ retryable: !semantic, semantic, complete, error: complete && semantic ? null : new Error("OpenCode stream ended before completion") }, true);
+    };
+    const onError = (error) => finish({ retryable: !semantic && !signal?.aborted, semantic, error }, true);
+    const onAbort = () => finish({ retryable: false, semantic, error: signal.reason || new Error("request aborted") }, true);
+    const preflightMs = Math.max(1, deadlineMs);
+    timer = setTimeout(() => finish({ retryable: !semantic && !signal?.aborted, semantic, error: new Error("OpenCode stream preamble timed out") }), preflightMs);
+    timer.unref?.();
+    response.on("data", onData);
+    response.once("end", onEnd);
+    response.once("error", onError);
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
+    response.resume();
+  });
+}
+
+function createChatStreamValidator() {
+  const reader = createSseChunkReader();
+  let terminal = false;
+  let error = null;
+  let semantic = false;
+  const inspect = (payload) => {
+    if (payload === "[DONE]") { terminal = true; return; }
+    let frame;
+    try { frame = JSON.parse(payload); } catch { error = new Error("OpenCode stream contained malformed JSON"); return; }
+    if (frame?.error) { error = new Error("OpenCode returned an embedded stream error"); return; }
+    const choice = frame?.choices?.[0];
+    const delta = choice?.delta || {};
+    if ((typeof delta.content === "string" && delta.content.length)
+      || (typeof delta.reasoning === "string" && delta.reasoning.length)
+      || (typeof delta.reasoning_content === "string" && delta.reasoning_content.length)
+      || (Array.isArray(delta.tool_calls) && delta.tool_calls.some((call) => call?.id || call?.function?.name || call?.function?.arguments))) semantic = true;
+    if (choice?.finish_reason) {
+      if (!["stop", "length", "tool_calls", "function_call", "content_filter"].includes(choice.finish_reason)) error = new Error("OpenCode stream reported an unsuccessful finish");
+      else terminal = true;
+    }
+  };
+  return {
+    push(text) {
+      const frames = reader.push(text);
+      for (const frame of frames) inspect(frame);
+      return { frames, error, terminal, semantic };
+    },
+    end() {
+      const tail = reader.end?.() || [];
+      for (const frame of tail) inspect(frame);
+      return { frames: tail, error, terminal, semantic };
+    },
+    get terminal() { return terminal; },
+    get error() { return error; },
+    get semantic() { return semantic; },
+  };
+}
+
 function firstStreamChunk(response, signal) {
   return new Promise((resolve, reject) => {
     const cleanup = () => {
@@ -137,7 +258,7 @@ function firstStreamChunk(response, signal) {
 // Serves an OpenAI stream to a caller that spoke the Anthropic protocol: as
 // Anthropic server-sent events, or folded into one message when the caller
 // asked for a single response. Used when the upstream only speaks OpenAI.
-async function respondWithCodec({ response, codec, res, status, requestId, model, provider, publicModel, signal, pingMs }) {
+async function respondWithCodec({ response, codec, res, status, requestId, model, provider, publicModel, signal, pingMs, strictCompletion = false, preflight = null }) {
   const base = {
     "x-gateway-request-id": requestId,
     "x-gateway-model": publicModel || model,
@@ -158,9 +279,10 @@ async function respondWithCodec({ response, codec, res, status, requestId, model
       res.end(JSON.stringify({ type: "error", error: { type: "api_error", message: "Upstream returned an unreadable body" } }));
       return;
     }
-    if (completion?.error) {
-      res.writeHead(status, { ...base, "content-type": "application/json" });
-      res.end(JSON.stringify({ type: "error", error: { type: "api_error", message: String(completion.error.message || "Upstream error") } }));
+    if (completion?.error || (strictCompletion && (!completion?.choices?.[0] || !completion.choices[0].finish_reason))) {
+      if (strictCompletion) response._opencodePoolStreamState = { failure: new Error("OpenCode returned an error or incomplete completion") };
+      res.writeHead(completion?.error ? status : 502, { ...base, "content-type": "application/json" });
+      res.end(JSON.stringify({ type: "error", error: { type: "api_error", message: "Upstream returned an error or incomplete completion" } }));
       return;
     }
     const message = openaiToAnthropicMessage(completion, { model });
@@ -175,8 +297,10 @@ async function respondWithCodec({ response, codec, res, status, requestId, model
   }
 
   const reader = createSseChunkReader();
-  const encoder = createAnthropicStreamCodec({ model });
-  response.setEncoding("utf8");
+  const encoder = createAnthropicStreamCodec({ model, strictCompletion });
+  const decoder = preflight?.decoder;
+  if (!decoder) response.setEncoding("utf8");
+  const decode = (chunk) => decoder ? decoder.decode(chunk, { stream: true }) : String(chunk);
 
   if (codec.stream) {
     const writer = createSseWriter(res, signal, pingMs);
@@ -186,15 +310,25 @@ async function respondWithCodec({ response, codec, res, status, requestId, model
     try {
       res.writeHead(status, sseHeaders(base));
       res.flushHeaders?.();
+      if (response._opencodePoolStreamState && preflight?.semantic) response._opencodePoolStreamState.semantic = true;
       const write = async (events) => events.length ? writer.write(events.join("")) : true;
       const feed = async (chunk) => {
-        for (const payload of reader.push(String(chunk))) if (!await write(encoder.push(payload))) return false;
+        for (const payload of reader.push(String(chunk))) {
+          const events = encoder.push(payload);
+          if (response._opencodePoolStreamState && events.length) response._opencodePoolStreamState.semantic = true;
+          if (!await write(events)) return false;
+        }
         return true;
       };
-      for await (const chunk of response) if (!await feed(chunk)) return;
+      if (preflight?.prefixText && !await feed(preflight.prefixText)) return;
+      if (!preflight?.ended) {
+        for await (const chunk of response) if (!await feed(decode(chunk))) return;
+        if (decoder && !await feed(decoder.decode())) return;
+      }
       if (!await write(encoder.end())) return;
       if (!res.destroyed && !res.writableEnded) res.end();
     } catch (error) {
+      if (response._opencodePoolStreamState && !signal?.aborted) response._opencodePoolStreamState.failure = error;
       endSseError(res, signal);
       throw error;
     } finally {
@@ -206,7 +340,11 @@ async function respondWithCodec({ response, codec, res, status, requestId, model
 
   const collected = [];
   const feed = (chunk) => { for (const payload of reader.push(String(chunk))) collected.push(...encoder.push(payload)); };
-  for await (const chunk of response) feed(chunk);
+  if (preflight?.prefixText) feed(preflight.prefixText);
+  if (!preflight?.ended) {
+    for await (const chunk of response) feed(decode(chunk));
+    if (decoder) feed(decoder.decode());
+  }
   collected.push(...encoder.end());
   res.writeHead(status, { ...base, "content-type": "application/json" });
   res.end(JSON.stringify(collectAnthropicStream(collected)));
@@ -301,7 +439,7 @@ function settledSpecialistSse(protocol, document, translated, model) {
   return events.join("") + emit("response.output_item.done", { response_id: id, output_index: 0, item }) + emit("response.completed", { response });
 }
 
-export async function executeRoutePlan({ plan, req, res, path, body, trace = req.requestTrace, env = process.env, runtimeState = {}, adapters = {}, affinityKey = null, historyKey = undefined, onUpstreamResponse, startAttempt: attemptStarter = startAttempt }) {
+export async function executeRoutePlan({ plan, req, res, path, body, trace = req.requestTrace, env = process.env, runtimeState = {}, adapters = {}, affinityKey = null, historyKey = undefined, onUpstreamResponse, openCodeAccountPool = null, startAttempt: attemptStarter = startAttempt }) {
   const requestId = trace?.id || randomUUID();
   trace?.model(plan.publicModel);
   trace?.stage("executor");
@@ -312,7 +450,8 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
   const abortResponse = () => activeResponse?.destroy(aborter.signal.reason);
   aborter.signal.addEventListener("abort", abortResponse, { once: true });
   aborter.signal.addEventListener("abort", () => trace?.emit("deadline", { deadline: aborter.signal.reason?.code || "unknown" }), { once: true });
-  const timeout = setTimeout(() => aborter.abort(Object.assign(new Error("upstream deadline exceeded"), { code: "TOTAL_DEADLINE" })), Math.max(plan.deadline - Date.now(), 1));
+  const deadlineMs = Math.max(plan.deadline - Date.now(), 1);
+  const timeout = setTimeout(() => aborter.abort(Object.assign(new Error("upstream deadline exceeded"), { code: "TOTAL_DEADLINE" })), deadlineMs);
   const responseStartMs = Math.max(1, Number(env.GATEWAY_RESPONSE_START_TIMEOUT_MS) || 90000);
   let responseStartExpired = false;
   let responseStartTimer;
@@ -332,20 +471,95 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
   }
 
   try {
-    for (const candidate of plan.candidates) {
+    candidateLoop: for (const candidate of plan.candidates) {
       if (aborter.signal.aborted) break;
       trace?.stage("attempt");
       trace?.emit("attempt_start", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel });
       const candidateBody = Buffer.from(JSON.stringify({ ...body, model: candidate.upstreamModel }));
+      const excludedAccounts = [];
+      let poolAttempt = 0;
+      let attemptResult;
+      let status;
       try {
-        const { response, codec, specialist, specialistProtocol } = await startAttemptUntilAbort({ candidate, req, path, body: candidateBody, env, signal: aborter.signal, adapters }, attemptStarter);
-        activeResponse = response;
-        if (aborter.signal.aborted) {
-          response.destroy();
+        const maxPoolAttempts = candidate.provider.adapter === "opencode-zen" && openCodeAccountPool ? openCodeAccountPool.maxAttempts : 1;
+        while (true) {
+          try {
+            attemptResult = await startAttemptUntilAbort({ candidate, req, path, body: candidateBody, env, signal: aborter.signal, adapters, accountPool: candidate.provider.adapter === "opencode-zen" ? openCodeAccountPool : null, stickyKey: affinityKey, excludedAccounts }, attemptStarter);
+          } catch (error) {
+            const failedAccount = error.poolAccount;
+            if (failedAccount && !aborter.signal.aborted) {
+              openCodeAccountPool.markFailure(failedAccount, error);
+              if (poolAttempt + 1 < maxPoolAttempts) {
+                excludedAccounts.push(failedAccount.id);
+                poolAttempt += 1;
+                continue;
+              }
+            }
+            throw error;
+          }
+          const { response } = attemptResult;
+          activeResponse = response;
+          if (aborter.signal.aborted) {
+            response.destroy();
+            break;
+          }
+          status = response.statusCode || 502;
+          trace?.emit("upstream_headers", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel, status });
+          if (status >= 200 && status < 300) {
+            if (attemptResult.poolAccount && !String(response.headers?.["content-type"] || "").includes("text/event-stream")) {
+              openCodeAccountPool.markFailure(attemptResult.poolAccount, new Error("OpenCode returned an unexpected response protocol"));
+              lastStatus = 502;
+              response.destroy();
+              if (poolAttempt + 1 < maxPoolAttempts) {
+                excludedAccounts.push(attemptResult.poolAccount.id);
+                poolAttempt += 1;
+                continue;
+              }
+              attemptResult = null;
+              continue candidateLoop;
+            }
+            if (attemptResult.poolAccount
+              && (attemptResult.codec || candidate.protocol === "chat_completions")
+              && String(response.headers?.["content-type"] || "").includes("text/event-stream")) {
+              const preflight = await preflightOpenCodeStream(response, aborter.signal, 256 * 1024, Math.max(1, plan.deadline - Date.now()));
+              attemptResult.streamPreflight = preflight;
+              if (preflight.retryable) {
+                openCodeAccountPool.markFailure(attemptResult.poolAccount, preflight.error);
+                if (poolAttempt + 1 < maxPoolAttempts) {
+                  response.destroy();
+                  excludedAccounts.push(attemptResult.poolAccount.id);
+                  poolAttempt += 1;
+                  continue;
+                }
+                response.destroy();
+                attemptResult = null;
+                continue candidateLoop;
+              }
+              if (preflight.error && preflight.semantic) {
+                attemptResult.streamPreflight = preflight;
+                break;
+              }
+              if (preflight.error) throw preflight.error;
+            }
+            break;
+          }
+          if (attemptResult.poolAccount) {
+            const retryable = status === 429 || status === 401 || status === 403 || status >= 500;
+            if (retryable) {
+              const retryAfter = Number(response.headers?.["retry-after"]);
+              openCodeAccountPool.markFailure(attemptResult.poolAccount, new Error(`upstream ${status}`), { retryAfterMs: retryAfter > 0 ? retryAfter * 1000 : undefined });
+              if (poolAttempt + 1 < maxPoolAttempts) {
+                excludedAccounts.push(attemptResult.poolAccount.id);
+                poolAttempt += 1;
+                discard(response);
+                continue;
+              }
+            }
+          }
           break;
         }
-        const status = response.statusCode || 502;
-        trace?.emit("upstream_headers", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel, status });
+        const { response, codec, specialist, specialistProtocol, poolAccount, poolGeneration, poolStickyKey, streamPreflight } = attemptResult;
+        if (aborter.signal.aborted) break;
         if (status < 200 || status >= 300) {
           if (specialist) {
             const rawError = await readBodyText(response, aborter.signal, 4096).catch(() => "");
@@ -359,20 +573,80 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
           }
           lastStatus = status;
           trace?.emit("upstream_rejected", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel, status });
+          if (poolAccount) {
+            discard(response);
+            continue candidateLoop;
+          }
           const cooldown = status === 429
             ? await status429CooldownMs(response, aborter.signal)
             : cooldownMs(response);
           discard(response);
-          // A failing status describes THIS candidate (rotated model, dead
-          // credential, upstream outage) — never the remaining candidates.
-          // Move on so the chain survives catalog rotations and partial
-          // upstream outages.
           runtimeState.cooldowns?.set(`${candidate.provider.id}:${candidate.model?.id || candidate.upstreamModel}:${candidate.protocol}`, Date.now() + cooldown);
           continue;
         }
         observeUpstreamResponse(response, candidate, onUpstreamResponse);
+        if (poolAccount && !codec && candidate.protocol === "chat_completions" && String(response.headers?.["content-type"] || "").includes("text/event-stream")) {
+          const validator = createChatStreamValidator();
+          const writer = createSseWriter(res, aborter.signal, pingMs);
+          const base = { "x-gateway-request-id": requestId, "x-gateway-model": plan.publicModel, "x-gateway-provider": candidate.provider.id, "x-gateway-upstream-model": candidate.upstreamModel };
+          let streamFailure = null;
+          let finished = false;
+          const relay = async (chunk) => {
+            const checked = validator.push(String(chunk));
+            if (checked.error) { streamFailure = checked.error; return false; }
+            for (const frame of checked.frames) if (!await writer.write(`data: ${frame}\n\n`)) return false;
+            if (checked.terminal) finished = true;
+            return true;
+          };
+          try {
+            res.writeHead(status, sseHeaders(base));
+            res.flushHeaders?.();
+            if (streamPreflight?.prefixText && !await relay(streamPreflight.prefixText)) throw streamFailure || new Error("downstream disconnected");
+            if (!streamPreflight?.ended) {
+              const decoder = streamPreflight?.decoder || new TextDecoder();
+              for await (const chunk of response) {
+                if (!await relay(decoder.decode(chunk, { stream: true }))) {
+                  if (streamFailure) break;
+                  if (aborter.signal.aborted || res.destroyed) break;
+                  throw new Error("downstream disconnected");
+                }
+              }
+              if (!streamFailure) await relay(decoder.decode());
+            }
+            const tail = validator.end();
+            for (const frame of tail.frames) if (!await writer.write(`data: ${frame}\n\n`)) break;
+            streamFailure ||= tail.error;
+            finished ||= tail.terminal;
+            if (!finished) streamFailure ||= new Error("OpenCode stream ended before completion");
+          } catch (error) {
+            if (!aborter.signal.aborted && !res.destroyed) streamFailure ||= error;
+          } finally {
+            writer.cleanup();
+          }
+          if (aborter.signal.aborted || res.destroyed) {
+            response.destroy(aborter.signal.reason);
+            return { committed: true, requestId, provider: candidate.provider.id };
+          }
+          if (streamFailure) {
+            openCodeAccountPool.markFailure(poolAccount, streamFailure);
+            if (validator.semantic || streamPreflight?.semantic) openCodeAccountPool.markSessionFailure?.(poolAccount, poolStickyKey);
+            response.destroy();
+            if (!res.destroyed && !res.writableEnded) res.end(`event: error\ndata: ${JSON.stringify({ type: "error", error: { type: "api_error", message: "Upstream stream failed" } })}\n\n`);
+          } else {
+            openCodeAccountPool.markSuccess(poolAccount, poolStickyKey, poolGeneration);
+            if (!res.destroyed && !res.writableEnded) res.end();
+          }
+          return { committed: true, requestId, provider: candidate.provider.id };
+        }
         if (codec) {
-          await respondWithCodec({ response, codec, res, status, requestId, model: candidate.upstreamModel, provider: candidate.provider.id, publicModel: plan.publicModel, signal: aborter.signal, pingMs });
+          await respondWithCodec({ response, codec, res, status, requestId, model: candidate.upstreamModel, provider: candidate.provider.id, publicModel: plan.publicModel, signal: aborter.signal, pingMs, strictCompletion: Boolean(poolAccount), preflight: streamPreflight });
+          if (poolAccount && !aborter.signal.aborted) {
+            const streamState = response._opencodePoolStreamState;
+            if (streamState?.failure || streamPreflight?.error) {
+              openCodeAccountPool.markFailure(poolAccount, streamState?.failure || streamPreflight.error);
+              if (streamState?.semantic || streamPreflight?.semantic) openCodeAccountPool.markSessionFailure?.(poolAccount, poolStickyKey);
+            } else openCodeAccountPool.markSuccess(poolAccount, poolStickyKey, poolGeneration);
+          }
           if (affinityKey && plan.profile && runtimeState.affinity) {
             runtimeState.affinity.set(`${affinityKey}:${plan.profile}`, {
               provider: candidate.provider.id,
@@ -384,7 +658,6 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
           return { committed: true, requestId, provider: candidate.provider.id, attempts: plan.candidates.indexOf(candidate) + 1, translated: codec.kind };
         }
         if (specialist) {
-          // Consume the service's terminal document before exposing any protocol response.
           const raw = await readBodyText(response, aborter.signal, 32 * 1024 * 1024);
           let document;
           try { document = JSON.parse(raw); } catch {
@@ -415,23 +688,10 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
         }
         trace?.stage("response");
         const headers = { ...response.headers, "x-gateway-request-id": requestId, "x-gateway-model": plan.publicModel, "x-gateway-provider": candidate.provider.id, "x-gateway-upstream-model": candidate.upstreamModel };
-        // An Anthropic-protocol pass-through is repaired here rather than relayed
-        // verbatim: some Anthropic-compatible upstreams answer with an array where
-        // the schema wants a string, or buffer a response the caller asked to
-        // stream. Healthy responses come back byte-identical.
         const thinking = body?.thinking;
         const keepReasoning = Boolean(thinking && thinking.type !== "disabled") || Boolean(body?.reasoning);
         const repaired = candidate.protocol === "messages"
-          && await respondWithAnthropicPassthrough({
-            response,
-            res,
-            status,
-            headers,
-            wantStream: plan.required.streaming === true,
-            keepReasoning,
-            signal: aborter.signal,
-            pingMs,
-          });
+          && await respondWithAnthropicPassthrough({ response, res, status, headers, wantStream: plan.required.streaming === true, keepReasoning, signal: aborter.signal, pingMs });
         if (!repaired) {
           if (plan.required.streaming) {
             const first = await firstStreamChunk(response, aborter.signal);
@@ -473,6 +733,10 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
         recordModelFamily(runtimeState, historyKey === undefined ? affinityKey : historyKey, candidate);
         return { committed: true, requestId, provider: candidate.provider.id, attempts: plan.candidates.indexOf(candidate) + 1 };
       } catch (error) {
+        if (attemptResult?.poolAccount && !aborter.signal.aborted) {
+          openCodeAccountPool?.markFailure(attemptResult.poolAccount, error);
+          if (attemptResult.poolStickyKey) openCodeAccountPool?.markSessionFailure?.(attemptResult.poolAccount, attemptResult.poolStickyKey);
+        }
         if (res.headersSent) {
           if (!res.destroyed && !res.writableEnded) res.destroy();
           return { committed: true, requestId, provider: candidate.provider.id, attempts: plan.candidates.indexOf(candidate) + 1 };
@@ -486,8 +750,6 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
         }
         const isLastCandidate = candidate === plan.candidates[plan.candidates.length - 1];
         if (isLastCandidate && candidate.provider.adapter === "cline-oauth" && error?.status && error?.code) {
-          // Nothing left to try: surface the verbatim cline error, but still
-          // cool the candidate down so follow-up requests fail fast.
           runtimeState.cooldowns?.set(`${candidate.provider.id}:${candidate.model?.id || candidate.upstreamModel}:${candidate.protocol}`, Date.now() + errorCooldownMs(error));
           res.writeHead(error.status, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: { code: error.code, message: error.message, type: "cline_oauth_error" } }));

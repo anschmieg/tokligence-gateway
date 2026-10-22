@@ -15,7 +15,11 @@ import { spawn } from "node:child_process";
 const READY_TIMEOUT_MS = Number(process.env.OPENCODE_ZEN_READY_TIMEOUT_MS || 30000);
 const READY_INTERVAL_MS = 250;
 const PROBE_TIMEOUT_MS = 2000;
+const VERSION_PROBE_TIMEOUT_MS = 1500;
+const VERSION_OUTPUT_LIMIT = 1024;
 const CHILD_LOG_LIMIT = 4000;
+const serverPasswords = new Map();
+const serverStarts = new Map();
 
 export function createSessionPool({
   command = process.env.OPENCODE_ZEN_SERVE_COMMAND || "opencode",
@@ -24,6 +28,10 @@ export function createSessionPool({
   port = Number(process.env.OPENCODE_ZEN_SERVE_PORT || 4096),
   size = 8,
   ttlMs = 15 * 60 * 1000,
+  affinityTtlMs = 60 * 60 * 1000,
+  readyTimeoutMs = READY_TIMEOUT_MS,
+  readyIntervalMs = READY_INTERVAL_MS,
+  versionProbeTimeoutMs = VERSION_PROBE_TIMEOUT_MS,
   title = "tokligence opencode-zen",
   spawnProcess = spawn,
   fetchImpl = globalThis.fetch,
@@ -32,29 +40,48 @@ export function createSessionPool({
 } = {}) {
   const origin = `http://${host}:${port}`;
   const ready = [];
+  const sticky = new Map();
+  const stickyPending = new Map();
+  const STICKY_LIMIT = 2048;
   let detectedVersion = null;
+  let versionProbe = null;
 
-  // Zen checks that the request looks like it came from OpenCode. Hardcoding a
-  // version means the user-agent can drift from the binary that actually minted
-  // the session, and the pair has to agree, so ask the binary instead.
+  // Version lookup is best-effort and bounded: never let a stuck executable
+  // delay a request indefinitely or retain unbounded subprocess output.
   const clientVersion = async () => {
-    if (detectedVersion) return detectedVersion;
-    detectedVersion = await new Promise((resolve) => {
+    if (detectedVersion !== null) return detectedVersion;
+    if (versionProbe) return versionProbe;
+    versionProbe = new Promise((resolve) => {
       let out = "";
+      let settled = false;
+      let probe;
+      const finish = (version) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        detectedVersion = version;
+        resolve(version);
+      };
+      const timer = setTimeout(() => {
+        try { probe?.kill?.(); } catch {}
+        finish(null);
+      }, versionProbeTimeoutMs);
       try {
-        const probe = spawnProcess(command, ["--version"], { stdio: ["ignore", "pipe", "ignore"] });
-        probe.stdout?.on("data", (chunk) => { out += String(chunk); });
-        probe.on?.("error", () => resolve(null));
+        probe = spawnProcess(command, ["--version"], { stdio: ["ignore", "pipe", "ignore"] });
+        probe.stdout?.on("data", (chunk) => {
+          if (settled) return;
+          out = (out + String(chunk)).slice(0, VERSION_OUTPUT_LIMIT);
+        });
+        probe.on?.("error", () => finish(null));
         probe.on?.("exit", () => {
           const match = out.match(/(\d+\.\d+\.\d+)/);
-          resolve(match ? match[1] : null);
+          finish(match ? match[1] : null);
         });
       } catch {
-        resolve(null);
+        finish(null);
       }
-    });
-    log(`opencode-zen: ${command} reports version ${detectedVersion ?? "unknown"}`);
-    return detectedVersion;
+    }).finally(() => { versionProbe = null; });
+    return versionProbe;
   };
   let child = null;
   let starting = null;
@@ -67,6 +94,7 @@ export function createSessionPool({
     const announced = String(text).match(/server password (\S+)/);
     if (announced) {
       serverPassword = announced[1];
+      serverPasswords.set(origin, serverPassword);
       log("opencode-zen: serve announced a password; using it for local calls");
     }
     childLog = (childLog + text).slice(-CHILD_LOG_LIMIT);
@@ -74,10 +102,10 @@ export function createSessionPool({
 
   // v2 protects the server with HTTP Basic (username "opencode"); v1 had no
   // local auth at all, so an absent password simply sends no credentials.
-  const authHeaders = () =>
-    serverPassword
-      ? { authorization: `Basic ${Buffer.from(`opencode:${serverPassword}`).toString("base64")}` }
-      : {};
+  const authHeaders = () => {
+    const password = serverPasswords.get(origin) || serverPassword;
+    return password ? { authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}` } : {};
+  };
 
   // Resolved once from the running server: v2 serves /api/session, v1 /session.
   let sessionPath = null;
@@ -118,23 +146,25 @@ export function createSessionPool({
   };
 
   const waitForServer = async () => {
-    const deadline = now() + READY_TIMEOUT_MS;
-    let lastWhy = "never probed";
+    const deadline = now() + readyTimeoutMs;
     while (now() < deadline) {
       const attempt = await probe();
       if (attempt.ready) return true;
-      lastWhy = attempt.why;
-      await new Promise((resolve) => setTimeout(resolve, READY_INTERVAL_MS));
+      await new Promise((resolve) => setTimeout(resolve, readyIntervalMs));
     }
-    log(`opencode-zen: ${command} serve did not become ready within ${READY_TIMEOUT_MS}ms (${lastWhy})`);
+    log("opencode-zen: serve did not become ready within configured timeout");
     return false;
   };
 
-  const describe = () => childLog.trim() || "no output captured from the server";
+  const describe = () => "server startup failed";
 
   const ensureServer = async () => {
     const first = await probe();
     if (first.ready) return;
+    if (serverStarts.has(origin)) {
+      await serverStarts.get(origin);
+      if ((await probe()).ready) return;
+    }
     if (starting) {
       await starting;
       if ((await probe()).ready) return;
@@ -142,32 +172,32 @@ export function createSessionPool({
     starting = (async () => {
       if (child && child.exitCode === null) return;
       childLog = "";
-      log(`opencode-zen: starting ${command} serve on ${origin} (${first.why})`);
+      log("opencode-zen: starting local serve");
       try {
         child = spawnProcess(command, [...args, "--port", String(port)], {
           stdio: ["ignore", "pipe", "pipe"],
           detached: true,
         });
-      } catch (error) {
-        throw new Error(`OpenCode Zen could not spawn ${command}: ${error.message}`);
+      } catch {
+        throw new Error("OpenCode Zen server startup failed (SPAWN_FAILED)");
       }
       child.stdout?.on("data", (chunk) => record(String(chunk)));
       child.stderr?.on("data", (chunk) => record(String(chunk)));
-      child.on?.("error", (error) => log(`opencode-zen: ${command} serve failed to start: ${error.message}`));
-      child.on?.("exit", (code, signal) => {
-        log(`opencode-zen: ${command} serve exited (code=${code} signal=${signal}): ${describe()}`);
+      child.on?.("error", () => log("opencode-zen: local serve process error"));
+      child.on?.("exit", () => {
+        log("opencode-zen: local serve process exited");
         child = null;
       });
       child.unref?.();
       if (!(await waitForServer())) {
-        throw new Error(
-          `OpenCode Zen could not reach ${command} serve on ${origin}: ${describe()}`,
-        );
+        throw new Error("OpenCode Zen server startup failed (NOT_READY)");
       }
-      log(`opencode-zen: ${command} serve ready on ${origin}`);
+      log("opencode-zen: local serve ready");
     })().finally(() => {
       starting = null;
+      serverStarts.delete(origin);
     });
+    serverStarts.set(origin, starting);
     await starting;
   };
 
@@ -180,12 +210,12 @@ export function createSessionPool({
       body: JSON.stringify({ title }),
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS * 5),
     });
-    if (!response.ok) throw new Error(`OpenCode Zen could not create a session (${response.status} at ${path}): ${describe()}`);
+    if (!response.ok) throw new Error(`OpenCode Zen could not create a session (HTTP_${response.status})`);
     const payload = await response.json();
     // v2 nests the session under `data` and reports the project it belongs to;
     // v1 returned it at the top level with no project.
     const id = payload?.data?.id || payload?.id;
-    if (!id) throw new Error(`OpenCode Zen session response had no id (${path}): ${describe()}`);
+    if (!id) throw new Error("OpenCode Zen session response had no id (MISSING_ID)");
     return { id, project: payload?.data?.projectID || payload?.projectID || null, minted: now() };
   };
 
@@ -193,18 +223,40 @@ export function createSessionPool({
     while (ready.length < size) ready.push(await mint());
   };
 
-  // Returns the session together with the project that owns it, so the caller
-  // can describe the session it presents instead of guessing.
-  const sessionId = async () => {
-    while (ready.length) {
-      const entry = ready.shift();
-      if (now() - entry.minted <= ttlMs) {
-        if (ready.length < size) fill().catch(() => {});
-        return { id: entry.id, project: entry.project };
-      }
-    }
-    return mint();
+  const setAffinity = (stickyKey, entry) => {
+    sticky.delete(stickyKey);
+    sticky.set(stickyKey, { entry, until: now() + affinityTtlMs });
+    while (sticky.size > STICKY_LIMIT) sticky.delete(sticky.keys().next().value);
   };
 
-  return { sessionId, ensureServer, clientVersion, close: () => { ready.length = 0; } };
+  // Returns the session together with the project that owns it, so the caller
+  // can describe the session it presents instead of guessing.
+  const sessionId = async (stickyKey = null) => {
+    const select = async () => {
+      const affinity = stickyKey ? sticky.get(stickyKey) : null;
+      if (affinity?.entry && affinity.until > now() && now() - affinity.entry.minted <= ttlMs) {
+        return { id: affinity.entry.id, project: affinity.entry.project };
+      }
+      while (ready.length) {
+        const entry = ready.shift();
+        if (now() - entry.minted <= ttlMs) {
+          if (ready.length < size) fill().catch(() => {});
+          if (stickyKey) setAffinity(stickyKey, entry);
+          return { id: entry.id, project: entry.project };
+        }
+      }
+      const entry = await mint();
+      if (stickyKey) setAffinity(stickyKey, entry);
+      return { id: entry.id, project: entry.project };
+    };
+    if (!stickyKey) return select();
+    if (stickyPending.has(stickyKey)) return stickyPending.get(stickyKey);
+    const pending = select().finally(() => {
+      if (stickyPending.get(stickyKey) === pending) stickyPending.delete(stickyKey);
+    });
+    stickyPending.set(stickyKey, pending);
+    return pending;
+  };
+
+  return { sessionId, ensureServer, clientVersion, close: () => { ready.length = 0; sticky.clear(); stickyPending.clear(); } };
 }
