@@ -1,3 +1,4 @@
+import { isDiscoveredOpenCodeFree } from "./opencode-free-models.mjs";
 import { matchConfiguredProvider, profileByModel, providerById, providerEnabled, roleByModel } from "./route-config.mjs";
 import { inspectRequestFeatures, supportsFeatures } from "./protocol-codecs.mjs";
 import { normalizeUpstreamModel } from "./upstream-model.mjs";
@@ -140,6 +141,18 @@ export function buildRoutePlan(config, { model, protocol, body, requestClass = n
   const profile = profileByModel(config, model);
   const role = roleByModel(config, model);
   let catalogModel = runtimeState.catalogModels?.get(model.toLowerCase());
+  // Direct provider IDs must use the same verified-free pool as catalog IDs;
+  // returning null here would hand them to the legacy API-key proxy.
+  const direct = providerById(config, matchConfiguredProvider(config, model));
+  const freeOnly = providerById(config, "opencode-zen")?.catalog?.discover_free_only === true;
+  if (freeOnly && (direct?.id === "opencode-go" || /^(?:opencode-go|go)\//i.test(model))) {
+    return { error: { status: 403, code: "opencode_paid_route_disabled", message: "Only verified free OpenCode models are available" } };
+  }
+  if (!profile && !role && !catalogModel && direct?.adapter === "opencode-zen" && direct.catalog?.discover_free_only === true) {
+    if (!isDiscoveredOpenCodeFree(direct, model)) return { error: { status: 403, code: "opencode_model_not_verified_free", message: "OpenCode model is unavailable or not verified free; refresh /v1/models" } };
+    catalogModel = { routes: [{ provider: direct.id, model, supported_endpoints: ["/v1/messages", "/v1/chat/completions"] }], supported_endpoints: ["/v1/messages", "/v1/chat/completions"] };
+  }
+
   if (!profile && !role && runtimeState.catalogModels && !catalogModel && Object.keys(config.model_catalog?.models || {}).some((id) => id.toLowerCase() === model.toLowerCase())) {
     return { error: { status: 503, code: "canonical_model_unavailable", message: "No discovered backend is available for this canonical model; refresh /v1/models" } };
   }

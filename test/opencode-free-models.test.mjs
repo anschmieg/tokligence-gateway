@@ -1,3 +1,4 @@
+import { buildRoutePlan } from "../routing-planner.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -63,4 +64,19 @@ test("refresh failures revoke a formerly free route and work without an API key"
   setOpenCodeFreeModels(provider, [{ id: "fresh-free" }]);
   await assert.rejects(discoverOpenCodeFreeModels(provider, async () => { throw new Error("offline"); }), /offline/);
   assert.equal(isDiscoveredOpenCodeFree(provider, "fresh-free"), false);
+});
+
+test("direct provider requests never fall through to the legacy paid proxy", () => {
+  const provider = { id: "opencode-zen", adapter: "opencode-zen", catalog: { discover_free_only: true }, protocols: ["chat_completions", "messages"], opencode_pool: { api_keys: [{ env: "TEST_KEY" }] }, models: [], metadata: {} };
+  const config = { providers: [provider], routes: [{ provider: provider.id, prefixes: ["opencode-zen/", "zen/"] }], profiles: [], roles: [] };
+  const plan = (model, protocol = "chat_completions") => buildRoutePlan(config, { model, protocol, body: { messages: [{ role: "user", content: "test" }] } }, { TEST_KEY: "synthetic" }, { catalogModels: new Map() });
+  for (const id of ["opencode-zen/paid", "zen/paid-free", "opencode-go/paid"]) assert.equal(plan(id).error.status, 403);
+  setOpenCodeFreeModels(provider, [{ id: "new-free" }]);
+  for (const id of ["opencode-zen/new-free", "zen/new-free"]) {
+    const result = plan(id);
+    assert.equal(result.candidates.length, 1);
+    assert.equal(result.candidates[0].upstreamModel, "new-free");
+    assert.equal(result.candidates[0].provider.adapter, "opencode-zen");
+  }
+  assert.equal(plan("zen/new-free", "responses").error.status, 400);
 });
