@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import http from "node:http";
+import fs from "node:fs/promises";
+import os from "node:os";
 import { once } from "node:events";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +16,52 @@ function listen(server) {
 }
 function close(server) {
   return new Promise((resolve) => server.close(resolve));
+}
+
+async function writeSchedulerFixture(dir) {
+  const preload = path.join(dir, "preload.mjs");
+  const credentialFile = path.join(dir, "zen-oauth.json");
+  await fs.writeFile(credentialFile, JSON.stringify({ access: "synthetic-access-token" }));
+  await fs.writeFile(preload, `
+    const realTimeout = globalThis.setTimeout;
+    const realNow = Date.now;
+    let clockOffset = 0;
+    Date.now = () => realNow() + clockOffset;
+    const timers = [];
+    let initialFailure = true;
+    globalThis.setTimeout = (fn, ms = 0, ...args) => {
+      if (fn.name === "refresh" && (Number(ms) === 10000 || Number(ms) === 60000)) {
+        const timer = { delay: Number(ms), callbackName: fn.name, fired: false, fire() { if (!this.fired) { this.fired = true; realTimeout(() => fn(...args), 0); } } };
+        timers.push(timer);
+        process.send?.({ type: "scheduled", delay: timer.delay, callbackName: timer.callbackName });
+        return { unref() { return this; }, ref() { return this; } };
+      }
+      return realTimeout(fn, ms, ...args);
+    };
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      if (!url.includes("opencode.ai/inference/v1/models") && !url.includes("models.dev/api.json")) throw new Error("unexpected network request " + url);
+      const catalog = url.includes("models.dev");
+      if (!catalog && initialFailure) {
+        initialFailure = false;
+        process.send?.({ type: "discovery", result: "failed" });
+        return new Response("offline", { status: 503 });
+      }
+      process.send?.({ type: "discovery", result: "ok", catalog });
+      return catalog
+        ? Response.json({ opencode: { models: { "fixture-free": { cost: { input: 0, output: 0 } } } } })
+        : Response.json({ data: [{ id: "fixture-free" }] });
+    };
+    process.on("message", ({ type, delay }) => {
+      if (type !== "fire") return;
+      clockOffset += delay;
+      const timer = timers.find((item) => item.delay === delay && !item.fired);
+      if (!timer) { process.send?.({ type: "missing", delay }); return; }
+      process.send?.({ type: "fired", delay });
+      timer.fire();
+    });
+  `);
+  return { preload, credentialFile };
 }
 
 function waitForProxy(child) {
@@ -45,6 +93,54 @@ const orModels = {
     { id: "paid-flagship", pricing: { prompt: "5.0", completion: "15.0" } },
   ],
 };
+
+test("startup discovery scheduler retries after failure and returns to its normal interval", async (t) => {
+  const fixtureDir = await fs.mkdtemp(path.join(os.tmpdir(), "tgw-scheduler-"));
+  const { preload, credentialFile } = await writeSchedulerFixture(fixtureDir);
+  const upstream = http.createServer((req, res) => res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ object: "list", data: [] })));
+  const upstreamPort = await listen(upstream);
+  const child = spawn(process.execPath, ["--import", preload, "tgw-proxy.mjs"], {
+    cwd: projectRoot,
+    env: { ...process.env, PROXY_PORT: "0", TGW_HOST: "127.0.0.1", TGW_PORT: String(upstreamPort), TOKLIGENCE_AUTH_SECRET: "public-secret", TOKLIGENCE_ADMIN_SECRET: "admin-secret", OPENCODE_ZEN_CREDENTIAL_FILE: credentialFile, OPENROUTER_API_KEY: "", OPENCODE_API_KEY: "", MISTRAL_API_KEY: "", MODAL_GLM5_API_KEY: "" },
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
+  });
+  const messages = [];
+  child.on("message", (message) => messages.push(message));
+  const childExited = once(child, "exit");
+  t.after(async () => {
+    child.kill("SIGTERM");
+    await Promise.all([childExited, close(upstream)]);
+    await fs.rm(fixtureDir, { recursive: true, force: true });
+  });
+  const proxyPort = await waitForProxy(child);
+  const baseUrl = `http://127.0.0.1:${proxyPort}`;
+  const headers = { Authorization: "Bearer sk-ant-public-secret", "Content-Type": "application/json" };
+  const waitMessage = async (predicate) => {
+    for (let attempt = 0; attempt < 80; attempt++) {
+      const found = messages.find(predicate);
+      if (found) return found;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.fail(`timed out waiting for fixture event; seen: ${JSON.stringify(messages)}`);
+  };
+  await waitMessage((message) => message.type === "discovery" && message.result === "failed");
+  assert.deepEqual(await waitMessage((message) => message.type === "scheduled" && message.delay === 10000), { type: "scheduled", delay: 10000, callbackName: "refresh" });
+  await waitMessage((message) => message.type === "discovery" && message.catalog === true);
+  let models = await (await fetch(`${baseUrl}/v1/models`, { headers })).json();
+  assert.ok(!models.data.some((model) => model.id === "fixture-free" || model.id === "opencode-zen/fixture-free"), "failed discovery is not exposed under bare or provider-prefixed IDs");
+  assert.equal(messages.filter((message) => message.type === "discovery").length, 2, "models request does not retry discovery outside the scheduler");
+  child.send({ type: "fire", delay: 10000 });
+  await waitMessage((message) => message.type === "fired" && message.delay === 10000);
+  await waitMessage((message) => message.type === "scheduled" && message.delay === 60000);
+  await waitMessage((message) => message.type === "discovery" && message.result === "ok" && message.catalog === true);
+  models = await (await fetch(`${baseUrl}/v1/models`, { headers })).json();
+  assert.ok(models.data.some((model) => model.id === "fixture-free" || model.id === "opencode-zen/fixture-free"), `recovered catalog makes the verified model discoverable: ${JSON.stringify(models.data.filter((model) => model.id.includes("fixture")))}`);
+  assert.equal(messages.filter((message) => message.type === "discovery").length, 4, "models request uses recovered registry without another fetch pair");
+  child.send({ type: "fire", delay: 60000 });
+  await waitMessage((message) => message.type === "fired" && message.delay === 60000);
+  await waitMessage((message) => message.type === "scheduled" && message.delay === 60000 && messages.filter((entry) => entry.type === "scheduled" && entry.delay === 60000).length >= 2);
+  assert.equal(messages.filter((message) => message.type === "discovery").length, 6, "normal interval callback performs the next actual discovery");
+});
 
 test("GET /v1/models reflects live provider endpoints and only exposes free OpenRouter models", async (t) => {
   // Mock OpenRouter /models endpoint.
