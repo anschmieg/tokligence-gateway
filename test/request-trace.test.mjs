@@ -52,6 +52,14 @@ test("request trace allows only safe diagnostic phase and outcome enums", () => 
   assert.doesNotMatch(serialized, /private\.example/);
 });
 
+test("request trace allows only explicitly safe provider error codes", () => {
+  const { trace, lines } = harness();
+  trace.emit("upstream_429", { upstream_error_code: "FreeUsageLimitError", provider_error_code: "secret-provider-code", category: "accountquota" });
+  const serialized = JSON.stringify(lines);
+  assert.match(serialized, /FreeUsageLimitError/);
+  assert.doesNotMatch(serialized, /secret-provider-code/);
+});
+
 test("request trace drops unsafe identifiers and bounds CF-Ray", () => {
   assert.equal(safeTraceId("x".repeat(129)), null);
   assert.equal(safeTraceId("ray/with newline\n"), null);

@@ -42,6 +42,7 @@ export function createOpenCodeAccountPool({ provider, env = process.env, getToke
     if (oauthFiles.has(canonical)) throw new Error("OpenCode pool OAuth accounts must reference distinct credential files");
     oauthFiles.add(canonical);
   }
+  const slotById = new Map(accounts.map((account, index) => [account.id, index + 1]));
   const state = new Map(accounts.map((account) => [account.id, { until: 0, failures: 0, generation: 0 }]));
   const affinity = new Map();
   const services = new Map();
@@ -131,6 +132,23 @@ export function createOpenCodeAccountPool({ provider, env = process.env, getToke
     servicesFor,
     authorizationFor,
     eligibleAccounts(endpoint, model) { return accounts.filter((a) => eligible(a, endpoint, model)).map((a) => a.id); },
+    slot(account) { return slotById.get(account?.id) || null; },
+    diagnostic(endpoint, model, { exclude = [] } = {}) {
+      const at = now();
+      return accounts.map((account) => {
+        let reason = "eligible";
+        const allowed = endpoint === "chat" ? account.chat_models : account.systemone_models;
+        const modelEligible = account.api_key
+          ? endpoint === "systemone" && allowed?.includes(model) && Boolean(env[account.api_key_env])
+          : endpoint === "chat" ? openCodeChatAllowed(provider, account, model) : allowed?.includes(model);
+        const cooldownRemaining = Math.max(0, state.get(account.id).until - at);
+        if (!modelEligible) reason = "model_ineligible";
+        else if (!account.api_key && !readCredential(fileFor(account))?.access) reason = "missing_credential";
+        else if (exclude.includes(account.id)) reason = "excluded_after_failure";
+        else if (cooldownRemaining > 0) reason = "cooldown";
+        return { slot: slotById.get(account.id), reason, ...(cooldownRemaining > 0 ? { remaining_ms: cooldownRemaining } : {}) };
+      });
+    },
     state,
     affinity,
   };

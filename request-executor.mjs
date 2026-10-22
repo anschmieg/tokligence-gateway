@@ -40,24 +40,57 @@ function errorCooldownMs(error) {
 // Peeks the body of a 429 to distinguish daily/period quota exhaustion from
 // per-minute rate limits, which usually arrive without a usable retry-after.
 // Capped at ~1s so a stalled upstream never delays failover.
-async function status429CooldownMs(response, signal) {
+const SAFE_ZEN_429_CODES = new Set(["FreeUsageLimitError", "FreeTierError", "rate_limit_error"]);
+
+function classify429Body(text) {
+  if (typeof text !== "string") return { category: "unknown", providerErrorCode: null };
+  let errorCode = "";
+  let errorType = "";
+  let detail = text;
   try {
-    const text = await Promise.race([
-      readBodyText(response, signal, 4096),
-      new Promise((resolve) => setTimeout(() => resolve(null), 1000)),
-    ]);
-    if (typeof text === "string" && DAILY_QUOTA_BODY_PATTERN.test(text)) return DAILY_QUOTA_COOLDOWN_MS;
-  } catch {
-    // fall through to header/default-based cooldown
-  }
-  return cooldownMs(response);
+    const parsed = JSON.parse(text);
+    const error = parsed?.error;
+    errorCode = typeof error?.code === "string" ? error.code : typeof parsed?.code === "string" ? parsed.code : "";
+    errorType = typeof error?.type === "string" ? error.type : typeof parsed?.type === "string" ? parsed.type : "";
+    if (typeof error === "string") detail = error;
+    else if (error && typeof error === "object") detail = [errorCode, errorType, error.message].filter((value) => typeof value === "string").join(" ");
+    else detail = [errorCode, errorType, parsed?.message].filter((value) => typeof value === "string").join(" ");
+  } catch {}
+  const normalized = `${errorCode} ${errorType} ${detail}`.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  let category = "unknown";
+  if (["FreeUsageLimitError", "FreeTierError"].includes(errorCode) || ["FreeUsageLimitError", "FreeTierError"].includes(errorType)) {
+    category = errorCode === "FreeUsageLimitError" || errorType === "FreeUsageLimitError" ? "free_usage_limit" : "free_tier_rejection";
+  } else if (["rate_limit_error"].includes(errorCode) || ["rate_limit_error"].includes(errorType)
+    || /rate limit error|rate limit|too many requests/.test(normalized)) category = "rate_limit";
+  else if (/account quota|daily quota|monthly quota|quota exhausted|quota exceeded|insufficient credits|out of credits/.test(normalized)
+    || DAILY_QUOTA_BODY_PATTERN.test(normalized)) category = "accountquota";
+  else if (/model capacity|capacity for (this )?model|model overloaded|model unavailable/.test(normalized)) category = "modelcapacity";
+  const providerErrorCode = SAFE_ZEN_429_CODES.has(errorCode) ? errorCode : SAFE_ZEN_429_CODES.has(errorType) ? errorType : null;
+  return { category, providerErrorCode };
 }
 
-function readBodyText(response, signal, limit = 4096) {
+async function status429Diagnostics(response, signal) {
+  const retryAfter = Number(response?.headers?.["retry-after"]);
+  const retryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : null;
+  let classification = { category: "unknown", providerErrorCode: null };
+  let legacyCooldown = cooldownMs(response);
+  try {
+    const text = await readBodyText(response, signal, 4096, 1000);
+    classification = classify429Body(text);
+    if (typeof text === "string" && DAILY_QUOTA_BODY_PATTERN.test(text)) legacyCooldown = DAILY_QUOTA_COOLDOWN_MS;
+  } catch {
+    // Diagnostics must not interfere with the established retry policy.
+  }
+  return { legacyCooldown, ...classification, retryAfterMs };
+}
+
+function readBodyText(response, signal, limit = 4096, timeoutMs = null) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
+    const timeout = timeoutMs === null ? null : setTimeout(() => finish(resolve, null), timeoutMs);
     const cleanup = () => {
+      if (timeout) clearTimeout(timeout);
       response.off("data", onData);
       response.off("end", onEnd);
       response.off("error", onError);
@@ -65,11 +98,15 @@ function readBodyText(response, signal, limit = 4096) {
     };
     const finish = (fn, value) => { cleanup(); fn(value); };
     const onData = (chunk) => {
-      chunks.push(chunk);
-      size += chunk.length;
+      const remaining = limit - size;
+      if (remaining > 0) {
+        const bounded = chunk.length > remaining ? chunk.subarray(0, remaining) : chunk;
+        chunks.push(bounded);
+        size += bounded.length;
+      }
       if (size >= limit) {
         response.pause();
-        finish(resolve, Buffer.concat(chunks).toString("utf8"));
+        finish(resolve, Buffer.concat(chunks, size).toString("utf8"));
       }
     };
     const onEnd = () => finish(resolve, Buffer.concat(chunks).toString("utf8"));
@@ -480,6 +517,7 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
       let attemptNumber = 0;
       let attemptResult;
       let status;
+      let status429Info;
       try {
         const maxPoolAttempts = candidate.provider.adapter === "opencode-zen" && openCodeAccountPool ? openCodeAccountPool.maxAttempts : 1;
         while (true) {
@@ -507,6 +545,7 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
           }
           status = response.statusCode || 502;
           trace?.emit("upstream_headers", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel, status });
+          status429Info = status === 429 && !candidate.specialist ? await status429Diagnostics(response, aborter.signal) : null;
           if (status >= 200 && status < 300) {
             if (attemptResult.poolAccount && !String(response.headers?.["content-type"] || "").includes("text/event-stream")) {
               openCodeAccountPool.markFailure(attemptResult.poolAccount, new Error("OpenCode returned an unexpected response protocol"));
@@ -549,7 +588,21 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
             const retryable = status === 429 || status === 401 || status === 403 || status >= 500;
             if (retryable) {
               const retryAfter = Number(response.headers?.["retry-after"]);
-              openCodeAccountPool.markFailure(attemptResult.poolAccount, new Error(`upstream ${status}`), { retryAfterMs: retryAfter > 0 ? retryAfter * 1000 : undefined });
+              const retryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : undefined;
+              openCodeAccountPool.markFailure(attemptResult.poolAccount, new Error(`upstream ${status}`), { retryAfterMs });
+              if (status429Info) {
+                const cooldownUntil = openCodeAccountPool.state.get(attemptResult.poolAccount.id)?.until || 0;
+                trace?.emit("upstream_429", {
+                  provider: candidate.provider.id,
+                  upstream_model: candidate.upstreamModel,
+                  status,
+                  category: status429Info.category,
+                  ...(status429Info.providerErrorCode ? { upstream_error_code: status429Info.providerErrorCode } : {}),
+                  ...(status429Info.retryAfterMs !== null ? { retry_after_ms: status429Info.retryAfterMs } : {}),
+                  cooldown_ms: Math.max(0, cooldownUntil - Date.now()),
+                  slot: openCodeAccountPool.slot?.(attemptResult.poolAccount),
+                });
+              }
               if (poolAttempt + 1 < maxPoolAttempts) {
                 excludedAccounts.push(attemptResult.poolAccount.id);
                 poolAttempt += 1;
@@ -580,7 +633,7 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
             continue candidateLoop;
           }
           const cooldown = status === 429
-            ? await status429CooldownMs(response, aborter.signal)
+            ? status429Info?.legacyCooldown ?? cooldownMs(response)
             : cooldownMs(response);
           discard(response);
           runtimeState.cooldowns?.set(`${candidate.provider.id}:${candidate.model?.id || candidate.upstreamModel}:${candidate.protocol}`, Date.now() + cooldown);

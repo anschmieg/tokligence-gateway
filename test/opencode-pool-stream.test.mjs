@@ -13,10 +13,12 @@ function makePool(firstStatusFailure = false) {
   const state = new Map(accounts.map((account) => [account.id, { generation: 0 }]));
   const failures = new Set();
   return {
-    state, failures, maxAttempts: 2,
+    state, failures, accounts, maxAttempts: 2,
+    slot(account) { return accounts.indexOf(account) + 1; },
+    diagnostic(_endpoint, _model, { exclude = [] } = {}) { return accounts.map((account, index) => ({ slot: index + 1, reason: exclude.includes(account.id) ? "excluded_after_failure" : failures.has(account.id) ? "cooldown" : "eligible", ...(failures.has(account.id) ? { remaining_ms: 5000 } : {}) })); },
     select(_endpoint, _model, _sticky, { exclude = [] } = {}) { return accounts.find((a) => !exclude.includes(a.id) && !failures.has(a.id)) || (firstStatusFailure && !exclude.includes("b") ? accounts[1] : null); },
     servicesFor(account) { return { tokens: { authorization: async () => `Bearer ${account.id}`, credential: async () => ({ metadata: { orgID: "org" } }) }, sessions: { sessionId: async () => ({ id: `session-${account.id}`, project: "global" }), clientVersion: async () => "1.18.32" } }; },
-    markFailure(account) { failures.add(account.id); state.get(account.id).generation += 1; },
+    markFailure(account, _error, options = {}) { failures.add(account.id); state.get(account.id).generation += 1; account.retryAfterMs = options.retryAfterMs; state.get(account.id).until = Date.now() + (options.retryAfterMs || 10000); },
     markSuccess() {},
   };
 }
@@ -47,17 +49,143 @@ test("pooled HTTP status and network failures quarantine an account then select 
   let calls = 0;
   const upstream = http.createServer((_req, res) => {
     calls += 1;
-    if (calls === 1) { res.writeHead(503); res.end("unavailable"); }
+    if (calls === 1) { res.writeHead(429, { "retry-after": "7", "content-type": "application/json" }); res.end(JSON.stringify({ error: { type: "rate_limit_error", message: "SECRET provider detail" } })); }
     else { res.writeHead(200, { "content-type": "text/event-stream" }); res.end(good); }
   });
   const port = await listen(upstream);
-  const gateway = http.createServer((req, res) => { req.resume(); req.once("end", () => void executeRoutePlan({ plan: { candidates: [candidate(port)], publicModel: "public/model", required: { streaming: true }, deadline: Date.now() + 1800 }, req, res, path: "/v1/messages", body: requestBody, env: { GATEWAY_RESPONSE_START_TIMEOUT_MS: "700" }, openCodeAccountPool: pool, affinityKey: "sticky" })); });
+  const logs = [];
+  const trace = { id: "test-trace-id", stage() {}, model() {}, emit(event, fields) { logs.push({ event, ...fields }); } };
+  const gateway = http.createServer((req, res) => { req.resume(); req.once("end", () => void executeRoutePlan({ plan: { candidates: [candidate(port)], publicModel: "public/model", required: { streaming: true }, deadline: Date.now() + 1800 }, req, res, path: "/v1/messages", body: requestBody, trace, env: { GATEWAY_RESPONSE_START_TIMEOUT_MS: "700" }, openCodeAccountPool: pool, affinityKey: "sticky" })); });
   const gatewayPort = await listen(gateway); t.after(async () => { await close(gateway); await close(upstream); });
   const response = await post(gatewayPort);
   assert.equal(response.status, 200);
   assert.match(await response.text(), /backup/);
   assert.deepEqual([...pool.failures], ["a"]);
+  assert.equal(pool.accounts[0].retryAfterMs, 7000);
   assert.equal(calls, 2);
+  assert.deepEqual(logs.filter((entry) => entry.event === "pool_account_selected").map((entry) => entry.slot), [1, 2]);
+  const rejected = logs.find((entry) => entry.event === "upstream_429");
+  assert.equal(rejected.category, "rate_limit");
+  assert.equal(rejected.upstream_error_code, "rate_limit_error");
+  assert.equal(rejected.retry_after_ms, 7000);
+  assert.ok(rejected.cooldown_ms <= 7000 && rejected.cooldown_ms > 6000);
+  assert.equal(rejected.slot, 1);
+  assert.equal(Object.hasOwn(rejected, "upstream_path"), false);
+  assert.equal(Object.hasOwn(rejected, "upstream_host"), false);
+  assert.doesNotMatch(JSON.stringify(logs), /SECRET provider detail|Bearer|session-a/);
+});
+
+test("OpenCode free quota error codes are classified without changing pool cooldown policy", async (t) => {
+  let calls = 0;
+  const upstream = http.createServer((_req, res) => {
+    calls += 1;
+    if (calls === 1) {
+      res.writeHead(429, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { code: "FreeUsageLimitError", message: "PRIVATE account text" } }));
+    } else {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(good);
+    }
+  });
+  const port = await listen(upstream);
+  const pool = makePool(true);
+  const logs = [];
+  const trace = { id: "test-trace-id", stage() {}, model() {}, emit(event, fields) { logs.push({ event, ...fields }); } };
+  const gateway = http.createServer((req, res) => {
+    req.resume();
+    req.once("end", () => void executeRoutePlan({
+      plan: { candidates: [candidate(port)], publicModel: "public/model", required: { streaming: true }, deadline: Date.now() + 1800 },
+      req, res, path: "/v1/messages", body: requestBody, trace, env: { GATEWAY_RESPONSE_START_TIMEOUT_MS: "700" }, openCodeAccountPool: pool, affinityKey: "sticky",
+    }));
+  });
+  const gatewayPort = await listen(gateway);
+  t.after(async () => { await close(gateway); await close(upstream); });
+
+  const response = await post(gatewayPort);
+  assert.equal(response.status, 200);
+  await response.text();
+  assert.equal(calls, 2);
+  assert.equal(pool.accounts[0].retryAfterMs, undefined);
+  const rejected = logs.find((entry) => entry.event === "upstream_429");
+  assert.equal(rejected.category, "free_usage_limit");
+  assert.equal(rejected.upstream_error_code, "FreeUsageLimitError");
+  assert.equal(rejected.retry_after_ms, undefined);
+  assert.ok(rejected.cooldown_ms <= 10000 && rejected.cooldown_ms > 9000);
+  assert.doesNotMatch(JSON.stringify(logs), /PRIVATE account text/);
+});
+
+test("429 classification ignores provider details beyond the bounded body prefix", async (t) => {
+  let calls = 0;
+  const upstream = http.createServer((_req, res) => {
+    calls += 1;
+    if (calls === 1) {
+      res.writeHead(429, { "content-type": "application/json" });
+      res.end(`${"x".repeat(4096)} FreeUsageLimitError daily quota exhausted`);
+    } else {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(good);
+    }
+  });
+  const port = await listen(upstream);
+  const pool = makePool(true);
+  const logs = [];
+  const trace = { id: "test-trace-id", stage() {}, model() {}, emit(event, fields) { logs.push({ event, ...fields }); } };
+  const gateway = http.createServer((req, res) => {
+    req.resume();
+    req.once("end", () => void executeRoutePlan({
+      plan: { candidates: [candidate(port)], publicModel: "public/model", required: { streaming: true }, deadline: Date.now() + 1800 },
+      req, res, path: "/v1/messages", body: requestBody, trace, env: { GATEWAY_RESPONSE_START_TIMEOUT_MS: "700" }, openCodeAccountPool: pool, affinityKey: "sticky",
+    }));
+  });
+  const gatewayPort = await listen(gateway);
+  t.after(async () => { await close(gateway); await close(upstream); });
+
+  const response = await post(gatewayPort);
+  assert.equal(response.status, 200);
+  await response.text();
+  assert.equal(calls, 2);
+  assert.equal(pool.accounts[0].retryAfterMs, undefined);
+  const rejected = logs.find((entry) => entry.event === "upstream_429");
+  assert.equal(rejected.category, "unknown");
+  assert.equal(rejected.upstream_error_code, undefined);
+  assert.ok(rejected.cooldown_ms <= 10000 && rejected.cooldown_ms > 9000);
+});
+
+test("top-level FreeTierError classification is allowlisted without quota policy changes", async (t) => {
+  let calls = 0;
+  const upstream = http.createServer((_req, res) => {
+    calls += 1;
+    if (calls === 1) {
+      res.writeHead(429, { "content-type": "application/json" });
+      res.end(JSON.stringify({ type: "FreeTierError", message: "PRIVATE account text" }));
+    } else {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(good);
+    }
+  });
+  const port = await listen(upstream);
+  const pool = makePool(true);
+  const logs = [];
+  const trace = { id: "test-trace-id", stage() {}, model() {}, emit(event, fields) { logs.push({ event, ...fields }); } };
+  const gateway = http.createServer((req, res) => {
+    req.resume();
+    req.once("end", () => void executeRoutePlan({
+      plan: { candidates: [candidate(port)], publicModel: "public/model", required: { streaming: true }, deadline: Date.now() + 1800 },
+      req, res, path: "/v1/messages", body: requestBody, trace, env: { GATEWAY_RESPONSE_START_TIMEOUT_MS: "700" }, openCodeAccountPool: pool, affinityKey: "sticky",
+    }));
+  });
+  const gatewayPort = await listen(gateway);
+  t.after(async () => { await close(gateway); await close(upstream); });
+  const response = await post(gatewayPort);
+  assert.equal(response.status, 200);
+  await response.text();
+  assert.equal(calls, 2);
+  assert.equal(pool.accounts[0].retryAfterMs, undefined);
+  const rejected = logs.find((entry) => entry.event === "upstream_429");
+  assert.equal(rejected.category, "free_tier_rejection");
+  assert.equal(rejected.upstream_error_code, "FreeTierError");
+  assert.ok(rejected.cooldown_ms <= 10000 && rejected.cooldown_ms > 9000);
+  assert.doesNotMatch(JSON.stringify(logs), /PRIVATE account text/);
 });
 
 test("stream failure before semantic output retries; after output it terminates without splicing and quarantines", async (t) => {

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { freeOpenCodeModels, setOpenCodeFreeModels, isDiscoveredOpenCodeFree, discoverOpenCodeFreeModels, OPENCODE_DISCOVERY_INTERVAL_MS } from "../opencode-free-models.mjs";
+import { freeOpenCodeModels, setOpenCodeFreeModels, isDiscoveredOpenCodeFree, discoverOpenCodeFreeModels, OPENCODE_DISCOVERY_INTERVAL_MS, OPENCODE_DISCOVERY_FAILURE_RETRY_MS } from "../opencode-free-models.mjs";
 import { createOpenCodeAccountPool } from "../opencode-account-pool.mjs";
 import { chatModelAvailable } from "../route-config.mjs";
 
@@ -45,8 +45,8 @@ test("new free models route immediately while paid direct requests and static ov
     setOpenCodeFreeModels(provider, []);
     assert.equal(pool.select("chat", "new-free", "s"), null);
     setOpenCodeFreeModels(provider, [{ id: "new-free" }], 1000);
-    assert.equal(isDiscoveredOpenCodeFree(provider, "new-free", 1000 + OPENCODE_DISCOVERY_INTERVAL_MS), true);
-    assert.equal(isDiscoveredOpenCodeFree(provider, "new-free", 1000 + OPENCODE_DISCOVERY_INTERVAL_MS + 60000), false);
+    assert.equal(isDiscoveredOpenCodeFree(provider, "new-free", 1000 + OPENCODE_DISCOVERY_INTERVAL_MS - 1), true);
+    assert.equal(isDiscoveredOpenCodeFree(provider, "new-free", 1000 + OPENCODE_DISCOVERY_INTERVAL_MS + 15000), false);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -82,20 +82,74 @@ test("direct provider requests never fall through to the legacy paid proxy", () 
   assert.equal(plan("zen/new-free", "responses").error.status, 400);
 });
 
-test("catalog requests reuse discovery for twelve hours, including after failures", async () => {
+test("successful discovery cache expires after sixty seconds without extending on cache hits", async () => {
   const provider = { base_url: "https://opencode.ai/inference/v1" };
   let calls = 0;
   const fetcher = async (url) => {
     calls++;
     return { ok: true, json: async () => url.includes("models.dev") ? { opencode: { models: { "new-free": { cost } } } } : { data: [{ id: "new-free" }] } };
   };
-  await discoverOpenCodeFreeModels(provider, fetcher, 1000);
-  await discoverOpenCodeFreeModels(provider, fetcher, 1001);
+  const initial = await discoverOpenCodeFreeModels(provider, fetcher, 1000);
+  assert.equal(initial.data[0].id, "new-free");
   await discoverOpenCodeFreeModels(provider, fetcher, 1000 + OPENCODE_DISCOVERY_INTERVAL_MS - 1);
   assert.equal(calls, 2);
-  await discoverOpenCodeFreeModels(provider, fetcher, 1000 + OPENCODE_DISCOVERY_INTERVAL_MS);
+  await discoverOpenCodeFreeModels(provider, fetcher, 1000 + OPENCODE_DISCOVERY_INTERVAL_MS + 15000);
   assert.equal(calls, 4);
-  await assert.rejects(discoverOpenCodeFreeModels(provider, async () => { throw new Error("offline"); }, 1000 + 2 * OPENCODE_DISCOVERY_INTERVAL_MS));
-  assert.deepEqual(await discoverOpenCodeFreeModels(provider, fetcher, 1001 + 2 * OPENCODE_DISCOVERY_INTERVAL_MS), { data: [] });
+});
+
+test("explicit discovery clock remains deterministic across delayed completion", async () => {
+  const provider = { base_url: "https://opencode.ai/inference/v1" };
+  let calls = 0;
+  let release;
+  const barrier = new Promise((resolve) => { release = resolve; });
+  const fetcher = async (url) => {
+    calls++;
+    await barrier;
+    return { ok: true, json: async () => url.includes("models.dev") ? { opencode: { models: { "new-free": { cost } } } } : { data: [{ id: "new-free" }] } };
+  };
+  const discovery = discoverOpenCodeFreeModels(provider, fetcher, 5000);
+  assert.equal(calls, 2);
+  release();
+  await discovery;
+  await discoverOpenCodeFreeModels(provider, fetcher, 5000 + OPENCODE_DISCOVERY_INTERVAL_MS - 1);
+  assert.equal(calls, 2);
+  await discoverOpenCodeFreeModels(provider, fetcher, 5000 + OPENCODE_DISCOVERY_INTERVAL_MS);
   assert.equal(calls, 4);
+});
+
+test("failed discovery retries after ten seconds and remains fail-closed", async () => {
+  const provider = { base_url: "https://opencode.ai/inference/v1" };
+  let calls = 0;
+  setOpenCodeFreeModels(provider, [{ id: "previously-free" }], 1000);
+  const failingFetcher = async () => { calls++; throw new Error("offline"); };
+  await assert.rejects(discoverOpenCodeFreeModels(provider, failingFetcher, 1000), /offline/);
+  assert.equal(isDiscoveredOpenCodeFree(provider, "previously-free", 1000), false);
+  assert.equal(calls, 2);
+  await assert.rejects(discoverOpenCodeFreeModels(provider, async () => { calls++; throw new Error("should not run yet"); }, 1000 + OPENCODE_DISCOVERY_FAILURE_RETRY_MS - 1), /offline/);
+  assert.equal(calls, 2);
+  const result = await discoverOpenCodeFreeModels(provider, async (url) => {
+    calls++;
+    return { ok: true, json: async () => url.includes("models.dev") ? { opencode: { models: { "previously-free": { cost: { ...cost, output: 1 } } } } } : { data: [{ id: "previously-free" }] } };
+  }, 1000 + OPENCODE_DISCOVERY_FAILURE_RETRY_MS);
+  assert.deepEqual(result, { data: [] });
+  assert.equal(calls, 4);
+  assert.equal(isDiscoveredOpenCodeFree(provider, "previously-free", 1000 + OPENCODE_DISCOVERY_FAILURE_RETRY_MS), false);
+});
+
+test("concurrent discovery calls coalesce into one pair of upstream requests", async () => {
+  const provider = { base_url: "https://opencode.ai/inference/v1" };
+  let calls = 0;
+  let release;
+  const barrier = new Promise((resolve) => { release = resolve; });
+  const fetcher = async (url) => {
+    calls++;
+    await barrier;
+    return { ok: true, json: async () => url.includes("models.dev") ? { opencode: { models: { "new-free": { cost } } } } : { data: [{ id: "new-free" }] } };
+  };
+  const first = discoverOpenCodeFreeModels(provider, fetcher, 1000);
+  const second = discoverOpenCodeFreeModels(provider, fetcher, 1001);
+  assert.equal(calls, 2);
+  release();
+  assert.deepEqual(await first, await second);
+  assert.equal(calls, 2);
 });

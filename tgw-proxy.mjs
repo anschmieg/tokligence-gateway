@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { discoverOpenCodeFreeModels, OPENCODE_DISCOVERY_INTERVAL_MS } from "./opencode-free-models.mjs";
+import { discoverOpenCodeFreeModels, OPENCODE_DISCOVERY_INTERVAL_MS, OPENCODE_DISCOVERY_FAILURE_RETRY_MS } from "./opencode-free-models.mjs";
 // tgw-proxy — model-rewriting proxy in front of Tokligence Gateway
 //
 // For OpenCode MiniMax models: calls the OpenCode Messages endpoint
@@ -2343,10 +2343,18 @@ server.listen(PROXY_PORT, "0.0.0.0", () => {
     : `  codex-oauth -> disabled`);
 
   if (OPENCODE_ZEN_PROVIDER?.catalog?.discover_free_only === true) {
-    const refresh = () => refreshOpenCodeRegistry().catch((error) => console.warn(`OpenCode free discovery failed: ${error.message}`));
+    const refresh = async () => {
+      let nextDelay = OPENCODE_DISCOVERY_INTERVAL_MS;
+      try {
+        await refreshOpenCodeRegistry();
+      } catch (error) {
+        console.warn(`OpenCode free discovery failed: ${error.message}`);
+        nextDelay = OPENCODE_DISCOVERY_FAILURE_RETRY_MS;
+      }
+      const timer = setTimeout(refresh, nextDelay);
+      timer.unref();
+    };
     refresh();
-    const timer = setInterval(refresh, OPENCODE_DISCOVERY_INTERVAL_MS);
-    timer.unref();
   }
 
   // Quotas are advisory and refreshed out-of-band; a probe failure never blocks routing.

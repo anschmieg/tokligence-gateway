@@ -122,7 +122,12 @@ async function zenAttempt(candidate, { body, env, accountPool, stickyKey, exclud
   const request = Buffer.isBuffer(body) ? JSON.parse(body.toString("utf8")) : body;
   const poolSelectionStarted = Date.now();
   if (accountPool) trace?.emit("transport_phase_start", { phase: "pool_selection" });
+  if (accountPool) {
+    const slots = accountPool.diagnostic?.("chat", candidate.upstreamModel, { exclude: excludedAccounts }) || [];
+    for (const slot of slots) trace?.emit("pool_slot", slot);
+  }
   const account = accountPool?.select("chat", candidate.upstreamModel, stickyKey, { exclude: excludedAccounts });
+  if (accountPool && account) trace?.emit("pool_account_selected", { slot: accountPool.slot?.(account) });
   if (accountPool) trace?.emit("transport_phase_end", { phase: "pool_selection", outcome: account ? "ok" : "exhausted", duration_ms: Math.max(0, Date.now() - poolSelectionStarted) });
   if (accountPool && !account) throw Object.assign(new Error("No eligible OpenCode account is available"), { statusCode: 503, poolExhausted: true, code: "OPENCODE_POOL_EXHAUSTED" });
   const poolGeneration = account ? accountPool.state.get(account.id)?.generation : null;
