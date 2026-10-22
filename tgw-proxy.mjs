@@ -20,6 +20,7 @@ import {
 } from "./gateway-config.mjs";
 import {
   configuredModels,
+  chatModelAvailable,
   loadRoutingConfig,
   matchConfiguredProvider,
   providerById,
@@ -42,11 +43,14 @@ import { decorateModel } from "./model-catalog-metadata.mjs";
 import { COPILOT_AUTO_MODEL, createCopilotAutoAdapter } from "./copilot-auto.mjs";
 import { buildRoutePlan } from "./routing-planner.mjs";
 import { executeRoutePlan } from "./request-executor.mjs";
+import { zenServicesFor } from "./provider-adapters.mjs";
 import { anthropicMessageToSse, normalizeAnthropicMessage } from "./anthropic-passthrough.mjs";
 import {
   ClineAdapterError,
   ClineOAuthAdapter,
 } from "./cline-oauth.mjs";
+import { createSystemOnePool, readBoundedBody, systemOneStickyKey } from "./systemone.mjs";
+import { createOpenCodeAccountPool } from "./opencode-account-pool.mjs";
 
 const PROXY_PORT = Number(process.env.PROXY_PORT || 8080);
 const TGW_HOST   = process.env.TGW_HOST || "127.0.0.1";
@@ -56,6 +60,12 @@ const ROUTING_CONFIG_PATH = path.resolve(process.env.ROUTING_CONFIG_PATH || "gat
 const ROUTING = loadRoutingConfig(ROUTING_CONFIG_PATH);
 const PROFILE_RUNTIME_STATE = { cooldowns: new Map(), affinity: new Map(), quotas: new Map(), modelHistory: new Map() };
 const SESSION_CACHE_OBSERVER = createSessionCacheObserver();
+const OPENCODE_ZEN_PROVIDER = providerById(ROUTING, "opencode-zen");
+const OPENCODE_ACCOUNT_POOL = OPENCODE_ZEN_PROVIDER
+  ? createOpenCodeAccountPool({ provider: OPENCODE_ZEN_PROVIDER, env: process.env })
+  : null;
+const SYSTEMONE_POOL = OPENCODE_ACCOUNT_POOL ? createSystemOnePool({ accountPool: OPENCODE_ACCOUNT_POOL }) : null;
+const SYSTEMONE_CHAT_RE = /^jev-1\.13(?:-free)?$/i;
 
 function providerApiKey(id) {
   const provider = providerById(ROUTING, id);
@@ -299,7 +309,7 @@ async function registerModelsFromEndpoint({ provider, hostname, port, path, head
     const candidate = typeof model === "string" ? { id: model } : model;
     if (modelFilter && !modelFilter(candidate)) continue;
     const id = candidate?.id;
-    if (!id || !modelAllowedByCatalog(providerConfig, candidate)) continue;
+    if (!id || !modelAllowedByCatalog(providerConfig, candidate) || !chatModelAvailable(providerConfig, id, process.env)) continue;
     const fullId = prefixedModelId(id, prefix);
     registerModel(fullId, provider, {
       created: candidate.created,
@@ -581,6 +591,7 @@ function handleProfileRequest(req, res, parsed, protocol) {
   }
   executeRoutePlan({
     plan,
+    openCodeAccountPool: OPENCODE_ACCOUNT_POOL,
     req,
     res,
     path: req.url,
@@ -1490,6 +1501,39 @@ const server = http.createServer((req, res) => {
   }
   sanitizeHeaders(req);
 
+  if (url.pathname === "/v1/systemone") {
+    if (req.method !== "POST") {
+      res.writeHead(405, { "content-type": "application/json", allow: "POST" });
+      res.end(JSON.stringify({ error: { message: "Method not allowed", type: "invalid_request_error" } }));
+      return;
+    }
+    (async () => {
+      const controller = new AbortController();
+      const onClose = () => { if (!res.writableEnded) controller.abort(new Error("client disconnected")); };
+      res.once("close", onClose);
+      try {
+        const body = await readBoundedBody(req);
+        const session = routingSessionId(req, body) || "default";
+        const stickyKey = systemOneStickyKey(req.headers.authorization, session);
+        if (!SYSTEMONE_POOL) throw Object.assign(new Error("SystemOne is not configured"), { statusCode: 503 });
+        const { status, document } = await SYSTEMONE_POOL.request(body, { stickyKey, signal: controller.signal });
+        if (!res.destroyed) {
+          res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
+          res.end(JSON.stringify(document));
+        }
+      } catch (error) {
+        if (!res.destroyed && !controller.signal.aborted) {
+          const status = Number.isInteger(error?.statusCode) ? error.statusCode : 502;
+          res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
+          res.end(JSON.stringify({ error: { message: status >= 500 ? "SystemOne request failed or no eligible credential is available" : error.message, type: status >= 500 ? "upstream_error" : "invalid_request_error" } }));
+        }
+      } finally {
+        res.off("close", onClose);
+      }
+    })();
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/v1/providers") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(providerSummary()));
@@ -1517,9 +1561,13 @@ const server = http.createServer((req, res) => {
 
       synthesizeMetadataUserId(parsed, req);
 
-      if (handleProfileRequest(req, res, parsed, "chat_completions")) return;
-
       const model = resolveModel(parsed.model);
+      if (SYSTEMONE_CHAT_RE.test(String(model).replace(/^(?:opencode-zen|zen)\//i, ""))) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "Jev requires the native /v1/systemone endpoint", type: "invalid_request_error" } }));
+        return;
+      }
+      if (handleProfileRequest(req, res, parsed, "chat_completions")) return;
 
       if (model === COPILOT_AUTO_MODEL) {
         if (!COPILOT_AUTO) {
@@ -1777,6 +1825,11 @@ const server = http.createServer((req, res) => {
       }
 
       const model = resolveModel(parsed.model);
+      if (SYSTEMONE_CHAT_RE.test(String(model).replace(/^(?:opencode-zen|zen)\//i, ""))) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "Jev requires the native /v1/systemone endpoint", type: "invalid_request_error" } }));
+        return;
+      }
       if (roleByModel(ROUTING, model)?.specialist) {
         if (handleProfileRequest(req, res, { ...parsed, model }, "responses")) return;
       }
@@ -1954,6 +2007,11 @@ const server = http.createServer((req, res) => {
       synthesizeMetadataUserId(parsed, req);
 
       const model = resolveModel(parsed.model);
+      if (SYSTEMONE_CHAT_RE.test(String(model).replace(/^(?:opencode-zen|zen)\//i, ""))) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "Jev requires the native /v1/systemone endpoint", type: "invalid_request_error" } }));
+        return;
+      }
 
       if (handleProfileRequest(req, res, parsed, "messages")) return;
 

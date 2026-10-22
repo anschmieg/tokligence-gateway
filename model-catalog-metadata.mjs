@@ -21,7 +21,6 @@ const MODEL_LIMITS = {
   "beam-free": { max_context_window_tokens: 1048576, max_output_tokens: 131072 },
   "deepseek-v4.1-flash-free": { max_context_window_tokens: 200000, max_output_tokens: 32000 },
   "glm-5.3-flash-free": { max_context_window_tokens: 200000, max_output_tokens: 32000 },
-  "jev-1.13-free": { max_context_window_tokens: 262144, max_output_tokens: 65536 },
   "longcat-2.5-preview-free": { max_context_window_tokens: 1000000, max_output_tokens: 131072 },
   "mimo-v2.6-flash-free": { max_context_window_tokens: 200000, max_output_tokens: 32000 },
   "nemotron-3.5-lightning-free": { max_context_window_tokens: 262144, max_output_tokens: 262144 },

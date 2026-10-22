@@ -118,10 +118,10 @@ test("the Anthropic event stream folds back into one message", () => {
   assert.deepEqual(message.usage, { input_tokens: 4, output_tokens: 2 });
 });
 
-test("the SSE reader tolerates split frames and drops the done marker", () => {
+test("the SSE reader tolerates split frames and preserves the done marker for strict stream validation", () => {
   const reader = createSseChunkReader();
   assert.deepEqual(reader.push('data: {"a":1}\n\ndata: {"b"'), ['{"a":1}']);
-  assert.deepEqual(reader.push(':2}\n\ndata: [DONE]\n\n'), ['{"b":2}']);
+  assert.deepEqual(reader.push(':2}\n\ndata: [DONE]\n\n'), ['{"b":2}', '[DONE]']);
 });
 
 test("compaction blocks and compaction accounting survive stream collection", () => {

@@ -32,6 +32,8 @@ test("OpenCode Zen catalog exposes only models explicitly marked free", () => {
   const zen = { id: "opencode-zen", catalog: { id_suffixes: ["-free"] } };
   assert.equal(modelAllowedByCatalog(zen, { id: "deepseek-v4-flash-free" }), true);
   assert.equal(modelAllowedByCatalog(zen, { id: "gpt-5.6-terra" }), false);
+  assert.equal(modelAllowedByCatalog(zen, { id: "jev-1.13-free" }), false);
+  assert.equal(modelAllowedByCatalog(zen, { id: "jev-1.13" }), false);
 });
 
 test("hidden providers do not enter the catalog", () => {

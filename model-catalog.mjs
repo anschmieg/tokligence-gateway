@@ -22,7 +22,7 @@ export function modelAllowedByCatalog(provider, candidate) {
 
   const model = asModelObject(candidate);
   const id = String(model.id || "");
-  if (!id) return false;
+  if (!id || (/^(?:(?:opencode-zen|zen)\/)?jev-1\.13(?:-free)?$/i.test(id) && provider?.id === "opencode-zen")) return false;
 
   if (provider?.id === "openrouter" && catalog.zero_price_only === true) {
     return hasZeroPrice(model) || (catalog.paid_allowlist || []).includes(id);

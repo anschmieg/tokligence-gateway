@@ -2,8 +2,9 @@ import http from "node:http";
 import https from "node:https";
 import { anthropicToOpenAI } from "./anthropic-openai-codec.mjs";
 import { GATE_TOOLS, shapeZenRequest, zenHeaders } from "./opencode-zen-gate.mjs";
-import { createTokenProvider } from "./opencode-zen-credential.mjs";
+import { canonicalCredentialFile, createTokenProvider } from "./opencode-zen-credential.mjs";
 import { createSessionPool } from "./opencode-zen-session.mjs";
+export { createSessionPool };
 
 const FORWARD_HEADERS = ["accept", "anthropic-version", "content-type", "user-agent", "x-request-id"];
 
@@ -61,36 +62,84 @@ export function endpointSuffix(pathname) {
 // a session a real OpenCode client created. This module owns those conditions so
 // every other provider keeps the plain pass-through behaviour.
 const zenServices = new Map();
-
-function zenServicesFor(provider, env) {
-  if (!zenServices.has(provider.id)) {
-    zenServices.set(provider.id, {
-      tokens: createTokenProvider({
-        file: (provider.credential_file_env && env[provider.credential_file_env]) || provider.credential_file || env.OPENCODE_ZEN_CREDENTIAL_FILE,
+const zenTokenOwners = new Map();
+export function getZenTokenProvider(provider, env = process.env) {
+  const credentialFile = (provider.credential_file_env && env[provider.credential_file_env]) || provider.credential_file || env.OPENCODE_ZEN_CREDENTIAL_FILE;
+  const canonicalFile = credentialFile ? canonicalCredentialFile(credentialFile) : null;
+  const configKey = `${provider.token_url || env.OPENCODE_ZEN_TOKEN_URL || ""}\0${provider.client_id || env.OPENCODE_ZEN_CLIENT_ID || ""}`;
+  const key = canonicalFile || `${provider.id}\0${configKey}`;
+  if (canonicalFile && zenTokenOwners.has(canonicalFile) && zenTokenOwners.get(canonicalFile).configKey !== configKey) {
+    throw new Error("Conflicting OpenCode OAuth refresh configuration for one credential file");
+  }
+  if (!zenServices.has(key)) {
+    if (canonicalFile && zenTokenOwners.has(canonicalFile)) {
+      zenServices.set(key, { tokens: zenTokenOwners.get(canonicalFile).tokens, sessions: null });
+    } else {
+      const tokens = createTokenProvider({
+        file: canonicalFile || credentialFile,
         tokenUrl: provider.token_url || env.OPENCODE_ZEN_TOKEN_URL,
         clientId: provider.client_id || env.OPENCODE_ZEN_CLIENT_ID,
         skewMs: Number(provider.refresh_skew_ms || 10 * 60 * 1000),
-        log: (message) => console.error(message.startsWith("opencode-zen:") ? message : `opencode-zen: ${message}`),
-      }),
-      sessions: createSessionPool({
-        command: provider.serve_command || env.OPENCODE_ZEN_SERVE_COMMAND || "opencode",
-        port: Number(provider.serve_port || env.OPENCODE_ZEN_SERVE_PORT || 4096),
-        log: (message) => console.error(message.startsWith("opencode-zen:") ? message : `opencode-zen: ${message}`),
-      }),
-    });
+        log: (message) => console.error(`opencode-zen: ${String(message).split(":")[0]}`),
+      });
+      if (canonicalFile) zenTokenOwners.set(canonicalFile, { tokens, configKey });
+      zenServices.set(key, { tokens, sessions: null });
+    }
   }
-  return zenServices.get(provider.id);
+  return zenServices.get(key).tokens;
 }
 
-async function zenAttempt(candidate, { body, env }) {
+export function zenServicesFor(provider, env) {
+  const tokens = getZenTokenProvider(provider, env);
+  const credentialFile = (provider.credential_file_env && env[provider.credential_file_env]) || provider.credential_file || env.OPENCODE_ZEN_CREDENTIAL_FILE;
+  const canonicalFile = credentialFile ? canonicalCredentialFile(credentialFile) : null;
+  const configKey = `${provider.token_url || env.OPENCODE_ZEN_TOKEN_URL || ""}\0${provider.client_id || env.OPENCODE_ZEN_CLIENT_ID || ""}`;
+  const serviceKey = canonicalFile || `${provider.id}\0${configKey}`;
+  if (!zenServices.has(serviceKey)) zenServices.set(serviceKey, { tokens, sessions: null });
+  const services = zenServices.get(serviceKey);
+  if (!services.sessions) {
+    services.sessions = createSessionPool({
+      command: provider.serve_command || env.OPENCODE_ZEN_SERVE_COMMAND || "opencode",
+      port: Number(provider.serve_port || env.OPENCODE_ZEN_SERVE_PORT || 4096),
+      log: (message) => console.error(`opencode-zen: ${String(message).split(":")[0]}`),
+    });
+  }
+  return services;
+}
+
+function waitForOpenCodeSetup(promise, signal) {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(signal.reason || new Error("OpenCode request cancelled"));
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason || new Error("OpenCode request cancelled"));
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
+async function zenAttempt(candidate, { body, env, accountPool, stickyKey, excludedAccounts = [], signal }) {
   const provider = candidate.provider;
-  const { tokens, sessions } = zenServicesFor(provider, env);
   const request = Buffer.isBuffer(body) ? JSON.parse(body.toString("utf8")) : body;
-  const [minted, authorization, credential] = await Promise.all([
-    sessions.sessionId(),
-    tokens.authorization(),
-    tokens.credential(),
-  ]);
+  const account = accountPool?.select("chat", candidate.upstreamModel, stickyKey, { exclude: excludedAccounts });
+  if (accountPool && !account) throw Object.assign(new Error("No eligible OpenCode account is available"), { statusCode: 503, poolExhausted: true });
+  const poolGeneration = account ? accountPool.state.get(account.id)?.generation : null;
+  const { tokens, sessions } = account ? accountPool.servicesFor(account) : zenServicesFor(provider, env);
+  let minted;
+  let authorization;
+  let credential;
+  let clientVersion;
+  try {
+    if (signal?.aborted) throw signal.reason || new Error("OpenCode request cancelled");
+    [minted, authorization, credential, clientVersion] = await waitForOpenCodeSetup(Promise.all([
+      sessions.sessionId(stickyKey),
+      tokens.authorization(),
+      tokens.credential(),
+      sessions.clientVersion(),
+    ]), signal);
+  } catch (error) {
+    if (account) { error.poolAccount = account; error.poolStickyKey = stickyKey; }
+    throw error;
+  }
   // The service attributes the request with the organisation id; without it the
   // request is refused as not coming from a client.
   const orgId = credential?.metadata?.orgID || env.OPENCODE_ZEN_ORG_ID || "";
@@ -105,13 +154,15 @@ async function zenAttempt(candidate, { body, env }) {
     headers: zenHeaders({
       session: minted.id,
       authorization,
-      clientVersion: (await sessions.clientVersion()) || provider.client_version || "1.18.32",
+      clientVersion: clientVersion || provider.client_version || "1.18.32",
       project: minted.project || provider.client_project || "global",
       orgId,
     }),
     codec: candidate.protocol === "messages"
       ? { kind: "anthropic-from-openai", stream: request.stream === true, model: candidate.upstreamModel }
       : null,
+    poolAccount: account || null,
+    poolGeneration,
   };
 }
 
@@ -362,7 +413,7 @@ function sendThroughProxy({ target, headers, body, signal, proxy }) {
   });
 }
 
-export async function startAttempt({ candidate, req, path, body, env = process.env, signal, adapters = {} }) {
+export async function startAttempt({ candidate, req, path, body, env = process.env, signal, adapters = {}, accountPool = null, stickyKey = null, excludedAccounts = [] }) {
   if (candidate.provider.adapter === "chatgpt-responses") {
     const endpoint = env.CHATGPT_SERVICE_URL;
     const token = env.CHATGPT_SERVICE_TOKEN;
@@ -400,10 +451,18 @@ export async function startAttempt({ candidate, req, path, body, env = process.e
   }
 
   if (candidate.provider.adapter === "opencode-zen") {
-    const prepared = await zenAttempt(candidate, { body, env });
+    const prepared = await zenAttempt(candidate, { body, env, accountPool, stickyKey, excludedAccounts, signal });
+    if (signal?.aborted) throw signal.reason || new Error("OpenCode request cancelled");
     const target = requestUrl(candidate, path, env);
-    const { response, upstream } = await send({ target, headers: prepared.headers, body: prepared.body, signal });
-    return { response, upstream, target, codec: prepared.codec };
+    let sent;
+    try {
+      sent = await send({ target, headers: prepared.headers, body: prepared.body, signal });
+    } catch (error) {
+      if (prepared.poolAccount) { error.poolAccount = prepared.poolAccount; error.poolStickyKey = stickyKey; }
+      throw error;
+    }
+    const { response, upstream } = sent;
+    return { response, upstream, target, codec: prepared.codec, poolAccount: prepared.poolAccount, poolGeneration: prepared.poolGeneration, poolStickyKey: stickyKey };
   }
 
   const target = requestUrl(candidate, path, env);

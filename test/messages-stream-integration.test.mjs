@@ -52,6 +52,8 @@ async function fixture(t, upstreamHandler, options = {}) {
         path: "/v1/messages",
         body,
         env: { ...process.env, GATEWAY_SSE_PING_MS: "15", GATEWAY_RESPONSE_START_TIMEOUT_MS: "180", ...options.env },
+        openCodeAccountPool: options.openCodeAccountPool,
+        affinityKey: options.affinityKey || "test-affinity",
       });
     });
   });
