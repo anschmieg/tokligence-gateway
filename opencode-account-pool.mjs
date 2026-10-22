@@ -6,6 +6,7 @@ import { createSessionPool } from "./opencode-zen-session.mjs";
 
 const MAX_STICKY = 4096;
 const MAX_COOLDOWN_MS = 60 * 60 * 1000;
+const MAX_RETRY_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_ACCOUNTS = 32;
 
 export function makeOpenCodeAffinityKey(principal, session) {
@@ -111,7 +112,8 @@ export function createOpenCodeAccountPool({ provider, env = process.env, getToke
     entry.failures += 1;
     entry.generation += 1;
     const retry = Number(retryAfterMs);
-    const delay = Number.isFinite(retry) ? Math.max(1000, Math.min(retry, MAX_COOLDOWN_MS)) : Math.min(30000 * 2 ** Math.min(entry.failures - 1, 6), MAX_COOLDOWN_MS);
+    const hasRetryAfter = retryAfterMs !== undefined && retryAfterMs !== null && retryAfterMs !== "" && !Number.isNaN(retry);
+    const delay = hasRetryAfter ? Math.max(1000, Math.min(retry, MAX_RETRY_AFTER_MS)) : Math.min(30000 * 2 ** Math.min(entry.failures - 1, 6), MAX_COOLDOWN_MS);
     entry.until = Math.max(entry.until, now() + delay);
   }
   function markSessionFailure(account, stickyKey) {

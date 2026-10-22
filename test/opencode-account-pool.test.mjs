@@ -34,16 +34,26 @@ test("ordered backup selection remains sticky after primary recovers and exclude
   assert.deepEqual(pool.eligibleAccounts("systemone", "jev-1.13"), ["paid"]);
 });
 
-test("concurrent failure ordering cannot shorten an existing Retry-After quarantine", () => {
+test("explicit Retry-After quarantines beyond the exponential cooldown cap", () => {
+  let at = 1000;
+  const pool = fixture(() => at);
+  const account = pool.select("systemone", "jev-1.13-free", "s");
+  pool.markFailure(account, null, { retryAfterMs: 12489000 });
+  assert.equal(pool.state.get(account.id).until, at + 12489000);
+  at += 60 * 60 * 1000;
+  assert.equal(pool.select("systemone", "jev-1.13-free", "new").id, "backup");
+});
+
+test("concurrent failures cannot shorten an existing Retry-After quarantine", () => {
   for (const longFirst of [true, false]) {
     let at = 1000;
     const pool = fixture(() => at);
     const account = pool.select("systemone", "jev-1.13-free", "s");
-    const long = () => pool.markFailure(account, null, { retryAfterMs: 3600000 });
+    const long = () => pool.markFailure(account, null, { retryAfterMs: 12489000 });
     const short = () => pool.markFailure(account, null);
     if (longFirst) { long(); short(); } else { short(); long(); }
-    assert.equal(pool.state.get(account.id).until, 3601000);
-    at += 120000;
+    assert.equal(pool.state.get(account.id).until, 12490000);
+    at += 60 * 60 * 1000;
     assert.equal(pool.select("systemone", "jev-1.13-free", "new").id, "backup");
   }
 });

@@ -44,12 +44,12 @@ async function post(port, protocol = "messages") {
 
 const good = `data: ${JSON.stringify({ choices: [{ delta: { content: "backup" }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`;
 
-test("pooled HTTP status and network failures quarantine an account then select its backup", async (t) => {
+test("pooled Retry-After beyond one hour is preserved while selecting the backup", async (t) => {
   const pool = makePool(true);
   let calls = 0;
   const upstream = http.createServer((_req, res) => {
     calls += 1;
-    if (calls === 1) { res.writeHead(429, { "retry-after": "7", "content-type": "application/json" }); res.end(JSON.stringify({ error: { type: "rate_limit_error", message: "SECRET provider detail" } })); }
+    if (calls === 1) { res.writeHead(429, { "retry-after": "12489", "content-type": "application/json" }); res.end(JSON.stringify({ error: { type: "rate_limit_error", message: "SECRET provider detail" } })); }
     else { res.writeHead(200, { "content-type": "text/event-stream" }); res.end(good); }
   });
   const port = await listen(upstream);
@@ -61,14 +61,15 @@ test("pooled HTTP status and network failures quarantine an account then select 
   assert.equal(response.status, 200);
   assert.match(await response.text(), /backup/);
   assert.deepEqual([...pool.failures], ["a"]);
-  assert.equal(pool.accounts[0].retryAfterMs, 7000);
+  assert.equal(pool.accounts[0].retryAfterMs, 12489000);
+  assert.ok(pool.state.get("a").until - Date.now() > 3 * 60 * 60 * 1000);
   assert.equal(calls, 2);
   assert.deepEqual(logs.filter((entry) => entry.event === "pool_account_selected").map((entry) => entry.slot), [1, 2]);
   const rejected = logs.find((entry) => entry.event === "upstream_429");
   assert.equal(rejected.category, "rate_limit");
   assert.equal(rejected.upstream_error_code, "rate_limit_error");
-  assert.equal(rejected.retry_after_ms, 7000);
-  assert.ok(rejected.cooldown_ms <= 7000 && rejected.cooldown_ms > 6000);
+  assert.equal(rejected.retry_after_ms, 12489000);
+  assert.ok(rejected.cooldown_ms <= 12489000 && rejected.cooldown_ms > 12488000);
   assert.equal(rejected.slot, 1);
   assert.equal(Object.hasOwn(rejected, "upstream_path"), false);
   assert.equal(Object.hasOwn(rejected, "upstream_host"), false);
