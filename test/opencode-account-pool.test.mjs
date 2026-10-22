@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createOpenCodeAccountPool } from "../opencode-account-pool.mjs";
+import { setOpenCodeFreeModels } from "../opencode-free-models.mjs";
 import { configuredModels, parseRoutingConfig } from "../route-config.mjs";
 import { parse, stringify } from "yaml";
 
@@ -92,6 +93,39 @@ test("pool configuration rejects duplicate identities, inline secrets and obsole
   invalid((p) => p.opencode_pool.api_keys[0].env = "not a variable");
   invalid((p) => p.opencode_pool.accounts[0].systemone_models = ["unsupported"]);
   invalid((p) => p.systemone = {});
+});
+
+test("shipped secondary Zen OAuth account is optional and shares free-only eligibility", () => {
+  const config = parseRoutingConfig(fs.readFileSync(new URL("../gateway.routes.yaml", import.meta.url), "utf8"));
+  const provider = config.providers.find((entry) => entry.id === "opencode-zen");
+  const [primary, secondary] = provider.opencode_pool.accounts;
+  assert.equal(primary.id, "primary-oauth");
+  assert.equal(secondary.id, "secondary-oauth");
+  assert.equal(secondary.credential_file, "/data/zen/secondary-oauth.json");
+  assert.equal(secondary.discover_free_models, true);
+  assert.notEqual(primary.credential_file_env, secondary.credential_file);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "opencode-secondary-"));
+  const primaryFile = path.join(dir, "primary.json");
+  const secondaryFile = path.join(dir, "secondary.json");
+  try {
+    fs.writeFileSync(primaryFile, JSON.stringify({ access: "synthetic-primary" }));
+    const runtimeProvider = { ...provider, credential_file: primaryFile, credential_file_env: null, opencode_pool: {
+      ...provider.opencode_pool,
+      accounts: [
+        { ...primary, credential_file: primaryFile, credential_file_env: null },
+        { ...secondary, credential_file: secondaryFile },
+      ],
+    } };
+    const env = {};
+    const pool = createOpenCodeAccountPool({ provider: runtimeProvider, env });
+    setOpenCodeFreeModels(runtimeProvider, [{ id: "beam-free" }]);
+    assert.deepEqual(pool.eligibleAccounts("chat", "beam-free"), ["primary-oauth"]);
+    fs.writeFileSync(secondaryFile, JSON.stringify({ access: "synthetic-secondary" }));
+    assert.deepEqual(pool.eligibleAccounts("chat", "beam-free"), ["primary-oauth", "secondary-oauth"]);
+    assert.deepEqual(pool.eligibleAccounts("chat", "jev-1.13-free"), []);
+    assert.deepEqual(pool.eligibleAccounts("chat", "paid-model"), []);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("explicit backup files do not inherit the primary credential environment override", async () => {

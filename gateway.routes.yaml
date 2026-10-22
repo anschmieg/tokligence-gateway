@@ -348,6 +348,10 @@ providers:
           credential_file_env: OPENCODE_ZEN_CREDENTIAL_FILE
           discover_free_models: true
           systemone_models: [jev-1.13-free]
+        - id: secondary-oauth
+          credential_file: /data/zen/secondary-oauth.json
+          discover_free_models: true
+          systemone_models: [jev-1.13-free]
       api_keys:
         - id: console-api-key
           env: OPENCODE_API_KEY
