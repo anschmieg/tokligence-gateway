@@ -441,8 +441,10 @@ model_catalog:
   models:
     minimax-m3.1-flash-free:
       routes:
-        - { provider: opencode-zen, model: minimax-m3.1-flash-free }
+        # Both are free. Cline is the verified responsive route; Zen remains a
+        # fallback while its upstream proxy can stall before response headers.
         - { provider: cline-oauth, model: cline/cline-free/minimax-m3.1-flash }
+        - { provider: opencode-zen, model: minimax-m3.1-flash-free }
         - { provider: openrouter, model: minimax/minimax-m3.1-flash:free }
     beam-free:
       routes:

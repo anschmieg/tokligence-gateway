@@ -68,7 +68,7 @@ test("catalog merges verified aliases and explicit equivalent backends, not matc
   assert.equal(rows.find((row) => row.id === "mistral/codestral-latest").aliases.length, 3);
   const mini = rows.find((row) => row.id === "minimax-m3.1-flash-free");
   assert.equal(mini.routes.length, 3);
-  assert.equal(mini.routes[0].provider, "opencode-zen", "equal-price backends respect explicit route order, not alphabetical IDs");
+  assert.equal(mini.routes[0].provider, "cline-oauth", "equal-price backends respect the verified Cline-first preference");
   assert.equal(decorateModel(mini, config.model_picker).model_picker_enabled, true);
   assert.equal(mini.context_window, 200000);
   assert.equal(decorateModel(mini).capabilities.limits.max_context_window_tokens, 200000);
