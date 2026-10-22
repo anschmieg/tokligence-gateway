@@ -27,6 +27,9 @@ export function createRequestTrace(req, res, { logger = console.info } = {}) {
         const value = safeTraceId(extra[key]);
         if (value) safeExtra[key] = value;
       }
+      if (["session_id", "authorization", "credential", "client_version", "proxy_connect", "connection", "tls", "body_sent"].includes(extra.phase)) safeExtra.phase = extra.phase;
+      if (["ok", "error", "cancelled", "completed_after_cancel", "failed_after_cancel", "reused", "rejected"].includes(extra.outcome)) safeExtra.outcome = extra.outcome;
+      if (Number.isSafeInteger(extra.duration_ms) && extra.duration_ms >= 0) safeExtra.duration_ms = extra.duration_ms;
       logger(JSON.stringify({ trace: "inference", event, ...fields, elapsed_ms: Math.round(performance.now() - started), ...safeExtra }));
     } catch {}
   };

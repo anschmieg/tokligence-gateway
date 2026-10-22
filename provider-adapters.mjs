@@ -117,7 +117,7 @@ function waitForOpenCodeSetup(promise, signal) {
   });
 }
 
-async function zenAttempt(candidate, { body, env, accountPool, stickyKey, excludedAccounts = [], signal }) {
+async function zenAttempt(candidate, { body, env, accountPool, stickyKey, excludedAccounts = [], signal, trace }) {
   const provider = candidate.provider;
   const request = Buffer.isBuffer(body) ? JSON.parse(body.toString("utf8")) : body;
   const account = accountPool?.select("chat", candidate.upstreamModel, stickyKey, { exclude: excludedAccounts });
@@ -130,12 +130,35 @@ async function zenAttempt(candidate, { body, env, accountPool, stickyKey, exclud
   let clientVersion;
   try {
     if (signal?.aborted) throw signal.reason || new Error("OpenCode request cancelled");
-    [minted, authorization, credential, clientVersion] = await waitForOpenCodeSetup(Promise.all([
-      sessions.sessionId(stickyKey),
-      tokens.authorization(),
-      tokens.credential(),
-      sessions.clientVersion(),
-    ]), signal);
+    const setup = [
+      ["session_id", () => sessions.sessionId(stickyKey)],
+      ["authorization", () => tokens.authorization()],
+      ["credential", () => tokens.credential()],
+      ["client_version", () => sessions.clientVersion()],
+    ];
+    const results = await waitForOpenCodeSetup(Promise.all(setup.map(([phase, operation]) => {
+      const startedAt = Date.now();
+      trace?.emit("setup_phase_start", { phase });
+      let completed = false;
+      const finish = (outcome) => {
+        if (completed) return;
+        completed = true;
+        trace?.emit("setup_phase_end", { phase, outcome, duration_ms: Math.max(0, Date.now() - startedAt) });
+      };
+      let result;
+      try { result = operation(); } catch (error) {
+        finish("error");
+        throw error;
+      }
+      return Promise.resolve(result).then((value) => {
+        finish(signal?.aborted ? "completed_after_cancel" : "ok");
+        return value;
+      }, (error) => {
+        finish(signal?.aborted ? "failed_after_cancel" : "error");
+        throw error;
+      });
+    })), signal);
+    [minted, authorization, credential, clientVersion] = results;
   } catch (error) {
     if (account) { error.poolAccount = account; error.poolStickyKey = stickyKey; }
     throw error;
@@ -180,7 +203,7 @@ function translatedRequest(body) {
   };
 }
 
-async function translatedAttempt(candidate, { upstreamBody, path, req, env, signal, codec }) {
+async function translatedAttempt(candidate, { upstreamBody, path, req, env, signal, codec, trace }) {
   const target = requestUrl(candidate, path, env, { suffix: "chat/completions" });
   const payload = Buffer.from(JSON.stringify(upstreamBody));
   const headers = {
@@ -196,7 +219,7 @@ async function translatedAttempt(candidate, { upstreamBody, path, req, env, sign
   } else if (req.headers.authorization) {
     headers.authorization = req.headers.authorization;
   }
-  const { response, upstream } = await send({ target, headers, body: payload, signal });
+  const { response, upstream } = await send({ target, headers, body: payload, signal, trace });
   return { response, upstream, target, codec };
 }
 
@@ -355,31 +378,62 @@ function throwIfAborted(signal) {
   if (signal?.aborted) throw signal.reason || Object.assign(new Error("request aborted"), { code: "ABORT_ERR" });
 }
 
-function send({ target, headers, body, signal }) {
+function send({ target, headers, body, signal, trace }) {
   throwIfAborted(signal);
   // An optional proxy (OPENCODE_ZEN_PROXY) lets the Zen adapter exit through a
   // network Zen accepts, without touching any other provider's traffic. The
   // tunnel is a plain HTTP CONNECT to the target, with TLS then layered on top.
   const proxy = process.env.OPENCODE_ZEN_PROXY;
   if (proxy) {
-    return sendThroughProxy({ target, headers, body, signal, proxy });
+    return sendThroughProxy({ target, headers, body, signal, proxy, trace });
   }
   const client = target.protocol === "https:" ? https : http;
   return new Promise((resolve, reject) => {
+    const requestStarted = Date.now();
+    trace?.emit("transport_phase_start", { phase: "connection" });
+    let connected = false;
     const upstream = client.request(
       { protocol: target.protocol, hostname: target.hostname, port: target.port || undefined, path: `${target.pathname}${target.search}`, method: "POST", headers },
-      (response) => resolve({ response, upstream }),
+      (response) => {
+        if (!connected) {
+          connected = true;
+          trace?.emit("transport_phase_end", { phase: "connection", outcome: "ok", duration_ms: Math.max(0, Date.now() - requestStarted) });
+        }
+        resolve({ response, upstream });
+      },
     );
-    upstream.once("error", reject);
+    upstream.once("socket", (socket) => {
+      if (socket.connecting) {
+        socket.once(target.protocol === "https:" ? "secureConnect" : "connect", () => {
+          if (connected) return;
+          connected = true;
+          trace?.emit("transport_phase_end", { phase: "connection", outcome: "ok", duration_ms: Math.max(0, Date.now() - requestStarted) });
+        });
+      } else {
+        connected = true;
+        trace?.emit("transport_phase_end", { phase: "connection", outcome: "reused", duration_ms: 0 });
+      }
+    });
+    upstream.once("error", (error) => {
+      if (!connected) {
+        connected = true;
+        trace?.emit("transport_phase_end", { phase: "connection", outcome: signal?.aborted ? "cancelled" : "error", duration_ms: Math.max(0, Date.now() - requestStarted) });
+      }
+      reject(error);
+    });
     signal?.addEventListener("abort", () => upstream.destroy(signal.reason), { once: true });
+    upstream.once("finish", () => trace?.emit("transport_phase_end", { phase: "body_sent", outcome: "ok", duration_ms: Math.max(0, Date.now() - requestStarted) }));
+    trace?.emit("transport_phase_start", { phase: "body_sent" });
     upstream.end(body);
   });
 }
 
-function sendThroughProxy({ target, headers, body, signal, proxy }) {
+function sendThroughProxy({ target, headers, body, signal, proxy, trace }) {
   const proxyUrl = new URL(proxy);
   const targetPort = Number(target.port) || (target.protocol === "https:" ? 443 : 80);
   return new Promise((resolve, reject) => {
+    const connectStarted = Date.now();
+    trace?.emit("transport_phase_start", { phase: "proxy_connect" });
     const connectReq = http.request({
       host: proxyUrl.hostname,
       port: Number(proxyUrl.port) || 80,
@@ -387,13 +441,17 @@ function sendThroughProxy({ target, headers, body, signal, proxy }) {
       path: `${target.hostname}:${targetPort}`,
       headers: { host: `${target.hostname}:${targetPort}` },
     });
+    let connectFinished = false;
     connectReq.on("connect", (res, socket) => {
-      console.error(`opencode-zen: proxy CONNECT ${proxyUrl.hostname}:${proxyUrl.port || 80} -> ${target.hostname}:${targetPort} = ${res.statusCode}`);
+      connectFinished = true;
+      trace?.emit("transport_phase_end", { phase: "proxy_connect", outcome: res.statusCode === 200 ? "ok" : "rejected", duration_ms: Math.max(0, Date.now() - connectStarted) });
       if (res.statusCode !== 200) {
         reject(new Error(`proxy CONNECT failed: ${res.statusCode}`));
         return;
       }
       const secure = target.protocol === "https:";
+      const connectionStarted = Date.now();
+      trace?.emit("transport_phase_start", { phase: secure ? "tls" : "connection" });
       const upstream = (secure ? https : http).request(
         {
           hostname: target.hostname,
@@ -406,12 +464,29 @@ function sendThroughProxy({ target, headers, body, signal, proxy }) {
         },
         (response) => resolve({ response, upstream }),
       );
-      upstream.once("error", reject);
+      let transportFinished = false;
+      const finishTransport = (outcome) => {
+        if (transportFinished) return;
+        transportFinished = true;
+        trace?.emit("transport_phase_end", { phase: secure ? "tls" : "connection", outcome, duration_ms: Math.max(0, Date.now() - connectionStarted) });
+      };
+      upstream.once("socket", (upstreamSocket) => {
+        const eventName = secure ? "secureConnect" : "connect";
+        const handshaking = secure && (upstreamSocket.secureConnecting || !upstreamSocket.encrypted);
+        if (upstreamSocket.connecting || handshaking) upstreamSocket.once(eventName, () => finishTransport("ok"));
+        else finishTransport("reused");
+      });
+      upstream.once("error", (error) => {
+        finishTransport(signal?.aborted ? "cancelled" : "error");
+        reject(error);
+      });
       signal?.addEventListener("abort", () => upstream.destroy(signal.reason), { once: true });
+      trace?.emit("transport_phase_start", { phase: "body_sent" });
+      upstream.once("finish", () => trace?.emit("transport_phase_end", { phase: "body_sent", outcome: "ok", duration_ms: Math.max(0, Date.now() - connectionStarted) }));
       upstream.end(body);
     });
     connectReq.on("error", (error) => {
-      console.error(`opencode-zen: proxy CONNECT error: ${error.message}`);
+      if (!connectFinished) trace?.emit("transport_phase_end", { phase: "proxy_connect", outcome: signal?.aborted ? "cancelled" : "error", duration_ms: Math.max(0, Date.now() - connectStarted) });
       reject(error);
     });
     signal?.addEventListener("abort", () => connectReq.destroy(signal.reason), { once: true });
@@ -419,7 +494,7 @@ function sendThroughProxy({ target, headers, body, signal, proxy }) {
   });
 }
 
-export async function startAttempt({ candidate, req, path, body, env = process.env, signal, adapters = {}, accountPool = null, stickyKey = null, excludedAccounts = [] }) {
+export async function startAttempt({ candidate, req, path, body, env = process.env, signal, trace, adapters = {}, accountPool = null, stickyKey = null, excludedAccounts = [] }) {
   throwIfAborted(signal);
   if (candidate.provider.adapter === "chatgpt-responses") {
     const endpoint = env.CHATGPT_SERVICE_URL;
@@ -437,7 +512,7 @@ export async function startAttempt({ candidate, req, path, body, env = process.e
     const prepared = prepareSpecialistRequest(request, candidate, req.headers["idempotency-key"], candidate.protocol);
     const payload = Buffer.from(JSON.stringify(prepared.body));
     const headers = { "content-type": "application/json", "content-length": String(payload.length), authorization: `Bearer ${token}`, "idempotency-key": prepared.idempotencyKey };
-    const { response, upstream } = await send({ target, headers, body: payload, signal });
+    const { response, upstream } = await send({ target, headers, body: payload, signal, trace });
     return { response, upstream, target, codec: null, specialist: true, specialistProtocol: candidate.protocol };
   }
   // Translation happens on the body before any adapter sees it: an Anthropic
@@ -454,16 +529,16 @@ export async function startAttempt({ candidate, req, path, body, env = process.e
   }
 
   if (translation) {
-    return translatedAttempt(candidate, { upstreamBody: translation.upstreamBody, path, req, env, signal, codec: translation.codec });
+    return translatedAttempt(candidate, { upstreamBody: translation.upstreamBody, path, req, env, signal, codec: translation.codec, trace });
   }
 
   if (candidate.provider.adapter === "opencode-zen") {
-    const prepared = await zenAttempt(candidate, { body, env, accountPool, stickyKey, excludedAccounts, signal });
+    const prepared = await zenAttempt(candidate, { body, env, accountPool, stickyKey, excludedAccounts, signal, trace });
     if (signal?.aborted) throw signal.reason || new Error("OpenCode request cancelled");
     const target = requestUrl(candidate, path, env);
     let sent;
     try {
-      sent = await send({ target, headers: prepared.headers, body: prepared.body, signal });
+      sent = await send({ target, headers: prepared.headers, body: prepared.body, signal, trace });
     } catch (error) {
       if (prepared.poolAccount) { error.poolAccount = prepared.poolAccount; error.poolStickyKey = stickyKey; }
       throw error;
@@ -490,6 +565,6 @@ export async function startAttempt({ candidate, req, path, body, env = process.e
     headers.authorization = req.headers.authorization;
   }
 
-  const { response, upstream } = await send({ target, headers, body, signal });
+  const { response, upstream } = await send({ target, headers, body, signal, trace });
   return { response, upstream, target, codec: null };
 }

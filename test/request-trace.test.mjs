@@ -28,6 +28,18 @@ test("request trace logs only sanitized metadata and shares generated ID", () =>
   assert.equal(lines[0].path, "/v1/messages");
 });
 
+test("request trace accepts only bounded phase diagnostics", () => {
+  const { trace, lines } = harness();
+  trace.emit("setup_phase_start", { phase: "session_id", outcome: "ok", duration_ms: 12, sessionId: "private-session", host: "secret.example" });
+  trace.emit("setup_phase_end", { phase: "secret-value", outcome: "secret-value", duration_ms: -1 });
+  const serialized = JSON.stringify(lines);
+  assert.match(serialized, /session_id/);
+  assert.match(serialized, /duration_ms/);
+  assert.doesNotMatch(serialized, /private-session|secret\.example|secret-value/);
+  assert.equal(lines[2].phase, undefined);
+  assert.equal(lines[2].duration_ms, undefined);
+});
+
 test("request trace drops unsafe identifiers and bounds CF-Ray", () => {
   assert.equal(safeTraceId("x".repeat(129)), null);
   assert.equal(safeTraceId("ray/with newline\n"), null);
