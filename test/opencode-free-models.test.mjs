@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { freeOpenCodeModels, setOpenCodeFreeModels, isDiscoveredOpenCodeFree, discoverOpenCodeFreeModels } from "../opencode-free-models.mjs";
+import { freeOpenCodeModels, setOpenCodeFreeModels, isDiscoveredOpenCodeFree, discoverOpenCodeFreeModels, OPENCODE_DISCOVERY_INTERVAL_MS } from "../opencode-free-models.mjs";
 import { createOpenCodeAccountPool } from "../opencode-account-pool.mjs";
 import { chatModelAvailable } from "../route-config.mjs";
 
@@ -45,7 +45,8 @@ test("new free models route immediately while paid direct requests and static ov
     setOpenCodeFreeModels(provider, []);
     assert.equal(pool.select("chat", "new-free", "s"), null);
     setOpenCodeFreeModels(provider, [{ id: "new-free" }], 1000);
-    assert.equal(isDiscoveredOpenCodeFree(provider, "new-free", 901000), false);
+    assert.equal(isDiscoveredOpenCodeFree(provider, "new-free", 1000 + OPENCODE_DISCOVERY_INTERVAL_MS), true);
+    assert.equal(isDiscoveredOpenCodeFree(provider, "new-free", 1000 + OPENCODE_DISCOVERY_INTERVAL_MS + 60000), false);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -59,10 +60,10 @@ test("refresh failures revoke a formerly free route and work without an API key"
   assert.equal(result.data[0].id, "fresh-free");
   assert.equal(isDiscoveredOpenCodeFree(provider, "fresh-free"), true);
   const paid = [{ data: [{ id: "fresh-free" }] }, { opencode: { models: { "fresh-free": { cost: { input: 1, output: 1 } } } } }];
-  await discoverOpenCodeFreeModels(provider, async () => ({ ok: true, json: async () => paid.shift() }));
+  await discoverOpenCodeFreeModels(provider, async () => ({ ok: true, json: async () => paid.shift() }), Date.now() + OPENCODE_DISCOVERY_INTERVAL_MS);
   assert.equal(isDiscoveredOpenCodeFree(provider, "fresh-free"), false);
   setOpenCodeFreeModels(provider, [{ id: "fresh-free" }]);
-  await assert.rejects(discoverOpenCodeFreeModels(provider, async () => { throw new Error("offline"); }), /offline/);
+  await assert.rejects(discoverOpenCodeFreeModels(provider, async () => { throw new Error("offline"); }, Date.now() + 2 * OPENCODE_DISCOVERY_INTERVAL_MS), /offline/);
   assert.equal(isDiscoveredOpenCodeFree(provider, "fresh-free"), false);
 });
 
@@ -79,4 +80,22 @@ test("direct provider requests never fall through to the legacy paid proxy", () 
     assert.equal(result.candidates[0].provider.adapter, "opencode-zen");
   }
   assert.equal(plan("zen/new-free", "responses").error.status, 400);
+});
+
+test("catalog requests reuse discovery for twelve hours, including after failures", async () => {
+  const provider = { base_url: "https://opencode.ai/inference/v1" };
+  let calls = 0;
+  const fetcher = async (url) => {
+    calls++;
+    return { ok: true, json: async () => url.includes("models.dev") ? { opencode: { models: { "new-free": { cost } } } } : { data: [{ id: "new-free" }] } };
+  };
+  await discoverOpenCodeFreeModels(provider, fetcher, 1000);
+  await discoverOpenCodeFreeModels(provider, fetcher, 1001);
+  await discoverOpenCodeFreeModels(provider, fetcher, 1000 + OPENCODE_DISCOVERY_INTERVAL_MS - 1);
+  assert.equal(calls, 2);
+  await discoverOpenCodeFreeModels(provider, fetcher, 1000 + OPENCODE_DISCOVERY_INTERVAL_MS);
+  assert.equal(calls, 4);
+  await assert.rejects(discoverOpenCodeFreeModels(provider, async () => { throw new Error("offline"); }, 1000 + 2 * OPENCODE_DISCOVERY_INTERVAL_MS));
+  assert.deepEqual(await discoverOpenCodeFreeModels(provider, fetcher, 1001 + 2 * OPENCODE_DISCOVERY_INTERVAL_MS), { data: [] });
+  assert.equal(calls, 4);
 });

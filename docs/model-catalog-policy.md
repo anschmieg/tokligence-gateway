@@ -55,7 +55,8 @@ preserved; new paid models are not opted in automatically. Explicit legacy
 provider-addressed requests retain their existing behavior.
 
 Discovery refreshes when `/v1/models` is requested. OpenCode also refreshes at
-startup and every five minutes. OpenRouter free models and
+startup and every 12 hours. Requests reuse that cache and do not trigger extra
+OpenCode discovery within the 12-hour interval. OpenRouter free models and
 OpenCode free models appear automatically, subject to personal catalog exclusions
 and the picker limit. OpenCode discovery intersects the public
 `https://opencode.ai/inference/v1/models` list with the `opencode` provider in
@@ -66,8 +67,10 @@ are rejected; a `-free` suffix alone grants no access.
 OAuth accounts opt in with `discover_free_models: true`. With provider
 `catalog.discover_free_only: true`, the live verified free set replaces static
 chat allowlists for both advertisement and execution, including prefixed/direct
-requests and fallback. Snapshots expire after 15 minutes; refresh failures clear
-them, blocking chat until a successful refresh. API keys remain SystemOne-only.
+requests and fallback. Snapshots expire after 12 hours plus a one-minute
+refresh grace period; refresh failures clear them, blocking chat until the next successful scheduled refresh. Failed attempts
+are also cached for 12 hours to prevent request-driven retries. API keys remain
+SystemOne-only.
 No OpenCode credits or paid fallback are needed. Other providers' paid exceptions
 and native SystemOne eligibility are configured separately.
 

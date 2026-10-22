@@ -1,7 +1,9 @@
 // Runtime-only, provider-owned authorization shared by discovery and execution.
 // Never infer free access from a model ID or from missing prices.
 const snapshots = new WeakMap();
-const MAX_AGE_MS = 15 * 60 * 1000;
+export const OPENCODE_DISCOVERY_INTERVAL_MS = 12 * 60 * 60 * 1000;
+const MAX_AGE_MS = OPENCODE_DISCOVERY_INTERVAL_MS + 60 * 1000;
+const discoveries = new WeakMap();
 const bareId = (id) => String(id || "").replace(/^(?:opencode-zen|zen)\//, "");
 const zero = (value) => (typeof value === "number" || typeof value === "string") && String(value).trim() !== "" && Number.isFinite(Number(value)) && Number(value) === 0;
 
@@ -36,7 +38,9 @@ export function openCodeChatAllowed(provider, account, model) {
   return (account.chat_models || []).includes(model);
 }
 
-export async function discoverOpenCodeFreeModels(provider, fetcher = fetch) {
+export async function discoverOpenCodeFreeModels(provider, fetcher = fetch, now = Date.now()) {
+  const cached = discoveries.get(provider);
+  if (cached && now - cached.at < OPENCODE_DISCOVERY_INTERVAL_MS) return cached.data;
   try {
     const urls = [new URL("/inference/v1/models", provider.base_url || provider.default_base_url).href, "https://models.dev/api.json"];
     const data = await Promise.all(urls.map(async (url) => {
@@ -45,10 +49,13 @@ export async function discoverOpenCodeFreeModels(provider, fetcher = fetch) {
       return response.json();
     }));
     const models = freeOpenCodeModels(...data);
-    setOpenCodeFreeModels(provider, models);
-    return { data: models };
+    setOpenCodeFreeModels(provider, models, now);
+    const result = { data: models };
+    discoveries.set(provider, { at: now, data: result });
+    return result;
   } catch (error) {
-    setOpenCodeFreeModels(provider, []);
+    setOpenCodeFreeModels(provider, [], now);
+    discoveries.set(provider, { at: now, data: { data: [] } });
     throw error;
   }
 }

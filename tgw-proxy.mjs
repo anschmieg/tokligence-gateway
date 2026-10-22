@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { discoverOpenCodeFreeModels } from "./opencode-free-models.mjs";
+import { discoverOpenCodeFreeModels, OPENCODE_DISCOVERY_INTERVAL_MS } from "./opencode-free-models.mjs";
 // tgw-proxy — model-rewriting proxy in front of Tokligence Gateway
 //
 // For OpenCode MiniMax models: calls the OpenCode Messages endpoint
@@ -2345,7 +2345,7 @@ server.listen(PROXY_PORT, "0.0.0.0", () => {
   if (OPENCODE_ZEN_PROVIDER?.catalog?.discover_free_only === true) {
     const refresh = () => refreshOpenCodeRegistry().catch((error) => console.warn(`OpenCode free discovery failed: ${error.message}`));
     refresh();
-    const timer = setInterval(refresh, 5 * 60 * 1000);
+    const timer = setInterval(refresh, OPENCODE_DISCOVERY_INTERVAL_MS);
     timer.unref();
   }
 
