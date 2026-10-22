@@ -28,6 +28,12 @@ only to loopback and is never exposed directly to the internet.
 - `POST /v1/messages` — Anthropic Messages, including streaming and tools
 - `POST /v1/messages/count_tokens` — Anthropic token counting
 - `POST /v1/responses` — OpenAI Responses
+- Mistral specialist APIs: `POST /v1/audio/transcriptions`, `/v1/audio/speech`,
+  `/v1/embeddings`, `/v1/ocr`, `/v1/moderations`, and `/v1/fim/completions`;
+  realtime transcription uses WebSocket `/v1/audio/transcriptions/realtime`.
+  These models stay discoverable with accurate endpoints and are hidden from
+  chat pickers. See [catalog policy and synchronization](docs/model-catalog-policy.md)
+  for canonical model IDs, exclusions, free-first fallback, and the T3 picker limit.
 - `POST /v1/chat/completions` — OpenAI Chat Completions
 - `POST /v1/systemone` — native OpenCode Jev typed evaluations
 

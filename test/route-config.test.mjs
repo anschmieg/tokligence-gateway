@@ -83,11 +83,11 @@ test("Cline OAuth provider is native, free-only, and fail-closed by prefix", () 
 
 test("capability profiles route to correct models and fallbacks", () => {
   const enabled = { CODEX_PROXY_ENABLED: "true", CODEX_PROXY_API_KEY: "internal" };
-  assert.equal(resolveConfiguredAlias(config, "xhigh", enabled), "gpt-5.6-sol");
-  assert.equal(resolveConfiguredAlias(config, "reasoning", enabled), "gpt-5.6-sol");
-  assert.equal(resolveConfiguredAlias(config, "smartest", enabled), "gpt-5.6-sol");
-  assert.equal(resolveConfiguredAlias(config, "high", enabled), "gpt-5.6-terra");
-  assert.equal(resolveConfiguredAlias(config, "engineer", enabled), "gpt-5.6-terra");
+  assert.equal(resolveConfiguredAlias(config, "xhigh", enabled), "gpt-6.1-sol");
+  assert.equal(resolveConfiguredAlias(config, "reasoning", enabled), "gpt-6.1-sol");
+  assert.equal(resolveConfiguredAlias(config, "smartest", enabled), "gpt-6.1-sol");
+  assert.equal(resolveConfiguredAlias(config, "high", enabled), "gpt-6-astra");
+  assert.equal(resolveConfiguredAlias(config, "engineer", enabled), "gpt-6-astra");
   // Routing is fail-closed: a profile's provider must be enabled, otherwise its
   // fallback is used. Mistral-backed profiles fall back when Mistral is off.
   const mistralOff = {};
@@ -121,7 +121,7 @@ test("one policy compiles both downstream configurations", () => {
   assert.doesNotMatch(oauth, /public/);
 
   const models = configuredModels(config, env);
-  assert.equal(models.some(({ id }) => id === "gpt-5.6-sol"), true);
+  assert.equal(models.some(({ id }) => id === "gpt-6.1-sol"), true);
 });
 
 test("invalid policies fail during startup validation", () => {
@@ -167,7 +167,7 @@ test("class routing is opt-in and targets only configured provider models", () =
     () => parseRoutingConfig(noWindow.replace("  enabled: false", "  enabled: true")),
     /requires a verified context_window/,
   );
-  assert.throws(() => parseRoutingConfig(source.replace("provider: mistral\n    model: mistral-medium-3-5", "provider: codex-oauth\n    model: gpt-5.6-terra")), /cannot target an oauth-proxy/);
+  assert.throws(() => parseRoutingConfig(source.replace("provider: mistral\n    model: mistral-medium-3-5", "provider: codex-oauth\n    model: gpt-6-astra")), /cannot target an oauth-proxy/);
   assert.throws(() => parseRoutingConfig(source.replace("model: mistral-medium-3-5\n", "model: not-configured\n")), /must reference a configured provider model/);
 });
 

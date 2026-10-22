@@ -12,7 +12,7 @@ export function isCodexModel(config, model) {
 }
 
 export function isReservedCodexModel(model) {
-  return Boolean(model && /^gpt-5\.6-/i.test(model));
+  return Boolean(model && /^gpt-(?:5\.6-|6(?:[.-]|$))/i.test(model));
 }
 
 export function codexUpstreamUrl(config, requestPath) {

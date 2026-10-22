@@ -198,7 +198,7 @@ test("bakeToRoutes persists overrides into gateway.routes.yaml", () => {
   assert.equal(low.target, "mistral-small-latest");
   assert.equal(low.fallback, "oc/kimi-k2.6");
   // Unrelated aliases untouched.
-  assert.equal(baked.aliases.find((a) => a.id === "profile-high").target, "gpt-5.6-terra");
+  assert.equal(baked.aliases.find((a) => a.id === "profile-high").target, "gpt-6-astra");
   assert.equal(baked.providers.length, config.providers.length);
 
   fs.rmSync(dir, { recursive: true, force: true });

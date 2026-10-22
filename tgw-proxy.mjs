@@ -38,8 +38,9 @@ import { createSessionCacheObserver } from "./cache-observer.mjs";
 import { RoutingPreferences, sanitizedPreferences } from "./preferences.mjs";
 import { DASHBOARD_HTML } from "./dashboard.mjs";
 import { cloudflareAccessConfigured, isValidCloudflareAccessToken } from "./cloudflare-access.mjs";
-import { modelAllowedByCatalog } from "./model-catalog.mjs";
-import { decorateModel } from "./model-catalog-metadata.mjs";
+import { buildModelCatalog, modelAllowedByCatalog, modelSurface, retiredModelReason } from "./model-catalog.mjs";
+import { handleSpecialistHttp, handleSpecialistUpgrade } from "./specialist-routes.mjs";
+import { decorateCatalog } from "./model-catalog-metadata.mjs";
 import { COPILOT_AUTO_MODEL, createCopilotAutoAdapter } from "./copilot-auto.mjs";
 import { buildRoutePlan } from "./routing-planner.mjs";
 import { executeRoutePlan } from "./request-executor.mjs";
@@ -162,8 +163,18 @@ function modelProvider(model) {
   return MODEL_REGISTRY.get(model.toLowerCase())?.provider || null;
 }
 
+function catalogProtocols(model) {
+  if (model.protocols) return model.protocols;
+  const provider = providerById(ROUTING, model.provider);
+  if (["tokligence", "oauth-proxy", "copilot-sdk"].includes(provider?.adapter)) return ["chat_completions", "messages", "responses"];
+  const protocols = [...(provider?.protocols || ["chat_completions"])];
+  if (["middleware", "openai-compatible", "cline-oauth"].includes(provider?.adapter)
+    && provider.messages_translation !== false && protocols.includes("chat_completions") && !protocols.includes("messages")) protocols.push("messages");
+  return protocols;
+}
+
 function getAvailableModels() {
-  return Array.from(MODEL_REGISTRY.values())
+  const models = Array.from(MODEL_REGISTRY.values())
     .sort((a, b) => a.id.localeCompare(b.id))
     .map((model) => ({
       id: model.id,
@@ -192,7 +203,13 @@ function getAvailableModels() {
       created: model.created,
       owned_by: model.owned_by,
       provider: model.provider,
+      protocols: catalogProtocols(model),
+      pricing: model.pricing,
+      upstream_aliases: model.upstream_aliases,
+      upstream_capabilities: model.upstream_capabilities,
+      source: model.source,
     }));
+  return buildModelCatalog(models, ROUTING);
 }
 
 function seedConfiguredModels() {
@@ -200,7 +217,8 @@ function seedConfiguredModels() {
 
   for (const model of configuredModels(ROUTING)) {
     const provider = providerById(ROUTING, model.provider);
-    if (!modelAllowedByCatalog(provider, model)) continue;
+    // Configured models are also request aliases; discovery policy must not
+    // delete callable names from the internal registry.
     const codexMetadata = model.provider === "codex-oauth" ? {
       supported_reasoning_levels: CODEX_REASONING_LEVELS,
       supports_reasoning_summaries: true,
@@ -318,8 +336,17 @@ async function registerModelsFromEndpoint({ provider, hostname, port, path, head
       discovered: true,
       discoveredBy: provider,
       context_length: typeof candidate.context_length === "number" ? candidate.context_length : undefined,
-      context_window: typeof candidate.context_window === "number" ? candidate.context_window : (typeof candidate.context_length === "number" ? candidate.context_length : undefined),
+      context_window: typeof candidate.max_context_length === "number" ? candidate.max_context_length : (typeof candidate.context_window === "number" ? candidate.context_window : (typeof candidate.context_length === "number" ? candidate.context_length : undefined)),
       pricing: candidate.pricing || undefined,
+      upstream_aliases: Array.isArray(candidate.aliases) ? candidate.aliases.filter((alias) => typeof alias === "string") : undefined,
+      upstream_capabilities: candidate.capabilities || (Array.isArray(candidate.supported_parameters) ? {
+        function_calling: candidate.supported_parameters.includes("tools"),
+        vision: candidate.architecture?.input_modalities?.includes("image") === true,
+        reasoning: candidate.supported_parameters.some((parameter) => ["reasoning", "reasoning_effort", "include_reasoning"].includes(parameter)),
+        structured_output: candidate.supported_parameters.some((parameter) => ["response_format", "structured_outputs"].includes(parameter)),
+      } : undefined),
+      protocols: providerConfig.protocols?.includes("responses") ? providerConfig.protocols : undefined,
+      display_name: candidate.name,
     });
     registered.add(fullId.toLowerCase());
   }
@@ -567,6 +594,20 @@ function sendClineError(res, error) {
 }
 
 function handleProfileRequest(req, res, parsed, protocol) {
+  const retired = retiredModelReason(ROUTING, parsed?.model);
+  if (retired) {
+    res.writeHead(410, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: { code: "model_retired", message: retired } }));
+    return true;
+  }
+  const provider = matchConfiguredProvider(ROUTING, parsed?.model);
+  const surface = modelSurface({ id: parsed?.model || "", provider });
+  if (surface.type !== "chat") {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: { code: "model_endpoint_mismatch", message: "Use the model's supported specialist endpoint", supported_endpoints: surface.endpoints } }));
+    return true;
+  }
+  PROFILE_RUNTIME_STATE.catalogModels = new Map(getAvailableModels().map((model) => [model.id.toLowerCase(), model]));
   const profile = profileByModel(ROUTING, parsed?.model);
   const affinityKey = routingAffinityKey(req, parsed);
   const historyKey = routingModelHistoryKey(req, parsed);
@@ -1488,7 +1529,7 @@ const server = http.createServer((req, res) => {
     refreshModelRegistry()
       .catch((err) => console.warn(`model registry refresh failed: ${err.message}`))
       .finally(() => {
-        const models = getAvailableModels().map((model) => decorateModel(model, ROUTING.model_picker));
+        const models = decorateCatalog(getAvailableModels(), ROUTING.model_picker);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({
           object: "list",
@@ -1505,6 +1546,8 @@ const server = http.createServer((req, res) => {
     return;
   }
   sanitizeHeaders(req);
+
+  if (handleSpecialistHttp(req, res, { config: ROUTING, env: process.env })) return;
 
   if (url.pathname === "/v1/systemone") {
     if (req.method !== "POST") {
@@ -2249,6 +2292,14 @@ const server = http.createServer((req, res) => {
       upstream.end(body);
     });
   }
+});
+
+server.on("upgrade", (req, socket, head) => {
+  if (!validateAndStripAuth(req)) {
+    socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+    return;
+  }
+  handleSpecialistUpgrade(req, socket, head, { config: ROUTING, env: process.env });
 });
 
 server.listen(PROXY_PORT, "0.0.0.0", () => {

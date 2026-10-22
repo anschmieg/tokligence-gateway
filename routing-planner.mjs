@@ -47,6 +47,10 @@ function resolveUpstreamModel(provider, requested) {
 
 function candidateSupports(provider, reference, required, body, translated = false) {
   const capabilities = providerCapabilities(provider);
+  if (typeof reference.parallel_tools === "boolean") capabilities.parallel_tools = reference.parallel_tools;
+  for (const [field, feature] of [["function_calling", "tools"], ["vision", "vision"], ["reasoning", "reasoning"], ["structured_output", "structured_output"]]) {
+    if (typeof reference.upstream_capabilities?.[field] === "boolean") capabilities[feature] = reference.upstream_capabilities[field];
+  }
   // A translated lane serves the Anthropic surface on top of chat completions;
   // the protocol is therefore supported, and thinking cannot be carried across,
   // so a thinking request is served without it rather than refused.
@@ -135,6 +139,32 @@ export function buildRoutePlan(config, { model, protocol, body, requestClass = n
   if (!model) return { error: { status: 400, code: "missing_model", message: "model is required" } };
   const profile = profileByModel(config, model);
   const role = roleByModel(config, model);
+  let catalogModel = runtimeState.catalogModels?.get(model.toLowerCase());
+  if (!profile && !role && runtimeState.catalogModels && !catalogModel && Object.keys(config.model_catalog?.models || {}).some((id) => id.toLowerCase() === model.toLowerCase())) {
+    return { error: { status: 503, code: "canonical_model_unavailable", message: "No discovered backend is available for this canonical model; refresh /v1/models" } };
+  }
+  // The native OAuth lane also owns remote compaction and session-cache
+  // observations. Catalog publication must not bypass those behaviors.
+  if (!profile && !role && catalogModel?.routes.length === 1 && catalogModel.routes[0].model.toLowerCase() === model.toLowerCase()
+    && ["oauth-proxy", "cline-oauth"].includes(providerById(config, catalogModel.routes[0].provider)?.adapter)) catalogModel = null;
+  if (!profile && !role && catalogModel) {
+    const required = inspectRequestFeatures(protocol, body);
+    const endpoint = { messages: "/v1/messages", responses: "/v1/responses", chat_completions: "/v1/chat/completions" }[protocol];
+    const candidates = [];
+    // Catalog routes are already ordered free -> subscription -> paid. Do not
+    // let sticky affinity promote a paid route above a recovered free backend.
+    for (const reference of catalogModel.routes) {
+      const provider = providerById(config, reference.provider);
+      if (!provider || !providerEnabled(provider, env) || !reference.supported_endpoints.includes(endpoint)) continue;
+      if (circuitOpen(runtimeState, provider.id, reference.model, protocol)) continue;
+      const translate = translationFor(provider, protocol);
+      if (translate === null || (translate && !TRANSLATING_ADAPTERS.has(provider.adapter))) continue;
+      if (!candidateSupports(provider, reference, required, body, Boolean(translate))) continue;
+      candidates.push({ provider, model: { id: reference.model }, upstreamModel: normalizeUpstreamModel(provider.id, reference.model), protocol, native: !translate, ...(translate ? { translate } : {}) });
+    }
+    if (!candidates.length) return { error: { status: 400, code: "no_compatible_model_route", message: "No configured backend supports this model and request", supported_endpoints: catalogModel.supported_endpoints } };
+    return { requestedModel: model, publicModel: model, profile: null, required, deadline: Date.now() + Number(env.GATEWAY_REQUEST_TIMEOUT_MS || 120000), maxAttempts: candidates.length, candidates };
+  }
   if (!profile && role) {
     const required = inspectRequestFeatures(protocol, body);
     if (role.specialist) {

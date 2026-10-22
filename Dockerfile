@@ -59,6 +59,7 @@ COPY quota.mjs mistral-subscription-quota.mjs preferences.mjs dashboard.mjs dash
 COPY anthropic-passthrough.mjs anthropic-openai-codec.mjs sse-stream.mjs opencode-zen-gate.mjs opencode-zen-credential.mjs opencode-zen-session.mjs ./
 # Copilot-compatible catalog metadata for /v1/models.
 COPY model-catalog-metadata.mjs ./
+COPY specialist-routes.mjs ./
 # Copilot SDK state must live on the mounted data volume; credentials are supplied
 # through COPILOT_GITHUB_TOKEN (or an interactive device login), never baked in.
 ENV COPILOT_AUTO_HOME=/data/copilot-auto

@@ -31,7 +31,7 @@ test("agent profiles preserve deterministic candidate order", () => {
     { provider: "mistral", model: "mistral-medium-3-5" },
     { provider: "google-ai-studio", model: "gemini-3-flash-latest" },
     { provider: "copilot-auto", model: "copilot-auto" },
-    { provider: "codex-oauth", model: "gpt-5.6-terra" },
+    { provider: "codex-oauth", model: "gpt-6-astra" },
     { provider: "openrouter", model: "deepseek/deepseek-v4-flash-0731" },
     { provider: "openrouter", model: "openrouter/free" },
   ]);
@@ -68,7 +68,7 @@ test("route planner builds the ordered fallback chain", () => {
     ["cline-oauth", "cline/cline-free/deepseek-v4.1-flash"],
     ["cline-oauth", "cline/cline-free/mimo-v2.6-flash"],
     ["mistral", "mistral-medium-3-5"],
-    ["codex-oauth", "gpt-5.6-terra"],
+    ["codex-oauth", "gpt-6-astra"],
     ["openrouter", "deepseek/deepseek-v4-flash-0731"],
     ["openrouter", "openrouter/free"],
   ]);

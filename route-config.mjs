@@ -69,6 +69,41 @@ function envEnabled(provider, env) {
   return String(env[provider.enabled_env] || "").toLowerCase() === "true";
 }
 
+function validateCatalogPolicy(raw, providerIds) {
+  const catalog = raw.model_catalog || {};
+  for (const name of ["exclude", "retired"]) {
+    if (catalog[name] != null && !Array.isArray(catalog[name])) throw new Error(`model_catalog.${name} must be a list`);
+    for (const rule of catalog[name] || []) {
+      requireString(rule?.pattern, `model_catalog.${name}.pattern`);
+      new RegExp(rule.pattern, "i");
+      if (rule.provider && !providerIds.has(rule.provider)) throw new Error(`Unknown catalog provider: ${rule.provider}`);
+      if (name === "retired") requireString(rule.reason, "model_catalog.retired.reason");
+    }
+  }
+  if (catalog.prefer_latest != null && typeof catalog.prefer_latest !== "boolean") throw new Error("model_catalog.prefer_latest must be a boolean");
+  if (catalog.models != null && (typeof catalog.models !== "object" || Array.isArray(catalog.models))) throw new Error("model_catalog.models must be a mapping");
+  const identities = new Set();
+  const names = new Set();
+  for (const [id, mapping] of Object.entries(catalog.models || {})) {
+    requireString(id, "canonical model ID");
+    if (names.has(id.toLowerCase())) throw new Error("Canonical model IDs must be unique");
+    names.add(id.toLowerCase());
+    if (!Array.isArray(mapping?.routes) || !mapping.routes.length) throw new Error(`Canonical model ${id} requires routes`);
+    for (const reference of mapping.routes) {
+      if (!providerIds.has(reference?.provider)) throw new Error(`Canonical model ${id} references an unknown provider`);
+      requireString(reference.model, `canonical model ${id}.model`);
+      const key = `${reference.provider}:${reference.model}`;
+      if (identities.has(key)) throw new Error("A backend model can belong to only one canonical model");
+      identities.add(key);
+    }
+  }
+  const picker = raw.model_picker || {};
+  optionalBoundedInteger(picker.max_models, "model_picker.max_models", 32, 1, 10000);
+  if (picker.priority != null && !Array.isArray(picker.priority)) throw new Error("model_picker.priority must be a list");
+  for (const pattern of picker.priority || []) new RegExp(requireString(pattern, "model_picker.priority"), "i");
+  for (const rule of picker.hide || []) new RegExp(requireString(rule?.pattern, "model_picker.hide.pattern"), "i");
+}
+
 export function parseRoutingConfig(source) {
   const raw = parse(source);
   if (!raw || (raw.version !== 1 && raw.version !== 2)) throw new Error("routing config version must be 1 or 2");
@@ -152,6 +187,7 @@ export function parseRoutingConfig(source) {
     };
   });
   const providerIds = new Set(providers.map(({ id }) => id));
+  validateCatalogPolicy(raw, providerIds);
   if (providerIds.size !== providers.length) throw new Error("provider IDs must be unique");
   if (providers.filter(({ default: isDefault }) => isDefault).length !== 1) {
     throw new Error("routing config must define exactly one default provider");
@@ -295,7 +331,7 @@ export function parseRoutingConfig(source) {
       throw new Error(`provider ${provider.id} is restricted to explicit specialist roles`);
     }
   }
-  return { version: 1, access, providers, routes, profiles, roles, aliases, model_picker: raw.model_picker || {}, classRouting };
+  return { version: 1, access, providers, routes, profiles, roles, aliases, model_picker: raw.model_picker || {}, model_catalog: raw.model_catalog || {}, classRouting };
 }
 
 export function loadRoutingConfig(path) {
@@ -490,5 +526,7 @@ export function publicRoutingConfig(config, env = process.env) {
     routes: config.routes,
     profiles: config.profiles,
     aliases: config.aliases,
+    model_catalog: config.model_catalog,
+    model_picker: config.model_picker,
   };
 }

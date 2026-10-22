@@ -222,7 +222,7 @@ test("the façade routes exact Codex models and preserves Claude effort", async 
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
         object: "list",
-        data: [{ id: "gpt-5.6-sol", owned_by: "tokligence" }],
+        data: [{ id: "gpt-6.1-sol", owned_by: "tokligence" }],
       }));
       return;
     }
@@ -306,7 +306,7 @@ test("the façade routes exact Codex models and preserves Claude effort", async 
   const models = await fetch(`${baseUrl}/v1/models`, { headers });
   assert.equal(models.status, 200);
   const modelBody = await models.json();
-  const sol = modelBody.data.find((model) => model.id === "gpt-5.6-sol");
+  const sol = modelBody.data.find((model) => model.id === "gpt-6.1-sol");
   assert.equal(sol.provider, "codex-oauth");
   assert.deepEqual(sol.supported_reasoning_levels, [
     "none", "low", "medium", "high", "xhigh", "max",
@@ -326,7 +326,7 @@ test("the façade routes exact Codex models and preserves Claude effort", async 
   });
   assert.equal(response.status, 200);
   assert.match(await response.text(), /message_stop/);
-  assert.equal(codexRequests[0].body.model, "gpt-5.6-sol");
+  assert.equal(codexRequests[0].body.model, "gpt-6.1-sol");
   assert.equal(codexRequests[0].body.output_config.effort, "max");
   assert.equal(codexRequests[0].body.thinking.type, "adaptive");
   assert.equal(codexRequests[0].headers.authorization, "Bearer internal-secret");
@@ -335,7 +335,7 @@ test("the façade routes exact Codex models and preserves Claude effort", async 
     method: "POST",
     headers,
     body: JSON.stringify({
-      model: "gpt-5.6-luna",
+      model: "gpt-6-luna",
       messages: [{ role: "user", content: "hello" }],
     }),
   });
@@ -394,7 +394,7 @@ test("the façade routes exact Codex models and preserves Claude effort", async 
       method: "POST",
       headers: { ...headers, "session-id": "cache-sample-session" },
       body: JSON.stringify({
-        model: "gpt-6-sol",
+        model: "gpt-6.1-sol",
         prompt_cache_key: "cache-sample-key",
         input: [{ role: "user", content: "private cache evidence payload" }],
       }),
@@ -407,7 +407,7 @@ test("the façade routes exact Codex models and preserves Claude effort", async 
   assert.equal(cacheObservations.status, 200);
   const cacheObservationBody = await cacheObservations.json();
   assert.deepEqual(cacheObservationBody.data, [{
-    provider: "codex-oauth", model: "gpt-6-sol", idle_bucket: "0-1m",
+    provider: "codex-oauth", model: "gpt-6.1-sol", idle_bucket: "0-1m",
     samples: 1, input_tokens: 1100, cache_read_input_tokens: 900,
     cache_creation_input_tokens: 0, output_tokens: 1,
   }]);

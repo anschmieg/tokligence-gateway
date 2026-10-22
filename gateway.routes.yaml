@@ -43,20 +43,15 @@ providers:
     internal_api_key_env: CODEX_PROXY_API_KEY
     external_base_url_env: CODEX_PROXY_BASE_URL
     auth_dir: /data/cliproxy/auth
+    protocols: [chat_completions, messages, responses]
     models:
-      - id: gpt-5.6-luna
-        family: openai
-        context_window: 1050000
-      - id: gpt-5.6-terra
-        family: openai
-        context_window: 1050000
-      - id: gpt-5.6-sol
-        family: openai
-        context_window: 1050000
       - id: gpt-6-luna
         family: openai
         context_window: 1050000
-      - id: gpt-6-sol
+      - id: gpt-6.1-sol
+        family: openai
+        context_window: 1050000
+      - id: gpt-6-astra
         family: openai
         context_window: 1050000
     credential_pool:
@@ -144,6 +139,10 @@ providers:
       - id: codestral-latest
         family: codestral
         context_window: 128000
+      - id: ministral-14b-latest
+        family: ministral
+        context_window: 256000
+      # Retained for existing role routes, excluded from public discovery below.
       - id: ministral-8b-latest
         family: ministral
         context_window: 256000
@@ -345,7 +344,7 @@ providers:
       accounts:
         - id: primary-oauth
           credential_file_env: OPENCODE_ZEN_CREDENTIAL_FILE
-          chat_models: [beam-free, deepseek-v4.1-flash-free, glm-5.3-flash-free, longcat-2.5-preview-free, mimo-v2.6-flash-free, nemotron-3.5-lightning-free, nemotron-3.5-super-vl-free, space-bunny-free]
+          chat_models: [beam-free, deepseek-v4.1-flash-free, glm-5.3-flash-free, longcat-2.5-preview-free, mimo-v2.6-flash-free, nemotron-3.5-lightning-free, nemotron-3.5-super-vl-free, minimax-m3.1-flash-free]
           systemone_models: [jev-1.13-free]
       api_keys:
         - id: console-api-key
@@ -359,10 +358,10 @@ providers:
       - mimo-v2.6-flash-free
       - nemotron-3.5-lightning-free
       - nemotron-3.5-super-vl-free
-      - space-bunny-free
+      - minimax-m3.1-flash-free
     metadata:
       cost_class: free
-      capabilities: [coding, reasoning]
+      capabilities: [coding, reasoning, tool_calling]
       quota_type: free_tier
 
 routes:
@@ -381,7 +380,7 @@ routes:
       - mimo-v2.6-flash-free
       - nemotron-3.5-lightning-free
       - nemotron-3.5-super-vl-free
-      - space-bunny-free
+      - minimax-m3.1-flash-free
 
   - provider: cline-oauth
     prefixes: [cline/]
@@ -409,16 +408,90 @@ routes:
     upstream: anthropic
     prefixes: [claude, minimax-m2]
   - provider: codex-oauth
-    prefixes: [gpt-5.6, gpt-6]
+    prefixes: [gpt-6]
   - provider: tokligence
     upstream: openai
     prefixes: [gpt]
   - provider: openrouter
     prefixes: ["*"]
 
+# Personal discovery policy. Exclusions remove rows, not request aliases.
+# Free OpenRouter models are discovered automatically; paid_allowlist above is
+# the only way to opt in to a paid OpenRouter route (also during fallback).
+model_catalog:
+  prefer_latest: true
+  retired:
+    - pattern: "(^|/)space-bunny(?:-free|-alpha)?$"
+      reason: "Space Bunny is retired. Select MiniMax M3.1 Flash explicitly; it is a different model."
+  exclude:
+    - pattern: "^gpt-5\\.6(?:-|$)|^gpt-6-sol$"
+      reason: "Superseded OpenAI generation"
+    - provider: mistral
+      pattern: "(^|/)(?:magistral-|pixtral-|labs-leanstral)|(^|/)ministral-(?:3b|8b)-"
+      reason: "Deprecated or intentionally excluded Mistral families"
+    - provider: mistral
+      pattern: "(^|/)(?:zai-glm-5(?:-2)?|glm-5-2)$"
+      reason: "Superseded by GLM 5.3"
+    - provider: mistral
+      pattern: "(^|/)(?:mistral-large-2512|mistral-medium-(?:3|3-5|3\\.5|2604)|mistral-small-2603|codestral-2508|ministral-14b-2512)$"
+      reason: "Versioned alias; publish the verified latest alias instead"
+  # Equivalence is explicit. Similar names, prefixes and ':free' alone never
+  # establish that two providers serve the same model. Prices/context windows
+  # remain attached to individual routes; the public context is conservative.
+  models:
+    minimax-m3.1-flash-free:
+      routes:
+        - { provider: opencode-zen, model: minimax-m3.1-flash-free }
+        - { provider: cline-oauth, model: cline/cline-free/minimax-m3.1-flash }
+        - { provider: openrouter, model: minimax/minimax-m3.1-flash:free }
+    beam-free:
+      routes:
+        - { provider: opencode-zen, model: beam-free }
+        - { provider: cline-oauth, model: cline/reflection/beam-free }
+    nemotron-3.5-lightning-free:
+      routes:
+        - { provider: opencode-zen, model: nemotron-3.5-lightning-free }
+        - { provider: cline-oauth, model: cline/nvidia/nemotron-3.5-lightning-free }
+        - { provider: openrouter, model: nvidia/nemotron-3.5-lightning:free }
+    nemotron-3.5-super-vl-free:
+      routes:
+        - { provider: opencode-zen, model: nemotron-3.5-super-vl-free }
+        - { provider: cline-oauth, model: cline/cline-free/nemotron-3.5-super-vl }
+        - { provider: openrouter, model: nvidia/nemotron-3.5-super-vl:free }
+    poolside/laguna-s-2.1:
+      routes:
+        - { provider: cline-oauth, model: cline/poolside/laguna-s-2.1-free }
+        - { provider: openrouter, model: poolside/laguna-s-2.1:free }
+        - { provider: openrouter, model: poolside/laguna-s-2.1 }
+    poolside/laguna-xs-2.1:
+      routes:
+        - { provider: openrouter, model: poolside/laguna-xs-2.1:free }
+        - { provider: openrouter, model: poolside/laguna-xs-2.1 }
+    thinkingmachines/inkling:
+      routes:
+        - { provider: openrouter, model: thinkingmachines/inkling:free }
+        - { provider: openrouter, model: thinkingmachines/inkling }
+    thinkingmachines/inkling-small:
+      routes:
+        - { provider: openrouter, model: thinkingmachines/inkling-small:free }
+        - { provider: openrouter, model: thinkingmachines/inkling-small }
+
 # Model picker visibility served on GET /v1/models. Hidden models stay callable;
 # policy.terms explains why they are not offered.
 model_picker:
+  # T3 renders at most 32 custom models. Additional eligible models remain in
+  # /v1/models with an explicit capacity reason rather than disappearing in T3.
+  max_models: 32
+  priority:
+    - "^gpt-6\\.1-sol$"
+    - "^gpt-6-astra$"
+    - "^gpt-6-luna$"
+    - "^(?:beam|deepseek-v4\\.1-flash|glm-5\\.3-flash|longcat-2\\.5-preview|mimo-v2\\.6-flash|minimax-m3\\.1-flash|nemotron-3\\.5-(?:lightning|super-vl))-free$"
+    - "^mistral/(?:codestral-latest|mistral-(?:large|medium|small)-latest|mistral-code-latest|mistral-vibe-cli-(?:fast|latest|with-tools)|zai-glm-latest|ministral-14b-latest)$"
+    - "^(?:(?:openrouter/)?poolside/laguna-|(?:openrouter/)?thinkingmachines/inkling(?:-|:|$)|openrouter/cohere/north-(?:mini-)?code(?:-|:|$)|openrouter/liquid/lfm-)"
+    # Newly discovered OpenCode free models follow the selected families above;
+    # all other eligible discoveries can fill any remaining picker slots.
+    - "^[^/]+-free$"
   categories:
     opencode-zen: free
     cline-oauth: free
@@ -436,12 +509,6 @@ model_picker:
     ollama-cloud:
       enabled: false
       reason: "Ollama Cloud subscription is not active"
-    cline-oauth:
-      enabled: false
-      reason: "Cline free models accept only OpenAI Chat Completions, not the Messages endpoint"
-    openrouter:
-      enabled: false
-      reason: "OpenRouter workspace has no credit balance"
     modal:
       enabled: false
       reason: "Modal GLM endpoint returns an execution error"
@@ -449,6 +516,10 @@ model_picker:
       enabled: false
       reason: "Internal routing alias rather than a selectable model"
   hide:
+    - pattern: "^mistral/voxtral-"
+      reason: "Audio specialists remain available through their supported APIs"
+    - pattern: "(^|/)lyria-|content-safety"
+      reason: "Music generation and safety classifiers are not chat picker options"
     - pattern: "^gpt-5\\.6"
       reason: "Superseded by the gpt-6 generation"
     - pattern: "^gpt-5"
@@ -503,7 +574,7 @@ profiles:
       - provider: copilot-auto
         model: copilot-auto
       - provider: codex-oauth
-        model: gpt-5.6-terra
+        model: gpt-6-astra
       - provider: openrouter
         model: deepseek/deepseek-v4-flash-0731
       - provider: openrouter
@@ -544,7 +615,7 @@ profiles:
       - provider: copilot-auto
         model: copilot-auto
       - provider: codex-oauth
-        model: gpt-5.6-terra
+        model: gpt-6-astra
       - provider: openrouter
         model: deepseek/deepseek-v4-flash-0731
       - provider: openrouter
@@ -556,7 +627,7 @@ profiles:
       - provider: cline-oauth
         model: cline/cline-free/deepseek-v4.1-flash
       - provider: cline-oauth
-        model: cline/stealth/space-bunny-alpha
+        model: cline/cline-free/minimax-m3.1-flash
       - provider: cline-oauth
         model: cline/cline-free/gemini-3.8-flash
       - provider: cline-oauth
@@ -683,19 +754,19 @@ aliases:
   - id: profile-xhigh
     patterns: [xhigh, reasoning, smartest, architect, oracle]
     provider: codex-oauth
-    target: gpt-5.6-sol
+    target: gpt-6.1-sol
     fallback: profile-high
 
   - id: profile-high
     patterns: [high, coding, smart, engineer]
     provider: codex-oauth
-    target: gpt-5.6-terra
+    target: gpt-6-astra
     fallback: profile-medium
 
   - id: profile-medium
     patterns: [medium, worker, standard, implement]
     provider: codex-oauth
-    target: gpt-5.6-luna
+    target: gpt-6-luna
     fallback: profile-low
 
   - id: profile-low

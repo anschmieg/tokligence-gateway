@@ -1,0 +1,7 @@
+.git
+.env
+.env.*
+node_modules
+tmp
+.zen-oauth.json
+**/__pycache__
