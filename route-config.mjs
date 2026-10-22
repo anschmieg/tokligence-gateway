@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { openCodeChatAllowed } from "./opencode-free-models.mjs";
 import { parse, stringify } from "yaml";
 
 const VALID_ADAPTERS = new Set(["tokligence", "oauth-proxy", "middleware", "copilot-sdk", "openai-compatible", "cline-oauth", "opencode-zen", "chatgpt-responses"]);
@@ -150,9 +151,10 @@ export function parseRoutingConfig(source) {
       const validatePoolEntry = (entry, entryIndex, type) => {
         const entryLabel = `providers[${index}].opencode_pool.${type}[${entryIndex}]`;
         const allowed = type === "accounts"
-          ? ["id", "credential_file", "credential_file_env", "chat_models", "systemone_models"]
+          ? ["id", "credential_file", "credential_file_env", "chat_models", "systemone_models", "discover_free_models"]
           : ["id", "env", "systemone_models"];
         if (!entry || typeof entry !== "object" || Array.isArray(entry) || Object.keys(entry).some((key) => !allowed.includes(key))) throw new Error(`${entryLabel} contains unsupported fields`);
+        if (entry.discover_free_models != null && typeof entry.discover_free_models !== "boolean") throw new Error(`${entryLabel}.discover_free_models must be boolean`);
         const accountId = requireString(entry?.id, `${entryLabel}.id`);
         if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(accountId)) throw new Error(`${entryLabel}.id contains unsupported characters`);
         if (ids.has(accountId)) throw new Error(`providers[${index}].opencode_pool account IDs must be unique`);
@@ -400,7 +402,7 @@ export function chatModelAvailable(provider, model, env = process.env) {
   const pool = provider.opencode_pool;
   const accounts = pool ? (pool.accounts || []) : [{ chat_models: provider.models.map((entry) => entry.id), credential_file: provider.credential_file, credential_file_env: provider.credential_file_env }];
   return accounts.some((account) => {
-    if (!(account.chat_models || []).includes(model)) return false;
+    if (!openCodeChatAllowed(provider, account, model)) return false;
     const ref = account.credential_file_env || (account.credential_file ? null : provider.credential_file_env);
     const file = (ref && env[ref]) || account.credential_file || provider.credential_file;
     try { return Boolean(JSON.parse(fs.readFileSync(file, "utf8"))?.access); } catch { return false; }

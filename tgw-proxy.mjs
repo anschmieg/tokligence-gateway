@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { discoverOpenCodeFreeModels } from "./opencode-free-models.mjs";
 // tgw-proxy — model-rewriting proxy in front of Tokligence Gateway
 //
 // For OpenCode MiniMax models: calls the OpenCode Messages endpoint
@@ -320,8 +321,8 @@ function prefixedModelId(id, prefix) {
   return `${prefix}${id}`;
 }
 
-async function registerModelsFromEndpoint({ provider, hostname, port, path, headers = {}, prefix = "", filter: modelFilter = null }) {
-  const data = await fetchJson({ hostname, port, path, method: "GET", headers });
+async function registerModelsFromEndpoint({ provider, hostname, port, path, headers = {}, prefix = "", filter: modelFilter = null, data: suppliedData = null }) {
+  const data = suppliedData || await fetchJson({ hostname, port, path, method: "GET", headers });
   const providerConfig = providerById(ROUTING, provider);
   const registered = new Set();
   for (const model of data?.data || []) {
@@ -372,15 +373,29 @@ async function registerClineFreeModels() {
 function pruneStaleDiscovered(provider, keepIds) {
   // Keep the provider's endpoint-derived model list current: drop discovered
   // entries that no longer appear upstream. Explicitly configured models
-  // (gateway.routes.yaml) are intentionally kept as a stable base/fallback so
+  // (gateway.routes.yaml), except Cline and live-verified OpenCode, stay a stable base so
   // routing aliases keep resolving even when an upstream endpoint omits them.
   for (const [key, model] of MODEL_REGISTRY) {
     if (model.provider !== provider) continue;
-    if (model.source === "config" && provider !== CLINE_OAUTH_PROVIDER?.id) continue;
+    if (model.source === "config" && provider !== CLINE_OAUTH_PROVIDER?.id && provider !== "opencode-zen") continue;
     if (!keepIds.has(key)) {
       MODEL_REGISTRY.delete(key);
     }
   }
+}
+
+let openCodeDiscoveryRefresh;
+function refreshOpenCodeRegistry() {
+  if (openCodeDiscoveryRefresh) return openCodeDiscoveryRefresh;
+  openCodeDiscoveryRefresh = discoverOpenCodeFreeModels(OPENCODE_ZEN_PROVIDER)
+    .then((data) => registerModelsFromEndpoint({ provider: "opencode-zen", prefix: "opencode-zen/", data }))
+    .then((ids) => { pruneStaleDiscovered("opencode-zen", ids); return ids; })
+    .catch((error) => {
+      pruneStaleDiscovered("opencode-zen", new Set());
+      throw error;
+    })
+    .finally(() => { openCodeDiscoveryRefresh = null; });
+  return openCodeDiscoveryRefresh;
 }
 
 async function refreshModelRegistry() {
@@ -403,15 +418,20 @@ async function refreshModelRegistry() {
           prefix: "opencode-go/"
         }),
       });
+    }
+
+    if (OPENCODE_ZEN_PROVIDER?.catalog?.discover_free_only === true) {
+      refreshes.push({
+        provider: "opencode-zen",
+        promise: refreshOpenCodeRegistry(),
+      });
+    } else if (OPENCODE_KEY) {
       refreshes.push({
         provider: "opencode-zen",
         promise: registerModelsFromEndpoint({
-          provider: "opencode-zen",
-          hostname: OPENCODE_URL.hostname,
-          port: OPENCODE_URL.port || 443,
-          path: "/zen/v1/models",
-          headers,
-          prefix: "opencode-zen/"
+          provider: "opencode-zen", hostname: OPENCODE_URL.hostname,
+          port: OPENCODE_URL.port || 443, path: "/zen/v1/models",
+          headers: { Authorization: `Bearer ${OPENCODE_KEY}` }, prefix: "opencode-zen/",
         }),
       });
     }
@@ -2321,6 +2341,13 @@ server.listen(PROXY_PORT, "0.0.0.0", () => {
   console.log(CODEX.enabled
     ? `  codex-oauth -> private Codex backend`
     : `  codex-oauth -> disabled`);
+
+  if (OPENCODE_ZEN_PROVIDER?.catalog?.discover_free_only === true) {
+    const refresh = () => refreshOpenCodeRegistry().catch((error) => console.warn(`OpenCode free discovery failed: ${error.message}`));
+    refresh();
+    const timer = setInterval(refresh, 5 * 60 * 1000);
+    timer.unref();
+  }
 
   // Quotas are advisory and refreshed out-of-band; a probe failure never blocks routing.
   const quotaRefreshMs = Number(process.env.ROUTING_QUOTA_REFRESH_MS || 300000);

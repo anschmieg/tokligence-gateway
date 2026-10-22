@@ -1,3 +1,4 @@
+import { isDiscoveredOpenCodeFree } from "./opencode-free-models.mjs";
 import { normalizeUpstreamModel } from "./upstream-model.mjs";
 
 function asModelObject(model) {
@@ -51,6 +52,7 @@ export function buildModelCatalog(models, config) {
   const groups = new Map();
   for (const model of models) {
     const provider = config.providers.find((p) => p.id === model.provider);
+    if (provider?.catalog?.discover_free_only === true && !isDiscoveredOpenCodeFree(provider, model.id)) continue;
     if (!provider || provider.catalog?.visible === false || retiredModelReason(config, model.id)) continue;
     const upstream = normalizeUpstreamModel(model.provider, model.id);
     if (model.provider === "openrouter" && !modelAllowedByCatalog(provider, { ...model, id: upstream })) continue;

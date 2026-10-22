@@ -1,3 +1,4 @@
+import { setOpenCodeFreeModels } from "../opencode-free-models.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildModelCatalog, modelAllowedByCatalog, retiredModelReason } from "../model-catalog.mjs";
@@ -54,6 +55,7 @@ test("unknown or missing prices never count as free", () => {
 const config = loadRoutingConfig("gateway.routes.yaml");
 
 test("catalog merges verified aliases and explicit equivalent backends, not matching names", () => {
+  setOpenCodeFreeModels(config.providers.find(p => p.id === "opencode-zen"), [{ id: "minimax-m3.1-flash-free" }, { id: "deepseek-v4.1-flash-free" }]);
   const rows = buildModelCatalog([
     { id: "codestral-latest", provider: "mistral", context_window: 128000 },
     { id: "mistral/codestral-latest", provider: "mistral", context_window: 128000 },

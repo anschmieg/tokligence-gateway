@@ -325,6 +325,8 @@ providers:
   # separately by the native SystemOne endpoint and is not a chat model.
   - id: opencode-zen
     adapter: opencode-zen
+    catalog:
+      discover_free_only: true
     billing_class: subscription
     protocols: [chat_completions, messages]
     base_url: https://opencode.ai/inference/v1
@@ -344,7 +346,7 @@ providers:
       accounts:
         - id: primary-oauth
           credential_file_env: OPENCODE_ZEN_CREDENTIAL_FILE
-          chat_models: [beam-free, deepseek-v4.1-flash-free, glm-5.3-flash-free, longcat-2.5-preview-free, mimo-v2.6-flash-free, nemotron-3.5-lightning-free, nemotron-3.5-super-vl-free, minimax-m3.1-flash-free]
+          discover_free_models: true
           systemone_models: [jev-1.13-free]
       api_keys:
         - id: console-api-key

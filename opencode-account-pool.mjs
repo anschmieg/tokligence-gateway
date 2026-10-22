@@ -1,3 +1,4 @@
+import { openCodeChatAllowed } from "./opencode-free-models.mjs";
 import { createHash } from "node:crypto";
 import { canonicalCredentialFile, readCredential } from "./opencode-zen-credential.mjs";
 import { getZenTokenProvider } from "./provider-adapters.mjs";
@@ -49,7 +50,7 @@ export function createOpenCodeAccountPool({ provider, env = process.env, getToke
   const eligible = (account, endpoint, model) => {
     if (account.api_key) return endpoint === "systemone" && account.systemone_models.includes(model) && Boolean(env[account.api_key_env]);
     const allowed = endpoint === "chat" ? account.chat_models : account.systemone_models;
-    if (!allowed?.includes(model)) return false;
+    if (endpoint === "chat" ? !openCodeChatAllowed(provider, account, model) : !allowed?.includes(model)) return false;
     const credential = readCredential(fileFor(account));
     return Boolean(credential?.access);
   };
