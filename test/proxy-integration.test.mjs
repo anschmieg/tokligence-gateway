@@ -491,6 +491,62 @@ test("Anthropic beta allow-list gates headers and paired compaction fields at th
   assert.equal(seen[1].body.compaction, undefined);
 });
 
+test("bare Mistral Messages use streaming executor with heartbeats and bounded header waits", async (t) => {
+  let stall = false;
+  const seen = [];
+  const upstream = http.createServer(async (req, res) => {
+    const body = await jsonRequest(req);
+    seen.push(body);
+    if (stall) return;
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    res.flushHeaders();
+    const timer = setTimeout(() => res.end('data: {"id":"test","choices":[{"index":0,"delta":{"content":"OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'), 100);
+    res.once("close", () => clearTimeout(timer));
+  });
+  const upstreamPort = await listen(upstream);
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tgw-mistral-timeout-"));
+  const configPath = path.join(dir, "routes.yaml");
+  await fs.writeFile(configPath, [
+    "version: 1", "access:", "  public_secret_env: PUBLIC_SECRET", "  admin_secret_env: ADMIN_SECRET",
+    "providers:", "  - id: mistral", "    adapter: middleware", "    default: true",
+    "    api_key_env: MISTRAL_API_KEY", "    base_url_env: MISTRAL_API_BASE",
+    "    protocols: [chat_completions]", "    models:", "      - id: mistral-small-latest",
+    "    metadata:", "      capabilities: [text, tool_calling]",
+    "profiles:", "  noop:", "    candidates:", "      - provider: mistral", "        model: mistral-small-latest",
+    "routes:", "  - provider: mistral", "    prefixes: [mistral/, mistral-]", "aliases: []",
+  ].join("\n"));
+  const child = spawn(process.execPath, ["tgw-proxy.mjs"], {
+    cwd: projectRoot,
+    env: { ...process.env, ROUTING_CONFIG_PATH: configPath, PROXY_PORT: "0", TGW_PORT: "1",
+      PUBLIC_SECRET: "public-secret", ADMIN_SECRET: "admin-secret", MISTRAL_API_KEY: "synthetic",
+      MISTRAL_API_BASE: `http://127.0.0.1:${upstreamPort}/v1`, GATEWAY_SSE_PING_MS: "10",
+      GATEWAY_RESPONSE_START_TIMEOUT_MS: "500", GATEWAY_REQUEST_TIMEOUT_MS: "1500" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  t.after(async () => {
+    child.kill("SIGTERM");
+    upstream.closeAllConnections();
+    await close(upstream);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+  const port = await waitForProxy(child);
+  const request = () => fetch(`http://127.0.0.1:${port}/v1/messages`, {
+    method: "POST", headers: { Authorization: "Bearer sk-ant-public-secret", "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "mistral-small-latest", stream: true, max_tokens: 32, messages: [{ role: "user", content: "hi" }] }),
+  });
+  const response = await request();
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-gateway-provider"), "mistral");
+  const text = await response.text();
+  assert.match(text, /event: ping/);
+  assert.match(text, /OK/);
+  assert.equal(seen[0].stream, true);
+  stall = true;
+  const timeout = await request();
+  assert.equal(timeout.status, 504);
+  assert.equal((await timeout.json()).error.type, "gateway_timeout");
+});
+
 test("an Anthropic client reaches an OpenAI-only provider through translation", async (t) => {
   const seen = [];
   const upstream = http.createServer(async (req, res) => {

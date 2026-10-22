@@ -82,7 +82,8 @@ function zenServicesFor(provider, env) {
   return zenServices.get(provider.id);
 }
 
-async function zenAttempt(candidate, { body, env }) {
+async function zenAttempt(candidate, { body, env, signal }) {
+  throwIfAborted(signal);
   const provider = candidate.provider;
   const { tokens, sessions } = zenServicesFor(provider, env);
   const request = Buffer.isBuffer(body) ? JSON.parse(body.toString("utf8")) : body;
@@ -91,6 +92,7 @@ async function zenAttempt(candidate, { body, env }) {
     tokens.authorization(),
     tokens.credential(),
   ]);
+  if (signal?.aborted) throw signal.reason || new Error("request aborted");
   // The service attributes the request with the organisation id; without it the
   // request is refused as not coming from a client.
   const orgId = credential?.metadata?.orgID || env.OPENCODE_ZEN_ORG_ID || "";
@@ -100,12 +102,15 @@ async function zenAttempt(candidate, { body, env }) {
     ? anthropicToOpenAI(request, { gateTools: GATE_TOOLS, forceStream: true })
     : request;
   const shaped = shapeZenRequest(upstream, { gateTools: GATE_TOOLS });
+  throwIfAborted(signal);
+  const clientVersion = (await sessions.clientVersion()) || provider.client_version || "1.18.32";
+  throwIfAborted(signal);
   return {
     body: Buffer.from(JSON.stringify(shaped)),
     headers: zenHeaders({
       session: minted.id,
       authorization,
-      clientVersion: (await sessions.clientVersion()) || provider.client_version || "1.18.32",
+      clientVersion,
       project: minted.project || provider.client_project || "global",
       orgId,
     }),
@@ -299,7 +304,12 @@ function requestUrl(candidate, path, env, { suffix: forcedSuffix } = {}) {
   return target;
 }
 
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw signal.reason || Object.assign(new Error("request aborted"), { code: "ABORT_ERR" });
+}
+
 function send({ target, headers, body, signal }) {
+  throwIfAborted(signal);
   // An optional proxy (OPENCODE_ZEN_PROXY) lets the Zen adapter exit through a
   // network Zen accepts, without touching any other provider's traffic. The
   // tunnel is a plain HTTP CONNECT to the target, with TLS then layered on top.
@@ -363,6 +373,7 @@ function sendThroughProxy({ target, headers, body, signal, proxy }) {
 }
 
 export async function startAttempt({ candidate, req, path, body, env = process.env, signal, adapters = {} }) {
+  throwIfAborted(signal);
   if (candidate.provider.adapter === "chatgpt-responses") {
     const endpoint = env.CHATGPT_SERVICE_URL;
     const token = env.CHATGPT_SERVICE_TOKEN;
@@ -400,7 +411,7 @@ export async function startAttempt({ candidate, req, path, body, env = process.e
   }
 
   if (candidate.provider.adapter === "opencode-zen") {
-    const prepared = await zenAttempt(candidate, { body, env });
+    const prepared = await zenAttempt(candidate, { body, env, signal });
     const target = requestUrl(candidate, path, env);
     const { response, upstream } = await send({ target, headers: prepared.headers, body: prepared.body, signal });
     return { response, upstream, target, codec: prepared.codec };

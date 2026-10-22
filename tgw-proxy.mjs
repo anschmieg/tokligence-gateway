@@ -42,6 +42,7 @@ import { decorateModel } from "./model-catalog-metadata.mjs";
 import { COPILOT_AUTO_MODEL, createCopilotAutoAdapter } from "./copilot-auto.mjs";
 import { buildRoutePlan } from "./routing-planner.mjs";
 import { executeRoutePlan } from "./request-executor.mjs";
+import { createRequestTrace } from "./request-trace.mjs";
 import { anthropicMessageToSse, normalizeAnthropicMessage } from "./anthropic-passthrough.mjs";
 import {
   ClineAdapterError,
@@ -585,6 +586,7 @@ function handleProfileRequest(req, res, parsed, protocol) {
     res,
     path: req.url,
     body: parsed,
+    trace: req.requestTrace,
     env: process.env,
     runtimeState: PROFILE_RUNTIME_STATE,
     adapters: { [CLINE_OAUTH_PROVIDER?.id]: CLINE_OAUTH },
@@ -1254,6 +1256,9 @@ function openAIToAnthropicMessage(data, requestedModel) {
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
+  if (req.method === "POST" && ["/v1/messages", "/v1/chat/completions", "/v1/responses", "/responses"].includes(url.pathname)) {
+    req.requestTrace = createRequestTrace(req, res);
+  }
 
   if (req.method === "GET" && url.pathname === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });

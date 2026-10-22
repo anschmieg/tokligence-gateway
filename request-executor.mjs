@@ -87,6 +87,32 @@ function discard(response) {
   response.resume();
 }
 
+function abortError(signal) {
+  return signal?.reason || Object.assign(new Error("request aborted"), { code: "ABORT_ERR" });
+}
+
+// Shared OAuth/session setup may outlive a caller; its deadline must not wait for it.
+function startAttemptUntilAbort(options, attemptStarter) {
+  const { signal } = options;
+  if (signal.aborted) return Promise.reject(abortError(signal));
+  return new Promise((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => { cleanup(); reject(abortError(signal)); };
+    signal.addEventListener("abort", onAbort, { once: true });
+    Promise.resolve().then(() => {
+      if (signal.aborted) throw abortError(signal);
+      return attemptStarter(options);
+    }).then((attempt) => {
+      cleanup();
+      if (signal.aborted) {
+        attempt.response?.destroy?.();
+        if (attempt.upstream !== attempt.response) attempt.upstream?.destroy?.();
+        reject(abortError(signal));
+      } else resolve(attempt);
+    }, (error) => { cleanup(); reject(error); });
+  });
+}
+
 function firstStreamChunk(response, signal) {
   return new Promise((resolve, reject) => {
     const cleanup = () => {
@@ -275,13 +301,17 @@ function settledSpecialistSse(protocol, document, translated, model) {
   return events.join("") + emit("response.output_item.done", { response_id: id, output_index: 0, item }) + emit("response.completed", { response });
 }
 
-export async function executeRoutePlan({ plan, req, res, path, body, env = process.env, runtimeState = {}, adapters = {}, affinityKey = null, historyKey = undefined, onUpstreamResponse }) {
-  const requestId = randomUUID();
+export async function executeRoutePlan({ plan, req, res, path, body, trace = req.requestTrace, env = process.env, runtimeState = {}, adapters = {}, affinityKey = null, historyKey = undefined, onUpstreamResponse, startAttempt: attemptStarter = startAttempt }) {
+  const requestId = trace?.id || randomUUID();
+  trace?.model(plan.publicModel);
+  trace?.stage("executor");
+  trace?.emit("route_plan", { candidate_count: plan.candidates.length });
   const pingMs = Math.max(1, Number(env.GATEWAY_SSE_PING_MS) || 15000);
   const aborter = new AbortController();
   let activeResponse;
   const abortResponse = () => activeResponse?.destroy(aborter.signal.reason);
   aborter.signal.addEventListener("abort", abortResponse, { once: true });
+  aborter.signal.addEventListener("abort", () => trace?.emit("deadline", { deadline: aborter.signal.reason?.code || "unknown" }), { once: true });
   const timeout = setTimeout(() => aborter.abort(Object.assign(new Error("upstream deadline exceeded"), { code: "TOTAL_DEADLINE" })), Math.max(plan.deadline - Date.now(), 1));
   const responseStartMs = Math.max(1, Number(env.GATEWAY_RESPONSE_START_TIMEOUT_MS) || 90000);
   let responseStartExpired = false;
@@ -297,19 +327,25 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
   const onClose = () => { if (!res.writableEnded) cancel(); };
   res.once("close", onClose);
   let lastStatus = 502;
+  if (plan.deadline <= Date.now()) {
+    aborter.abort(Object.assign(new Error("upstream deadline exceeded"), { code: "TOTAL_DEADLINE" }));
+  }
 
   try {
     for (const candidate of plan.candidates) {
       if (aborter.signal.aborted) break;
+      trace?.stage("attempt");
+      trace?.emit("attempt_start", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel });
       const candidateBody = Buffer.from(JSON.stringify({ ...body, model: candidate.upstreamModel }));
       try {
-        const { response, codec, specialist, specialistProtocol } = await startAttempt({ candidate, req, path, body: candidateBody, env, signal: aborter.signal, adapters });
+        const { response, codec, specialist, specialistProtocol } = await startAttemptUntilAbort({ candidate, req, path, body: candidateBody, env, signal: aborter.signal, adapters }, attemptStarter);
         activeResponse = response;
         if (aborter.signal.aborted) {
           response.destroy();
           break;
         }
         const status = response.statusCode || 502;
+        trace?.emit("upstream_headers", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel, status });
         if (status < 200 || status >= 300) {
           if (specialist) {
             const rawError = await readBodyText(response, aborter.signal, 4096).catch(() => "");
@@ -322,10 +358,7 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
             return { committed: false, requestId, specialist: true };
           }
           lastStatus = status;
-          const detail = await readSnippet(response);
-          console.error(
-            `upstream ${status} from ${candidate.provider.id}/${candidate.upstreamModel}: ${detail || "<empty body>"}`,
-          );
+          trace?.emit("upstream_rejected", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel, status });
           const cooldown = status === 429
             ? await status429CooldownMs(response, aborter.signal)
             : cooldownMs(response);
@@ -380,6 +413,7 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
           }
           return { committed: true, requestId, provider: candidate.provider.id, specialist: true };
         }
+        trace?.stage("response");
         const headers = { ...response.headers, "x-gateway-request-id": requestId, "x-gateway-model": plan.publicModel, "x-gateway-provider": candidate.provider.id, "x-gateway-upstream-model": candidate.upstreamModel };
         // An Anthropic-protocol pass-through is repaired here rather than relayed
         // verbatim: some Anthropic-compatible upstreams answer with an array where
@@ -460,9 +494,8 @@ export async function executeRoutePlan({ plan, req, res, path, body, env = proce
           return { committed: false, requestId };
         }
         lastStatus = 502;
-        console.error(
-          `attempt failed for ${candidate.provider.id}/${candidate.upstreamModel}: ${error?.message ?? error}`,
-        );
+        const safeCode = typeof error?.code === "string" && /^[A-Za-z0-9_.-]{1,64}$/.test(error.code) ? error.code : "upstream_error";
+        trace?.emit("attempt_failed", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel, code: safeCode });
         runtimeState.cooldowns?.set(`${candidate.provider.id}:${candidate.model?.id || candidate.upstreamModel}:${candidate.protocol}`, Date.now() + errorCooldownMs(error));
       }
     }
