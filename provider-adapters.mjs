@@ -378,12 +378,11 @@ function throwIfAborted(signal) {
   if (signal?.aborted) throw signal.reason || Object.assign(new Error("request aborted"), { code: "ABORT_ERR" });
 }
 
-function send({ target, headers, body, signal, trace }) {
+function send({ target, headers, body, signal, trace, proxy }) {
   throwIfAborted(signal);
-  // An optional proxy (OPENCODE_ZEN_PROXY) lets the Zen adapter exit through a
-  // network Zen accepts, without touching any other provider's traffic. The
-  // tunnel is a plain HTTP CONNECT to the target, with TLS then layered on top.
-  const proxy = process.env.OPENCODE_ZEN_PROXY;
+  // A proxy is supplied explicitly only by the OpenCode Zen adapter, so other
+  // provider lanes always connect directly even when the Zen proxy is enabled.
+  // The tunnel is a plain HTTP CONNECT to the target, with TLS layered on top.
   if (proxy) {
     return sendThroughProxy({ target, headers, body, signal, proxy, trace });
   }
@@ -538,7 +537,7 @@ export async function startAttempt({ candidate, req, path, body, env = process.e
     const target = requestUrl(candidate, path, env);
     let sent;
     try {
-      sent = await send({ target, headers: prepared.headers, body: prepared.body, signal, trace });
+      sent = await send({ target, headers: prepared.headers, body: prepared.body, signal, trace, proxy: env.OPENCODE_ZEN_PROXY });
     } catch (error) {
       if (prepared.poolAccount) { error.poolAccount = prepared.poolAccount; error.poolStickyKey = stickyKey; }
       throw error;

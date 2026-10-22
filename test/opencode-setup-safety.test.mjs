@@ -93,35 +93,69 @@ test("direct HTTP transport records body completion before delayed upstream head
   assert.ok(events.findIndex((item) => item.event === "transport_phase_end" && item.phase === "body_sent") < events.length);
 });
 
-test("proxy CONNECT is traced without endpoint details", async (t) => {
-  const upstreamServer = http.createServer((req, res) => { req.resume(); res.end("ok"); });
+test("Zen alone uses its explicitly configured proxy across native and translated lanes", async (t) => {
+  const upstreamRequests = [];
+  const upstreamSockets = new Set();
+  const upstreamServer = http.createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => { upstreamRequests.push({ url: req.url, body: Buffer.concat(chunks).toString() }); res.setHeader("connection", "close"); res.end("ok"); });
+  });
+  upstreamServer.on("connection", (socket) => { upstreamSockets.add(socket); socket.once("close", () => upstreamSockets.delete(socket)); });
   upstreamServer.listen(0, "127.0.0.1"); await once(upstreamServer, "listening");
+  const connectRequests = [];
+  const tunnelSockets = new Set();
   const proxyServer = http.createServer();
+  proxyServer.on("connection", (socket) => { tunnelSockets.add(socket); socket.once("close", () => tunnelSockets.delete(socket)); });
   proxyServer.on("connect", (req, clientSocket, head) => {
+    tunnelSockets.add(clientSocket);
+    clientSocket.once("close", () => tunnelSockets.delete(clientSocket));
+    connectRequests.push(req.url);
     const [host, port] = req.url.split(":");
     const upstreamSocket = net.connect(Number(port), host, () => {
+      tunnelSockets.add(upstreamSocket);
+      upstreamSocket.once("close", () => tunnelSockets.delete(upstreamSocket));
       clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
       if (head.length) upstreamSocket.write(head);
       clientSocket.pipe(upstreamSocket); upstreamSocket.pipe(clientSocket);
     });
   });
   proxyServer.listen(0, "127.0.0.1"); await once(proxyServer, "listening");
-  const previousProxy = process.env.OPENCODE_ZEN_PROXY;
-  process.env.OPENCODE_ZEN_PROXY = `http://127.0.0.1:${proxyServer.address().port}`;
+  const proxy = `http://127.0.0.1:${proxyServer.address().port}`;
+  const baseUrl = `http://127.0.0.1:${upstreamServer.address().port}`;
   t.after(() => {
-    if (previousProxy === undefined) delete process.env.OPENCODE_ZEN_PROXY; else process.env.OPENCODE_ZEN_PROXY = previousProxy;
-    proxyServer.closeAllConnections(); proxyServer.close(); upstreamServer.closeAllConnections(); upstreamServer.close();
+    for (const socket of tunnelSockets) socket.destroy();
+    for (const socket of upstreamSockets) socket.destroy();
+    proxyServer.closeAllConnections(); upstreamServer.closeAllConnections();
+    proxyServer.close(); upstreamServer.close();
   });
-  const candidate = { provider: { id: "fixture", adapter: "middleware", base_url: `http://127.0.0.1:${upstreamServer.address().port}` }, upstreamModel: "fixture", protocol: "messages" };
-  const events = [];
-  const attempt = startAttempt({ candidate, req: { headers: {} }, path: "/v1/messages", body: Buffer.from("{}"), trace: { emit: (event, fields) => events.push({ event, ...fields }) } });
-  await new Promise((resolve) => upstreamServer.once("request", (req) => req.once("end", resolve)));
-  const phases = events.filter((item) => item.event === "transport_phase_end").map((item) => item.phase);
-  const result = await attempt;
-  result.response.resume();
-  assert.ok(phases.indexOf("proxy_connect") >= 0);
-  assert.ok(phases.indexOf("proxy_connect") < phases.indexOf("connection"));
-  assert.doesNotMatch(JSON.stringify(events), /127\\.0\\.0\\.1|fixture/);
+
+  async function dispatch(candidate, path, requestBody, env) {
+    const events = [];
+    const result = await startAttempt({ candidate, req: { headers: candidate.provider.adapter === "chatgpt-responses" ? { "idempotency-key": "fixture-key" } : {} }, path, body: Buffer.from(JSON.stringify(requestBody)), env, accountPool: candidate.provider.adapter === "opencode-zen" ? pool() : null, trace: { emit: (event, fields) => events.push({ event, ...fields }) } });
+    const statusCode = result.response.statusCode;
+    result.response.resume();
+    return { events, statusCode };
+  }
+  const baseEnv = { OPENCODE_ZEN_PROXY: proxy };
+  const request = { model: "fixture", stream: false, messages: [{ role: "user", content: "synthetic" }] };
+  const native = await dispatch({ provider: { id: "mistral", adapter: "middleware", base_url: baseUrl }, upstreamModel: "fixture", protocol: "chat_completions" }, "/v1/chat/completions", request, baseEnv);
+  const translated = await dispatch({ provider: { id: "mistral", adapter: "middleware", base_url: baseUrl }, upstreamModel: "fixture", protocol: "messages", translate: "anthropic-from-openai" }, "/v1/messages", { model: "fixture", stream: false, max_tokens: 20, messages: [{ role: "user", content: "synthetic" }] }, baseEnv);
+  const specialist = await dispatch({ provider: { id: "specialist", adapter: "chatgpt-responses" }, upstreamModel: "fixture", protocol: "responses", specialistInstructions: "Review carefully." }, "/v1/responses", { model: "specialist", input: "synthetic" }, { ...baseEnv, CHATGPT_RESPONSES_ENABLED: "true", CHATGPT_SERVICE_URL: baseUrl, CHATGPT_SERVICE_TOKEN: "synthetic-token" });
+  const zen = await dispatch({ provider: { id: "zen", adapter: "opencode-zen", base_url: baseUrl }, model: { id: "fixture" }, upstreamModel: "fixture", protocol: "chat_completions" }, "/v1/chat/completions", request, baseEnv);
+
+  assert.equal(native.statusCode, 200);
+  assert.equal(translated.statusCode, 200);
+  assert.equal(specialist.statusCode, 200);
+  assert.equal(zen.statusCode, 200);
+  assert.deepEqual(connectRequests, [`127.0.0.1:${upstreamServer.address().port}`]);
+  for (const result of [native, translated, specialist]) assert.equal(result.events.some((item) => item.phase === "proxy_connect"), false);
+  assert.ok(zen.events.some((item) => item.phase === "proxy_connect"));
+  assert.equal(upstreamRequests.length, 4);
+  assert.equal(upstreamRequests[1].url, "/chat/completions");
+  assert.match(upstreamRequests[1].body, /\"messages\"/);
+  assert.equal(upstreamRequests[2].url, "/v1/responses");
+  assert.doesNotMatch(JSON.stringify([native.events, translated.events, specialist.events, zen.events]), /127\\.0\\.0\\.1|synthetic/);
 });
 
 test("OpenCode setup errors are never logged with private subprocess details", async (t) => {
