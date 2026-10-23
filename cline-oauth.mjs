@@ -172,6 +172,59 @@ async function nodeResponseText(response) {
   return Buffer.concat(chunks).toString();
 }
 
+const DIAGNOSTIC_ERROR_CODES = new Set([
+  "invalid_request_error",
+  "authentication_error",
+  "permission_error",
+  "rate_limit_error",
+  "not_found_error",
+  "api_error",
+  "overloaded_error",
+  "server_error",
+  "insufficient_quota",
+  "context_length_exceeded",
+  "model_not_found",
+]);
+const REQUEST_FEATURE_FIELDS = [
+  "system", "temperature", "top_p", "stop", "tool_choice", "parallel_tool_calls",
+  "response_format", "stream_options", "n", "seed", "user",
+];
+
+function diagnosticRequestInventory(request, bodyBytes) {
+  const inventory = {
+    request_body_bytes: bodyBytes,
+    request_has_tools: Array.isArray(request?.tools) && request.tools.length > 0,
+    request_tool_count: Array.isArray(request?.tools) ? request.tools.length : 0,
+    request_message_count: Array.isArray(request?.messages) ? request.messages.length : 0,
+    request_stream: request?.stream === true,
+  };
+  for (const field of ["max_tokens", "max_completion_tokens"]) {
+    const value = request?.[field];
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) inventory[`request_${field}`] = Math.min(Math.floor(value), 10_000_000);
+  }
+  for (const field of REQUEST_FEATURE_FIELDS) inventory[`request_has_${field}`] = request?.[field] !== undefined;
+  inventory.request_has_system = request?.system !== undefined
+    || (Array.isArray(request?.messages) && request.messages.some((message) => message?.role === "system"));
+  return inventory;
+}
+
+function diagnosticErrorCode(responseText) {
+  try {
+    const payload = JSON.parse(responseText);
+    const candidates = [payload?.error?.code, payload?.error?.type, payload?.code, payload?.type];
+    return candidates.find((value) => typeof value === "string" && DIAGNOSTIC_ERROR_CODES.has(value)) || "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function diagnosticContentType(response) {
+  const value = String(response.headers?.["content-type"] || "").toLowerCase();
+  if (value.includes("application/json")) return "application_json";
+  if (value.includes("text/event-stream")) return "event_stream";
+  return value ? "other" : "unknown";
+}
+
 export class ClineAdapterError extends Error {
   constructor(message, { status = 502, code = "cline_upstream_error" } = {}) {
     super(message);
@@ -566,7 +619,7 @@ export class ClineOAuthAdapter {
     return this.#modelRefreshInFlight;
   }
 
-  async createChatCompletion(body, { signal } = {}) {
+  async createChatCompletion(body, { signal, trace } = {}) {
     const credentials = await this.#validCredentials();
     const models = await this.discoverFreeModels();
     const requested = nonEmptyString(body?.model);
@@ -588,6 +641,8 @@ export class ClineOAuthAdapter {
       ...requestHeaders(),
       Authorization: `Bearer ${workosTokenPrefix(credentials.accessToken)}`,
     };
+    const inventory = diagnosticRequestInventory(payload, Buffer.byteLength(JSON.stringify(payload)));
+    trace?.emit("cline_request_features", inventory);
     try {
       const response = await nodePostJson(
         endpoint(this.#apiBaseUrl, "/api/v1/chat/completions"),
@@ -596,7 +651,15 @@ export class ClineOAuthAdapter {
         signal,
       );
       if (response.statusCode && (response.statusCode < 200 || response.statusCode >= 300)) {
-        const classified = classifyClineUpstreamError(response.statusCode, await nodeResponseText(response));
+        const responseText = await nodeResponseText(response);
+        const classified = classifyClineUpstreamError(response.statusCode, responseText);
+        trace?.emit("cline_upstream_failure", {
+          status: response.statusCode,
+          cline_classification: classified.code,
+          cline_error_code: diagnosticErrorCode(responseText),
+          cline_content_type: diagnosticContentType(response),
+          ...inventory,
+        });
         throw new ClineAdapterError(classified.message, classified);
       }
       if (body?.stream === true || !response.statusCode) {

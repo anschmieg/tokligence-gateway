@@ -552,7 +552,7 @@ export async function startAttempt({ candidate, req, path, body, env = process.e
   if (candidate.provider.adapter === "cline-oauth") {
     const adapter = adapters[candidate.provider.id];
     if (!adapter) throw new Error("Cline OAuth adapter is not configured");
-    const response = await adapter.createChatCompletion(JSON.parse(attemptBody.toString()), { signal });
+    const response = await adapter.createChatCompletion(JSON.parse(attemptBody.toString()), { signal, trace });
     return { response, upstream: response, target: null, codec: translation?.codec ?? null };
   }
 

@@ -52,6 +52,44 @@ test("request trace allows only safe diagnostic phase and outcome enums", () => 
   assert.doesNotMatch(serialized, /private\.example/);
 });
 
+test("request trace exposes only allowlisted Cline diagnostic fields", () => {
+  const { trace, lines } = harness();
+  trace.emit("cline_upstream_failure", {
+    status: 500,
+    cline_classification: "cline_upstream_error",
+    cline_error_code: "invalid_request_error",
+    cline_content_type: "application_json",
+    request_body_bytes: 54000,
+    request_tool_count: 3,
+    request_message_count: 8,
+    request_max_tokens: 8192,
+    request_has_tools: true,
+    request_stream: true,
+    request_has_tool_choice: true,
+    prompt: "private prompt",
+    tool_name: "private tool name",
+    raw_error: "private error",
+    cline_error_code_raw: "attacker-controlled",
+    request_model: "private model",
+  });
+  trace.emit("cline_upstream_failure", {
+    cline_error_code: "arbitrary-provider-detail",
+    cline_content_type: "text/plain; secret=1",
+    request_body_bytes: -1,
+    request_tool_count: 1.5,
+    request_has_tools: "yes",
+  });
+  const serialized = JSON.stringify(lines);
+  assert.match(serialized, /invalid_request_error/);
+  assert.match(serialized, /application_json/);
+  assert.match(serialized, /54000/);
+  assert.match(serialized, /request_has_tool_choice/);
+  assert.doesNotMatch(serialized, /private prompt|private tool name|private error|attacker-controlled|private model|arbitrary-provider-detail|text\/plain|secret=1/);
+  assert.equal(lines[2].request_body_bytes, undefined);
+  assert.equal(lines[2].request_tool_count, undefined);
+  assert.equal(lines[2].request_has_tools, undefined);
+});
+
 test("request trace allows only explicitly safe provider error codes", () => {
   const { trace, lines } = harness();
   trace.emit("upstream_429", { upstream_error_code: "FreeUsageLimitError", provider_error_code: "secret-provider-code", category: "accountquota" });

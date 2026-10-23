@@ -376,6 +376,89 @@ test("logout clears stored credentials and prevents a pending device login from 
   assert.deepEqual(await adapter.oauthStatus(), { status: "login_required" });
 });
 
+test("Cline failure trace records allowlisted diagnostics and excludes sensitive upstream fields", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "cline-diagnostic-test-"));
+  const credentialsPath = path.join(directory, "credentials.json");
+  await writeFile(credentialsPath, `${JSON.stringify({
+    accessToken: "diagnostic-access",
+    refreshToken: "diagnostic-refresh",
+    expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+  })}\n`, { mode: 0o600 });
+  const secret = "DO_NOT_LOG_PROMPT_OR_SECRET";
+  const upstreamPayload = { error: { code: "invalid_request_error", message: secret, param: "tools[0].function.parameters", prompt: secret } };
+  const api = http.createServer(async (req, res) => {
+    await requestBody(req);
+    if (req.url === "/api/v1/ai/cline/recommended-models") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ free: [{ id: "z-ai/glm-free" }] }));
+      return;
+    }
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(upstreamPayload));
+  });
+  const port = await listen(api);
+  t.after(() => close(api));
+  const events = [];
+  const adapter = new ClineOAuthAdapter({ provider: {
+    api_base_url: `http://127.0.0.1:${port}`,
+    credentials_path: credentialsPath,
+    models: [],
+  } });
+  const request = {
+    model: "cline/z-ai/glm-free",
+    messages: [{ role: "user", content: secret }],
+    stream: true,
+    max_tokens: 4096,
+    tools: [{ type: "function", function: { name: secret, parameters: { type: "object", description: secret } } }],
+    tool_choice: "auto",
+    response_format: { type: "json_object" },
+  };
+  await assert.rejects(adapter.createChatCompletion(request, { trace: { emit: (event, fields) => events.push({ event, fields }) } }), {
+    status: 500,
+    code: "cline_upstream_error",
+  });
+  const features = events.find(({ event }) => event === "cline_request_features").fields;
+  assert.equal(features.request_has_tools, true);
+  assert.equal(features.request_tool_count, 1);
+  assert.equal(features.request_message_count, 1);
+  assert.equal(features.request_stream, true);
+  assert.equal(features.request_max_tokens, 4096);
+  assert.equal(features.request_has_tool_choice, true);
+  const failure = events.find(({ event }) => event === "cline_upstream_failure").fields;
+  assert.equal(failure.status, 500);
+  assert.equal(failure.cline_classification, "cline_upstream_error");
+  assert.equal(failure.cline_error_code, "invalid_request_error");
+  assert.equal(failure.cline_content_type, "application_json");
+  const serialized = JSON.stringify(events);
+  assert.doesNotMatch(serialized, new RegExp(secret));
+  assert.doesNotMatch(serialized, /tools\[0\]\.function\.parameters|proprietary-secret/);
+});
+
+test("unrecognized Cline upstream body fields collapse to safe unknown diagnostic code", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "cline-unknown-diagnostic-test-"));
+  const credentialsPath = path.join(directory, "credentials.json");
+  await writeFile(credentialsPath, `${JSON.stringify({ accessToken: "a", refreshToken: "r", expiresAt: new Date(Date.now() + 60 * 60_000).toISOString() })}\n`, { mode: 0o600 });
+  const api = http.createServer(async (req, res) => {
+    await requestBody(req);
+    if (req.url === "/api/v1/ai/cline/recommended-models") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ free: [{ id: "z-ai/glm-free" }] }));
+      return;
+    }
+    res.writeHead(500, { "Content-Type": "text/plain" });
+    res.end("proprietary-secret-error");
+  });
+  const port = await listen(api);
+  t.after(() => close(api));
+  const events = [];
+  const adapter = new ClineOAuthAdapter({ provider: { api_base_url: `http://127.0.0.1:${port}`, credentials_path: credentialsPath, models: [] } });
+  await assert.rejects(adapter.createChatCompletion({ model: "cline/z-ai/glm-free", messages: [], stream: false }, { trace: { emit: (event, fields) => events.push({ event, fields }) } }));
+  const failure = events.find(({ event }) => event === "cline_upstream_failure").fields;
+  assert.equal(failure.cline_error_code, "unknown");
+  assert.equal(failure.cline_content_type, "other");
+  assert.doesNotMatch(JSON.stringify(events), /proprietary-secret-error/);
+});
+
 test("safe Cline upstream classifications preserve meaningful statuses without raw upstream bodies", () => {
   assert.deepEqual(classifyClineUpstreamError(401, "token invalid access-secret"), {
     status: 401,

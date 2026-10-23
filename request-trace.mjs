@@ -20,8 +20,11 @@ export function createRequestTrace(req, res, { logger = console.info } = {}) {
   const emit = (event, extra = {}) => {
     try {
       const safeExtra = {};
-      for (const key of ["status", "body_bytes", "content_length", "candidate_count", "attempt_number", "slot", "retry_after_ms", "cooldown_ms", "remaining_ms"]) {
+      for (const key of ["status", "body_bytes", "content_length", "candidate_count", "attempt_number", "slot", "retry_after_ms", "cooldown_ms", "remaining_ms", "request_body_bytes", "request_tool_count", "request_message_count", "request_max_tokens", "request_max_completion_tokens"]) {
         if (Number.isSafeInteger(extra[key]) && extra[key] >= 0) safeExtra[key] = extra[key];
+      }
+      for (const key of ["request_has_tools", "request_stream", "request_has_system", "request_has_temperature", "request_has_top_p", "request_has_stop", "request_has_tool_choice", "request_has_parallel_tool_calls", "request_has_response_format", "request_has_stream_options", "request_has_n", "request_has_seed", "request_has_user"]) {
+        if (typeof extra[key] === "boolean") safeExtra[key] = extra[key];
       }
       for (const key of ["stage", "provider", "upstream_model", "code", "deadline"]) {
         const value = safeTraceId(extra[key]);
@@ -29,6 +32,9 @@ export function createRequestTrace(req, res, { logger = console.info } = {}) {
       }
       if (["FreeUsageLimitError", "FreeTierError", "rate_limit_error"].includes(extra.provider_error_code)) safeExtra.provider_error_code = extra.provider_error_code;
       if (["FreeUsageLimitError", "FreeTierError", "rate_limit_error"].includes(extra.upstream_error_code)) safeExtra.upstream_error_code = extra.upstream_error_code;
+      if (["cline_auth_error", "cline_daily_free_quota_exhausted", "cline_model_retired", "cline_request_rejected", "cline_upstream_error"].includes(extra.cline_classification)) safeExtra.cline_classification = extra.cline_classification;
+      if (["invalid_request_error", "authentication_error", "permission_error", "rate_limit_error", "not_found_error", "api_error", "overloaded_error", "server_error", "insufficient_quota", "context_length_exceeded", "model_not_found", "unknown"].includes(extra.cline_error_code)) safeExtra.cline_error_code = extra.cline_error_code;
+      if (["application_json", "event_stream", "other", "unknown"].includes(extra.cline_content_type)) safeExtra.cline_content_type = extra.cline_content_type;
       if (["session_id", "authorization", "credential", "client_version", "proxy_connect", "connection", "tls", "body_sent", "upstream_headers_wait", "pool_selection"].includes(extra.phase)) safeExtra.phase = extra.phase;
       if (["ok", "error", "cancelled", "completed_after_cancel", "failed_after_cancel", "reused", "rejected", "exhausted", "timeout"].includes(extra.outcome)) safeExtra.outcome = extra.outcome;
       if (["eligible", "excluded_after_failure", "model_ineligible", "missing_credential", "cooldown"].includes(extra.reason)) safeExtra.reason = extra.reason;
