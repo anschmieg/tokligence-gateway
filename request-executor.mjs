@@ -153,7 +153,7 @@ function startAttemptUntilAbort(options, attemptStarter) {
 // Holds a bounded stream prefix until the first semantic event. This leaves a
 // small pre-output window for account failover without replaying anything once
 // visible output has started.
-function preflightOpenCodeStream(response, signal, limit = 256 * 1024, deadlineMs = 90000) {
+function preflightOpenCodeStream(response, signal, limit = 256 * 1024, deadlineMs = 90000, { allowRetryAfterSemantic = false, waitForCompletion = false } = {}) {
   return new Promise((resolve) => {
     const parser = createSseChunkReader();
     const decoder = new TextDecoder();
@@ -161,6 +161,7 @@ function preflightOpenCodeStream(response, signal, limit = 256 * 1024, deadlineM
     let bytes = 0;
     let semantic = false;
     let complete = false;
+    let finishSeen = false;
     let settled = false;
     let timer;
     const cleanup = () => {
@@ -178,7 +179,11 @@ function preflightOpenCodeStream(response, signal, limit = 256 * 1024, deadlineM
       resolve({ ...result, prefixText, ended, decoder });
     };
     const inspect = (payload) => {
-      if (payload === "[DONE]") { complete = true; return null; }
+      if (payload === "[DONE]") {
+        if (waitForCompletion && !semantic) return new Error("OpenCode completed without a message or tool call");
+        complete = true;
+        return null;
+      }
       let frame;
       try { frame = JSON.parse(payload); } catch { return new Error("OpenCode stream contained malformed JSON"); }
       if (frame?.error) return new Error("OpenCode returned an embedded stream error");
@@ -188,38 +193,43 @@ function preflightOpenCodeStream(response, signal, limit = 256 * 1024, deadlineM
         || (typeof delta.reasoning === "string" && delta.reasoning.length)
         || (typeof delta.reasoning_content === "string" && delta.reasoning_content.length)
         || (Array.isArray(delta.tool_calls) && delta.tool_calls.some((call) => call?.id || call?.function?.name || call?.function?.arguments))) semantic = true;
+      if (waitForCompletion && choice?.finish_reason === "content_filter") semantic = true;
       if (choice?.finish_reason) {
         if (!["stop", "length", "tool_calls", "function_call", "content_filter"].includes(choice.finish_reason)) return new Error("OpenCode stream reported an unsuccessful finish");
-        complete = true;
-        semantic = true;
+        if (waitForCompletion && !semantic && choice.finish_reason !== "content_filter") return new Error("OpenCode completed without a message or tool call");
+        if (waitForCompletion && choice.finish_reason === "content_filter") semantic = true;
+        finishSeen = true;
+        if (!waitForCompletion) complete = true;
+        if (!waitForCompletion) semantic = true;
       }
       return null;
     };
     const onData = (chunk) => {
       const buffer = Buffer.from(chunk);
       bytes += buffer.length;
-      if (bytes > limit) return finish({ retryable: !semantic && !signal?.aborted, semantic, error: new Error("OpenCode stream preamble exceeded its bound") });
+      if (bytes > limit) return finish({ retryable: (allowRetryAfterSemantic || !semantic) && !signal?.aborted, semantic, error: new Error("OpenCode stream preamble exceeded its bound") });
       const decoded = decoder.decode(buffer, { stream: true });
       prefixText += decoded;
       for (const payload of parser.push(decoded)) {
         const error = inspect(payload);
-        if (error) return finish({ retryable: !semantic && !signal?.aborted, semantic, error });
+        if (error) return finish({ retryable: (allowRetryAfterSemantic || !semantic) && !signal?.aborted, semantic, error });
       }
-      if (semantic || complete) finish({ retryable: false, semantic, complete });
+      if (complete && (!waitForCompletion || finishSeen)) finish({ retryable: false, semantic, complete });
+      else if (semantic && !waitForCompletion) finish({ retryable: false, semantic, complete });
     };
     const onEnd = () => {
       const tail = decoder.decode();
       if (tail) {
-        if (bytes + Buffer.byteLength(tail) > limit) return finish({ retryable: !semantic, semantic, error: new Error("OpenCode stream preamble exceeded its bound") }, true);
+        if (bytes + Buffer.byteLength(tail) > limit) return finish({ retryable: (allowRetryAfterSemantic || !semantic) && !signal?.aborted, semantic, error: new Error("OpenCode stream preamble exceeded its bound") }, true);
         prefixText += tail;
         for (const payload of parser.push(tail)) {
           const error = inspect(payload);
-          if (error) return finish({ retryable: !semantic, semantic, error }, true);
+          if (error) return finish({ retryable: (allowRetryAfterSemantic || !semantic) && !signal?.aborted, semantic, error }, true);
         }
       }
-      finish({ retryable: !semantic, semantic, complete, error: complete && semantic ? null : new Error("OpenCode stream ended before completion") }, true);
+      finish({ retryable: (allowRetryAfterSemantic || !semantic) && !signal?.aborted, semantic, complete, error: complete && semantic && (!waitForCompletion || finishSeen) ? null : new Error("OpenCode stream ended before completion") }, true);
     };
-    const onError = (error) => finish({ retryable: !semantic && !signal?.aborted, semantic, error }, true);
+    const onError = (error) => finish({ retryable: (allowRetryAfterSemantic || !semantic) && !signal?.aborted, semantic, error }, true);
     const onAbort = () => finish({ retryable: false, semantic, error: signal.reason || new Error("request aborted") }, true);
     const preflightMs = Math.max(1, deadlineMs);
     timer = setTimeout(() => finish({ retryable: !semantic && !signal?.aborted, semantic, error: new Error("OpenCode stream preamble timed out") }), preflightMs);
@@ -269,6 +279,67 @@ function createChatStreamValidator() {
     get error() { return error; },
     get semantic() { return semantic; },
   };
+}
+
+async function collectOpenAIChatCompletion(response, preflight, model) {
+  const reader = createSseChunkReader();
+  const decoder = preflight?.decoder || new TextDecoder();
+  let size = 0;
+  let completion = null;
+  let done = false;
+  const choices = new Map();
+  let sawFinish = false;
+  let semantic = false;
+  let contentFiltered = false;
+  const fail = (message) => { throw Object.assign(new Error(message), { upstreamStreamError: true }); };
+  const consume = (text) => {
+    for (const payload of reader.push(text)) {
+      if (payload === "[DONE]") { done = true; continue; }
+      let frame;
+      try { frame = JSON.parse(payload); } catch { fail("OpenCode stream contained malformed JSON"); }
+      if (!frame || typeof frame !== "object" || frame.error) fail("OpenCode returned an embedded stream error");
+      if (!completion) completion = { id: frame.id, object: "chat.completion", created: frame.created, model: frame.model || model, choices: [], usage: null };
+      if (frame.usage && typeof frame.usage === "object") completion.usage = frame.usage;
+      for (const part of frame.choices || []) {
+        if (!Number.isInteger(part.index) || part.index < 0) fail("OpenCode stream contained an invalid choice index");
+        let choice = choices.get(part.index);
+        if (!choice) { choice = { index: part.index, message: { role: "assistant", content: "" }, finish_reason: null }; choices.set(part.index, choice); }
+        const delta = part.delta || {};
+        if (delta.role) choice.message.role = delta.role;
+        if (typeof delta.content === "string") { choice.message.content += delta.content; if (delta.content.length) semantic = true; }
+        if (Array.isArray(delta.tool_calls)) {
+          choice.message.tool_calls ||= [];
+          for (const call of delta.tool_calls) {
+            if (!Number.isInteger(call.index) || call.index < 0) fail("OpenCode stream contained an invalid tool index");
+            let tool = choice.message.tool_calls[call.index];
+            if (!tool) { tool = { id: "", type: call.type || "function", function: { name: "", arguments: "" } }; choice.message.tool_calls[call.index] = tool; }
+            if (call.id) { tool.id += call.id; semantic = true; }
+            if (call.type) tool.type = call.type;
+            if (call.function?.name) tool.function.name += call.function.name;
+            if (typeof call.function?.arguments === "string") { tool.function.arguments += call.function.arguments; if (call.function.arguments.length) semantic = true; }
+          }
+        }
+        if (part.finish_reason) { choice.finish_reason = part.finish_reason; sawFinish = true; if (part.finish_reason === "content_filter") contentFiltered = true; }
+      }
+      size += Buffer.byteLength(payload);
+      if (size > 32 * 1024 * 1024) fail("OpenCode completion exceeded its size bound");
+    }
+  };
+  if (preflight?.error) throw preflight.error;
+  if (preflight?.prefixText) consume(preflight.prefixText);
+  if (!preflight?.ended) {
+    for await (const chunk of response) consume(decoder.decode(chunk, { stream: true }));
+    consume(decoder.decode());
+  }
+  if (!completion || !done || !choices.size || !sawFinish || (!semantic && !contentFiltered)) fail("OpenCode stream ended before completion");
+  completion.choices = [...choices.values()].sort((a, b) => a.index - b.index);
+  for (const choice of completion.choices) {
+    if (!choice.finish_reason || !["stop", "length", "tool_calls", "function_call", "content_filter"].includes(choice.finish_reason)) fail("OpenCode stream reported an incomplete completion");
+    const hasText = choice.message.content.trim().length > 0;
+    const hasTools = choice.message.tool_calls?.length > 0;
+    if (!hasText && !hasTools && choice.finish_reason !== "content_filter") fail("OpenCode completed without a message or tool call");
+  }
+  return completion;
 }
 
 function firstStreamChunk(response, signal) {
@@ -578,7 +649,8 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
             if (attemptResult.poolAccount
               && (attemptResult.codec || candidate.protocol === "chat_completions")
               && String(response.headers?.["content-type"] || "").includes("text/event-stream")) {
-              const preflight = await preflightOpenCodeStream(response, aborter.signal, 256 * 1024, Math.max(1, plan.deadline - Date.now()));
+              const directChatNonstream = !attemptResult.codec && candidate.protocol === "chat_completions" && body?.stream !== true;
+              const preflight = await preflightOpenCodeStream(response, aborter.signal, directChatNonstream ? 32 * 1024 * 1024 : 256 * 1024, Math.max(1, plan.deadline - Date.now()), { allowRetryAfterSemantic: directChatNonstream, waitForCompletion: directChatNonstream });
               attemptResult.streamPreflight = preflight;
               if (preflight.retryable) {
                 openCodeAccountPool.markFailure(attemptResult.poolAccount, preflight.error);
@@ -656,6 +728,16 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
           continue;
         }
         observeUpstreamResponse(response, candidate, onUpstreamResponse);
+        if (poolAccount && !codec && candidate.protocol === "chat_completions" && body?.stream !== true && String(response.headers?.["content-type"] || "").includes("text/event-stream")) {
+          const completion = await collectOpenAIChatCompletion(response, streamPreflight, candidate.upstreamModel);
+          const base = { "x-gateway-request-id": requestId, "x-gateway-model": plan.publicModel, "x-gateway-provider": candidate.provider.id, "x-gateway-upstream-model": candidate.upstreamModel };
+          res.writeHead(status, { ...base, "content-type": "application/json" });
+          res.end(JSON.stringify(completion));
+          openCodeAccountPool.markSuccess(poolAccount, poolStickyKey, poolGeneration);
+          if (affinityKey && plan.profile && runtimeState.affinity) runtimeState.affinity.set(`${affinityKey}:${plan.profile}`, { provider: candidate.provider.id, model: candidate.upstreamModel, updatedAt: Date.now() });
+          recordModelFamily(runtimeState, historyKey === undefined ? affinityKey : historyKey, candidate);
+          return { committed: true, requestId, provider: candidate.provider.id, attempts: plan.candidates.indexOf(candidate) + 1 };
+        }
         if (poolAccount && !codec && candidate.protocol === "chat_completions" && String(response.headers?.["content-type"] || "").includes("text/event-stream")) {
           const validator = createChatStreamValidator();
           const writer = createSseWriter(res, aborter.signal, pingMs);

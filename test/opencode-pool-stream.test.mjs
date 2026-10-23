@@ -22,14 +22,14 @@ function makePool(firstStatusFailure = false) {
     markSuccess() {},
   };
 }
-async function runFixture(t, handler, protocol = "messages") {
+async function runFixture(t, handler, protocol = "messages", body = requestBody) {
   const upstream = http.createServer(handler);
   const port = await listen(upstream);
   const gateway = http.createServer((req, res) => {
     req.resume();
     req.once("end", () => void executeRoutePlan({
-      plan: { candidates: [candidate(port, protocol)], publicModel: "public/model", required: { streaming: true }, deadline: Date.now() + 3000 },
-      req, res, path: protocol === "chat_completions" ? "/v1/chat/completions" : "/v1/messages", body: requestBody,
+      plan: { candidates: [candidate(port, protocol)], publicModel: "public/model", required: { streaming: body.stream === true }, deadline: Date.now() + 3000 },
+      req, res, path: protocol === "chat_completions" ? "/v1/chat/completions" : "/v1/messages", body,
       env: { GATEWAY_SSE_PING_MS: "20", GATEWAY_RESPONSE_START_TIMEOUT_MS: "2500" }, openCodeAccountPool: pool, affinityKey: "sticky",
     }));
   });
@@ -38,8 +38,8 @@ async function runFixture(t, handler, protocol = "messages") {
   t.after(async () => { await close(gateway); await close(upstream); });
   return { gatewayPort, pool };
 }
-async function post(port, protocol = "messages") {
-  return fetch(`http://127.0.0.1:${port}${protocol === "chat_completions" ? "/v1/chat/completions" : "/v1/messages"}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(requestBody) });
+async function post(port, protocol = "messages", body = requestBody) {
+  return fetch(`http://127.0.0.1:${port}${protocol === "chat_completions" ? "/v1/chat/completions" : "/v1/messages"}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 }
 
 const good = `data: ${JSON.stringify({ choices: [{ delta: { content: "backup" }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`;
@@ -229,6 +229,76 @@ test("pooled direct chat stream surfaces embedded errors and truncation", async 
     assert.match(text, /event: error|"error"/);
     assert.doesNotMatch(text, /secret detail/);
     assert.deepEqual([...pool.failures], bad.includes('"error"') ? ["a", "b"] : ["a"]);
+  }
+});
+
+test("non-streaming pooled chat folds Zen SSE into a JSON completion", async (t) => {
+  const body = { model: "public/model", stream: false, messages: [{ role: "user", content: "hello" }] };
+  const fixture = await runFixture(t, (_req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    const frame = `data: ${JSON.stringify({ id: "chatcmpl-test", object: "chat.completion.chunk", created: 123, model: "zen/model", choices: [{ index: 0, delta: { role: "assistant", content: "hello 😀" }, finish_reason: null }] })}\n\n`;
+    const emoji = Buffer.from("😀");
+    const frameBytes = Buffer.from(frame);
+    const emojiOffset = frameBytes.indexOf(emoji);
+    res.write(frameBytes.subarray(0, emojiOffset));
+    res.write(emoji.subarray(0, 2));
+    setImmediate(() => {
+      res.write(Buffer.concat([emoji.subarray(2), frameBytes.subarray(emojiOffset + emoji.length)]));
+      res.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`);
+      res.end(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 } })}\n\ndata: [DONE]\n\n`);
+    });
+  }, "chat_completions", body);
+  const response = await post(fixture.gatewayPort, "chat_completions", body);
+  const completion = await response.json();
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type"), /application\/json/);
+  assert.equal(completion.object, "chat.completion");
+  assert.deepEqual(completion.choices, [{ index: 0, message: { role: "assistant", content: "hello 😀" }, finish_reason: "stop" }]);
+  assert.deepEqual(completion.usage, { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 });
+  assert.deepEqual([...fixture.pool.failures], []);
+});
+
+test("non-streaming pooled chat preserves an empty content-filter completion", async (t) => {
+  const body = { model: "public/model", stream: false, messages: [{ role: "user", content: "hello" }] };
+  const fixture = await runFixture(t, (_req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(`data: ${JSON.stringify({ id: "filtered", choices: [{ index: 0, delta: {}, finish_reason: "content_filter" }] })}\n\ndata: [DONE]\n\n`);
+  }, "chat_completions", body);
+  const response = await post(fixture.gatewayPort, "chat_completions", body);
+  const completion = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(completion.choices[0].finish_reason, "content_filter");
+  assert.equal(completion.choices[0].message.content, "");
+  assert.deepEqual([...fixture.pool.failures], []);
+});
+
+test("non-streaming pooled chat folds tool calls and retries malformed or incomplete streams", async (t) => {
+  const body = { model: "public/model", stream: false, messages: [{ role: "user", content: "hello" }] };
+  const toolFrames = `data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "lookup", arguments: '{"q":' } }] }, finish_reason: null }] })}\n\n`;
+  const toolTail = `data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '"x"}' } }] }, finish_reason: "tool_calls" }] })}\n\ndata: [DONE]\n\n`;
+  const toolFixture = await runFixture(t, (_req, res) => { res.writeHead(200, { "content-type": "text/event-stream" }); res.end(toolFrames + toolTail); }, "chat_completions", body);
+  const toolResponse = await post(toolFixture.gatewayPort, "chat_completions", body);
+  const toolCompletion = await toolResponse.json();
+  assert.equal(toolCompletion.choices[0].finish_reason, "tool_calls");
+  assert.deepEqual(toolCompletion.choices[0].message.tool_calls, [{ id: "call_1", type: "function", function: { name: "lookup", arguments: '{"q":"x"}' } }]);
+  assert.deepEqual(JSON.parse(toolCompletion.choices[0].message.tool_calls[0].function.arguments), { q: "x" });
+
+  for (const bad of [
+    `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "partial" }, finish_reason: null }] })}\n\ndata: {not-json}\n\n`,
+    `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "partial" }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ error: { message: "PRIVATE provider error" } })}\n\n`,
+    `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "partial" }, finish_reason: null }] })}\n\ndata: [DONE]\n\n`,
+  ]) {
+    let calls = 0;
+    const fixture = await runFixture(t, (_req, res) => {
+      calls += 1;
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(calls === 1 ? bad : `data: ${JSON.stringify({ id: "backup", choices: [{ index: 0, delta: { content: "backup" }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+    }, "chat_completions", body);
+    const response = await post(fixture.gatewayPort, "chat_completions", body);
+    const completion = await response.json();
+    assert.equal(completion.choices[0].message.content, "backup");
+    assert.equal(calls, 2);
+    assert.deepEqual([...fixture.pool.failures], ["a"]);
   }
 });
 
