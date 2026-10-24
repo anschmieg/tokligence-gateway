@@ -44,6 +44,82 @@ async function post(port, protocol = "messages", body = requestBody) {
 
 const good = `data: ${JSON.stringify({ choices: [{ delta: { content: "backup" }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`;
 
+test("Zen Messages translation sends only caller tools and does not leak injected built-ins", async (t) => {
+  let upstreamRequest;
+  const body = { ...requestBody, stream: false, thinking: { type: "enabled", budget_tokens: 1024 } };
+  const bashTool = { name: "bash", description: "Caller-owned shell", input_schema: { type: "object", properties: { command: { type: "string" } }, required: ["command"] } };
+  const bodyWithTool = { ...body, tools: [bashTool] };
+  const injectedCall = { id: "call_synthetic_bash", type: "function", function: { name: "bash", arguments: "{\"command\":\"synthetic\"}" } };
+  const fixture = await runFixture(t, (req, res) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      upstreamRequest = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: "Synthetic reasoning", tool_calls: [injectedCall] }, finish_reason: "tool_calls" }] })}\n\ndata: [DONE]\n\n`);
+    });
+  }, "messages", bodyWithTool);
+  const response = await post(fixture.gatewayPort, "messages", bodyWithTool);
+  const payload = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(upstreamRequest.model, "zen/model");
+  assert.deepEqual(upstreamRequest.tools, [{ type: "function", function: { name: "bash", description: "Caller-owned shell", parameters: bashTool.input_schema } }]);
+  assert.deepEqual(payload.content, [
+    { type: "thinking", thinking: "Synthetic reasoning" },
+    { type: "tool_use", id: "call_synthetic_bash", name: "bash", input: { command: "synthetic" } },
+  ]);
+  assert.equal(payload.stop_reason, "tool_use");
+});
+
+test("streaming Messages keeps reasoning separate from visible text", async (t) => {
+  const body = { ...requestBody, thinking: { type: "enabled", budget_tokens: 1024 } };
+  const fixture = await runFixture(t, (_req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(`data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "private thought", content: "visible answer" }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+  }, "messages", body);
+  const response = await post(fixture.gatewayPort, "messages", body);
+  const stream = await response.text();
+  assert.equal(response.status, 200);
+  assert.match(stream, /"type":"thinking_delta","thinking":"private thought"/);
+  assert.match(stream, /"type":"text_delta","text":"visible answer"/);
+  assert.ok(stream.indexOf("private thought") < stream.indexOf("visible answer"));
+});
+
+test("caller-declared bash schema and tool result id survive the Messages translation", async (t) => {
+  let upstreamRequest;
+  const bashTool = { name: "bash", description: "Synthetic caller tool", input_schema: { type: "object", properties: { command: { type: "string" } }, required: ["command"] } };
+  const callId = "call_synthetic_declared_bash";
+  const body = {
+    ...requestBody,
+    stream: false,
+    tools: [bashTool],
+    messages: [
+      { role: "user", content: "Synthetic request" },
+      { role: "assistant", content: [{ type: "tool_use", id: callId, name: "bash", input: { command: "synthetic" } }] },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: callId, content: "synthetic result" }] },
+    ],
+  };
+  const fixture = await runFixture(t, (req, res) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      upstreamRequest = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "synthetic completion" }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+    });
+  }, "messages", body);
+  const response = await post(fixture.gatewayPort, "messages", body);
+  const payload = await response.json();
+  const bashTools = upstreamRequest.tools.filter((tool) => tool.function.name === "bash");
+  assert.equal(bashTools.length, 1);
+  const upstreamTool = bashTools[0];
+  assert.deepEqual(upstreamTool.function.parameters, bashTool.input_schema);
+  assert.ok(upstreamRequest.messages.some((message) => message.tool_calls?.some((call) => call.id === callId && call.function.name === "bash")));
+  assert.ok(upstreamRequest.messages.some((message) => message.role === "tool" && message.tool_call_id === callId && message.content === "synthetic result"));
+  assert.equal(response.status, 200);
+  assert.equal(payload.content[0].text, "synthetic completion");
+});
+
 test("pooled Retry-After beyond one hour is preserved while selecting the backup", async (t) => {
   const pool = makePool(true);
   let calls = 0;
@@ -256,6 +332,19 @@ test("non-streaming pooled chat folds Zen SSE into a JSON completion", async (t)
   assert.deepEqual(completion.choices, [{ index: 0, message: { role: "assistant", content: "hello 😀" }, finish_reason: "stop" }]);
   assert.deepEqual(completion.usage, { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 });
   assert.deepEqual([...fixture.pool.failures], []);
+});
+
+test("non-streaming pooled chat preserves reasoning separately from visible text", async (t) => {
+  const body = { model: "public/model", stream: false, messages: [{ role: "user", content: "hello" }] };
+  const fixture = await runFixture(t, (_req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: "private thought", content: "visible answer" }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+  }, "chat_completions", body);
+  const response = await post(fixture.gatewayPort, "chat_completions", body);
+  const completion = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(completion.choices[0].message.content, "visible answer");
+  assert.equal(completion.choices[0].message.reasoning_content, "private thought");
 });
 
 test("non-streaming pooled chat preserves an empty content-filter completion", async (t) => {

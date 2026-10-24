@@ -307,6 +307,10 @@ async function collectOpenAIChatCompletion(response, preflight, model) {
         const delta = part.delta || {};
         if (delta.role) choice.message.role = delta.role;
         if (typeof delta.content === "string") { choice.message.content += delta.content; if (delta.content.length) semantic = true; }
+        if (typeof delta.reasoning_content === "string") {
+          choice.message.reasoning_content = (choice.message.reasoning_content || "") + delta.reasoning_content;
+          if (delta.reasoning_content.length) semantic = true;
+        }
         if (Array.isArray(delta.tool_calls)) {
           choice.message.tool_calls ||= [];
           for (const call of delta.tool_calls) {
@@ -336,8 +340,9 @@ async function collectOpenAIChatCompletion(response, preflight, model) {
   for (const choice of completion.choices) {
     if (!choice.finish_reason || !["stop", "length", "tool_calls", "function_call", "content_filter"].includes(choice.finish_reason)) fail("OpenCode stream reported an incomplete completion");
     const hasText = choice.message.content.trim().length > 0;
+    const hasReasoning = typeof choice.message.reasoning_content === "string" && choice.message.reasoning_content.length > 0;
     const hasTools = choice.message.tool_calls?.length > 0;
-    if (!hasText && !hasTools && choice.finish_reason !== "content_filter") fail("OpenCode completed without a message or tool call");
+    if (!hasText && !hasReasoning && !hasTools && choice.finish_reason !== "content_filter") fail("OpenCode completed without a message or tool call");
   }
   return completion;
 }
@@ -387,11 +392,10 @@ async function respondWithCodec({ response, codec, res, status, requestId, model
       throw Object.assign(new Error("Upstream returned an incomplete completion"), { upstreamStreamError: true });
     }
     const message = choice.message || {};
-    // The current message translator emits string content and tool calls; array
-    // content is not supported there, so it must not count as semantic output.
     const text = typeof message.content === "string" && message.content.trim().length > 0;
+    const reasoning = codec.keepReasoning && typeof message.reasoning_content === "string" && message.reasoning_content.length > 0;
     const tools = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
-    if (!text && !tools && finish !== "content_filter") {
+    if (!text && !reasoning && !tools && finish !== "content_filter") {
       throw Object.assign(new Error("Upstream completed without a message or tool call"), { upstreamStreamError: true });
     }
   };
@@ -409,7 +413,7 @@ async function respondWithCodec({ response, codec, res, status, requestId, model
       if (strictCompletion) response._opencodePoolStreamState = { failure: error };
       throw error;
     }
-    const message = openaiToAnthropicMessage(completion, { model });
+    const message = openaiToAnthropicMessage(completion, { model, keepReasoning: codec.keepReasoning === true });
     if (codec.stream) {
       res.writeHead(status, { ...base, "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive" });
       res.end(anthropicMessageToSse(message));
@@ -421,7 +425,7 @@ async function respondWithCodec({ response, codec, res, status, requestId, model
   }
 
   const reader = createSseChunkReader();
-  const encoder = createAnthropicStreamCodec({ model, strictCompletion });
+  const encoder = createAnthropicStreamCodec({ model, strictCompletion, keepReasoning: codec.keepReasoning === true });
   const decoder = preflight?.decoder;
   if (!decoder) response.setEncoding("utf8");
   const decode = (chunk) => decoder ? decoder.decode(chunk, { stream: true }) : String(chunk);

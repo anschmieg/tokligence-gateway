@@ -105,34 +105,23 @@ test("pool configuration rejects duplicate identities, inline secrets and obsole
   invalid((p) => p.systemone = {});
 });
 
-test("shipped secondary Zen OAuth account is optional and shares free-only eligibility", () => {
+test("shipped Zen OAuth pool routes only through primary", () => {
   const config = parseRoutingConfig(fs.readFileSync(new URL("../gateway.routes.yaml", import.meta.url), "utf8"));
   const provider = config.providers.find((entry) => entry.id === "opencode-zen");
-  const [primary, secondary] = provider.opencode_pool.accounts;
-  assert.equal(primary.id, "primary-oauth");
-  assert.equal(secondary.id, "secondary-oauth");
-  assert.equal(secondary.credential_file, "/data/zen/secondary-oauth.json");
-  assert.equal(secondary.discover_free_models, true);
-  assert.notEqual(primary.credential_file_env, secondary.credential_file);
+  assert.deepEqual(provider.opencode_pool.accounts.map((account) => account.id), ["primary-oauth"]);
+  assert.equal(provider.opencode_pool.accounts[0].credential_file_env, "OPENCODE_ZEN_CREDENTIAL_FILE");
 
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "opencode-secondary-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "opencode-primary-only-"));
   const primaryFile = path.join(dir, "primary.json");
-  const secondaryFile = path.join(dir, "secondary.json");
   try {
     fs.writeFileSync(primaryFile, JSON.stringify({ access: "synthetic-primary" }));
     const runtimeProvider = { ...provider, credential_file: primaryFile, credential_file_env: null, opencode_pool: {
       ...provider.opencode_pool,
-      accounts: [
-        { ...primary, credential_file: primaryFile, credential_file_env: null },
-        { ...secondary, credential_file: secondaryFile },
-      ],
+      accounts: [{ ...provider.opencode_pool.accounts[0], credential_file: primaryFile, credential_file_env: null }],
     } };
-    const env = {};
-    const pool = createOpenCodeAccountPool({ provider: runtimeProvider, env });
+    const pool = createOpenCodeAccountPool({ provider: runtimeProvider, env: {} });
     setOpenCodeFreeModels(runtimeProvider, [{ id: "beam-free" }]);
     assert.deepEqual(pool.eligibleAccounts("chat", "beam-free"), ["primary-oauth"]);
-    fs.writeFileSync(secondaryFile, JSON.stringify({ access: "synthetic-secondary" }));
-    assert.deepEqual(pool.eligibleAccounts("chat", "beam-free"), ["primary-oauth", "secondary-oauth"]);
     assert.deepEqual(pool.eligibleAccounts("chat", "jev-1.13-free"), []);
     assert.deepEqual(pool.eligibleAccounts("chat", "paid-model"), []);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }

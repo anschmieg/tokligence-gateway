@@ -34,7 +34,7 @@ function toolChoiceToOpenAI(choice) {
   return undefined;
 }
 
-export function anthropicToOpenAI(request, { gateTools = [], forceStream = true } = {}) {
+export function anthropicToOpenAI(request, { forceStream = true } = {}) {
   const out = {};
   for (const key of ["model", "max_tokens", "temperature", "top_p", "user"]) {
     if (request?.[key] !== undefined) out[key] = request[key];
@@ -71,6 +71,13 @@ export function anthropicToOpenAI(request, { gateTools = [], forceStream = true 
         if (url) plain.push({ type: "image_url", image_url: { url } });
         continue;
       }
+      if (block.type === "thinking") {
+        if (typeof block.signature === "string" && block.signature) {
+          throw Object.assign(new Error("Signed Anthropic thinking blocks are not supported by the OpenAI-compatible Zen route"), { statusCode: 400 });
+        }
+        if (typeof block.thinking === "string" && block.thinking) plain.push({ type: "reasoning_content", text: block.thinking });
+        continue;
+      }
       if (block.type === "tool_use") {
         toolCalls.push({
           id: block.id || `call_${block.name}`,
@@ -90,22 +97,29 @@ export function anthropicToOpenAI(request, { gateTools = [], forceStream = true 
 
     if (toolResults.length) messages.push(...toolResults);
     if (plain.length || toolCalls.length) {
-      const reply = { role: message.role || "assistant", content: plain.length ? plain : null };
+      const reasoning = plain.filter((part) => part.type === "reasoning_content").map((part) => part.text).join("");
+      const visible = plain.filter((part) => part.type !== "reasoning_content");
+      if (reasoning && !toolCalls.length) {
+        throw Object.assign(new Error("Anthropic thinking can only be replayed on assistant tool-call continuations over the OpenAI-compatible Zen route"), { statusCode: 400 });
+      }
+      const reply = { role: message.role || "assistant", content: visible.length ? visible : null };
+      if (reasoning) reply.reasoning_content = reasoning;
       if (toolCalls.length) reply.tool_calls = toolCalls;
       messages.push(reply);
     }
   }
 
   const tools = [];
-  for (const tool of gateTools) tools.push(tool);
   for (const tool of request?.tools || []) {
     if (!tool?.name) continue;
+    const parameters = tool.input_schema || tool.parameters || { type: "object", properties: {} };
     tools.push({
       type: "function",
       function: {
         name: tool.name,
         description: tool.description || "",
-        parameters: tool.input_schema || tool.parameters || { type: "object", properties: {} },
+        parameters,
+        ...(tool.strict === true ? { strict: true } : {}),
       },
     });
   }
@@ -125,10 +139,13 @@ function usageOf(usage) {
   };
 }
 
-export function openaiToAnthropicMessage(completion, { model } = {}) {
+export function openaiToAnthropicMessage(completion, { model, keepReasoning = false } = {}) {
   const choice = completion?.choices?.[0];
   const message = choice?.message || {};
   const content = [];
+  if (keepReasoning && typeof message.reasoning_content === "string" && message.reasoning_content) {
+    content.push({ type: "thinking", thinking: message.reasoning_content });
+  }
   const text = typeof message.content === "string" ? message.content : textOf(message.content);
   if (text) content.push({ type: "text", text });
   for (const call of message.tool_calls || []) {
@@ -155,7 +172,7 @@ export function openaiToAnthropicMessage(completion, { model } = {}) {
 // Turns OpenAI server-sent chunks into Anthropic server-sent events. Zen always
 // streams, so this is also how a non-streaming Anthropic caller is served: the
 // events are folded into one message by collectAnthropicStream.
-export function createAnthropicStreamCodec({ model, messageId, strictCompletion = false } = {}) {
+export function createAnthropicStreamCodec({ model, messageId, strictCompletion = false, keepReasoning = false } = {}) {
   const id = messageId || `msg_${Math.random().toString(36).slice(2, 18)}`;
   let started = false;
   let finished = false;
@@ -232,6 +249,16 @@ export function createAnthropicStreamCodec({ model, messageId, strictCompletion 
       if (!choice) return drain();
       const delta = choice.delta || {};
 
+      if (typeof delta.reasoning_content === "string" && delta.reasoning_content.length) {
+        semanticStarted = true;
+        if (keepReasoning) {
+          closeOpen();
+          const block = nextBlock++;
+          emit("content_block_start", { index: block, content_block: { type: "thinking", thinking: "" } });
+          emit("content_block_delta", { index: block, delta: { type: "thinking_delta", thinking: delta.reasoning_content } });
+          emit("content_block_stop", { index: block });
+        }
+      }
       if (typeof delta.content === "string" && delta.content.length) {
         semanticStarted = true;
         openText();
@@ -310,6 +337,7 @@ export function collectAnthropicStream(events) {
         const block = blocks.get(event.index);
         if (!block) continue;
         if (event.delta.type === "text_delta") block.text = (block.text || "") + event.delta.text;
+        if (event.delta.type === "thinking_delta") block.thinking = (block.thinking || "") + event.delta.thinking;
         if (event.delta.type === "input_json_delta") block.json += event.delta.partial_json || "";
       }
       if (event.type === "message_delta") {
@@ -325,6 +353,7 @@ export function collectAnthropicStream(events) {
         const { json: _json, ...preserved } = block;
         return preserved;
       }
+      if (block.type === "thinking") return { type: "thinking", thinking: block.thinking || "" };
       if (block.type === "tool_use") {
         let input = {};
         try {
@@ -336,7 +365,7 @@ export function collectAnthropicStream(events) {
       }
       return { type: "text", text: block.text || "" };
     })
-    .filter((block) => block.type === "tool_use" || block.type === "compaction" || block.text);
+    .filter((block) => block.type === "tool_use" || block.type === "thinking" || block.type === "compaction" || block.text);
   return message;
 }
 

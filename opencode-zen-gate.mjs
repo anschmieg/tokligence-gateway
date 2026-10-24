@@ -7,20 +7,7 @@
 //     OpenCode agents get FreeTierError or 426;
 //   * x-opencode-session names a session a real client created;
 //   * the request streams;
-//   * the request declares tools, including OpenCode's own built-in tool names.
-// The built-ins are re-declared here with empty schemas so the model can see
-// them but will not select them in favour of the caller's tools.
-
-export const GATE_TOOL_NAMES = ["edit", "glob", "grep", "question", "read", "shell", "skill", "subagent", "webfetch", "write", "execute"];
-
-export const GATE_TOOLS = GATE_TOOL_NAMES.map((name) => ({
-  type: "function",
-  function: {
-    name,
-    description: "Disabled in this session. Do not call this tool.",
-    parameters: { type: "object", properties: {}, additionalProperties: false },
-  },
-}));
+//   * the request declares tools.
 
 export function requestId() {
   const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -55,14 +42,9 @@ export function zenHeaders({
   return headers;
 }
 
-// Merges the gate tools with the caller's tools and forces streaming.
-export function shapeZenRequest(body, { gateTools = GATE_TOOLS } = {}) {
+// Preserves caller tools and forces streaming for the Zen free tier.
+export function shapeZenRequest(body) {
   const shaped = { ...body, stream: true };
   if (!shaped.stream_options) shaped.stream_options = { include_usage: true };
-  const declared = Array.isArray(shaped.tools) ? shaped.tools : [];
-  const declaredNames = new Set(declared.map((tool) => tool?.function?.name || tool?.name));
-  const missing = gateTools.filter((tool) => !declaredNames.has(tool.function.name));
-  shaped.tools = missing.length ? [...declared, ...missing] : declared;
-  if (!shaped.tools.length) throw new Error("OpenCode Zen requires at least one tool on a free-tier request");
   return shaped;
 }

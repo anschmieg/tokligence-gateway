@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { createTokenProvider, credentialExpiry, needsRefresh, readCredential } from "../opencode-zen-credential.mjs";
-import { GATE_TOOL_NAMES, GATE_TOOLS, requestId, shapeZenRequest, zenHeaders } from "../opencode-zen-gate.mjs";
+import { requestId, shapeZenRequest, zenHeaders } from "../opencode-zen-gate.mjs";
 
 function credentialFile(credential) {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "zen-cred-")), "oauth.json");
@@ -124,31 +124,11 @@ test("every request carries the OpenCode identity the gate checks", () => {
   assert.notEqual(requestId(), requestId());
 });
 
-test("caller tools ride along with the gate tools and streaming is forced", () => {
-  const shaped = shapeZenRequest({
-    model: "space-bunny-free",
-    stream: false,
-    messages: [{ role: "user", content: "hi" }],
-    tools: [{ type: "function", function: { name: "get_weather", parameters: { type: "object" } } }],
-  });
+test("Zen preserves caller tools and forces streaming without injecting built-ins", () => {
+  const tools = [{ type: "function", function: { name: "lookup_weather", description: "Forecast", parameters: { type: "object", properties: { city: { type: "string" } } } } }];
+  const shaped = shapeZenRequest({ model: "space-bunny-free", stream: false, messages: [{ role: "user", content: "hi" }], tools });
   assert.equal(shaped.stream, true);
   assert.deepEqual(shaped.stream_options, { include_usage: true });
-  const names = shaped.tools.map((tool) => tool.function.name);
-  assert.ok(names.includes("get_weather"));
-  for (const name of GATE_TOOL_NAMES) assert.ok(names.includes(name), `missing gate tool ${name}`);
-  // The gate tools must not be able to do anything.
-  for (const tool of GATE_TOOLS) {
-    assert.deepEqual(tool.function.parameters.properties, {});
-    assert.match(tool.function.description, /Do not call/);
-  }
-});
-
-test("a caller that declares its own copy of a gate tool is not given a duplicate", () => {
-  const shaped = shapeZenRequest({
-    messages: [],
-    tools: [{ type: "function", function: { name: "read", parameters: { type: "object", properties: { path: { type: "string" } } } } }],
-  });
-  const reads = shaped.tools.filter((tool) => tool.function.name === "read");
-  assert.equal(reads.length, 1);
-  assert.deepEqual(reads[0].function.parameters.properties, { path: { type: "string" } });
+  assert.deepEqual(shaped.tools, tools);
+  assert.deepEqual(shapeZenRequest({ messages: [] }).tools, undefined);
 });

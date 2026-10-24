@@ -8,8 +8,6 @@ import {
   createSseChunkReader,
   openaiToAnthropicMessage,
 } from "../anthropic-openai-codec.mjs";
-import { GATE_TOOLS } from "../opencode-zen-gate.mjs";
-
 test("system instructions and text survive the translation to OpenAI", () => {
   const openai = anthropicToOpenAI({
     model: "zen/space-bunny-free",
@@ -27,23 +25,26 @@ test("system instructions and text survive the translation to OpenAI", () => {
   assert.deepEqual(openai.stream_options, { include_usage: true });
 });
 
-test("Anthropic tools become OpenAI function tools alongside the gate tools", () => {
-  const openai = anthropicToOpenAI(
-    {
-      messages: [{ role: "user", content: "weather?" }],
-      tools: [{
-        name: "get_weather",
-        description: "Get weather",
-        input_schema: { type: "object", properties: { city: { type: "string" } }, required: ["city"] },
-      }],
-      tool_choice: { type: "tool", name: "get_weather" },
-    },
-    { gateTools: GATE_TOOLS },
-  );
-  assert.equal(openai.tools.length, GATE_TOOLS.length + 1);
-  const weather = openai.tools.find((tool) => tool.function.name === "get_weather");
-  assert.deepEqual(weather.function.parameters.required, ["city"]);
-  assert.deepEqual(openai.tool_choice, { type: "function", function: { name: "get_weather" } });
+test("caller tools preserve full schemas, strict mode, named choice, and order without fabricated tools", () => {
+  const tools = [
+    { name: "lookup_weather", description: "Get weather", strict: true, input_schema: { type: "object", properties: { city: { type: "string" } }, required: ["city"], additionalProperties: false } },
+    { name: "lookup_time", description: "Get local time", input_schema: { type: "object", properties: { zone: { type: "string" } } } },
+  ];
+  const openai = anthropicToOpenAI({
+    messages: [{ role: "user", content: "weather?" }], tools,
+    tool_choice: { type: "tool", name: "lookup_weather" },
+  });
+  assert.deepEqual(openai.tools.map((tool) => tool.function.name), ["lookup_weather", "lookup_time"]);
+  assert.deepEqual(openai.tools[0].function.parameters, tools[0].input_schema);
+  assert.equal(openai.tools[0].function.strict, true);
+  assert.deepEqual(openai.tool_choice, { type: "function", function: { name: "lookup_weather" } });
+  assert.equal(openai.tools.some((tool) => ["bash", "read", "shell"].includes(tool.function.name)), false);
+});
+
+test("unsupported signed thinking blocks fail instead of losing signature semantics", () => {
+  assert.throws(() => anthropicToOpenAI({
+    messages: [{ role: "assistant", content: [{ type: "thinking", thinking: "private", signature: "opaque" }] }],
+  }), /Signed Anthropic thinking blocks are not supported/);
 });
 
 test("tool_use and tool_result blocks map onto tool_calls and tool messages", () => {
@@ -61,6 +62,28 @@ test("tool_use and tool_result blocks map onto tool_calls and tool messages", ()
   const tool = openai.messages.find((message) => message.role === "tool");
   assert.equal(tool.tool_call_id, "toolu_1");
   assert.equal(tool.content, "12C and raining");
+});
+
+test("OpenAI reasoning remains separate and is exposed to Messages only when requested", () => {
+  const completion = { choices: [{ finish_reason: "tool_calls", message: { content: "Visible answer", reasoning_content: "Private reasoning", tool_calls: [{ id: "call_1", function: { name: "lookup", arguments: "{}" } }] } }] };
+  assert.deepEqual(openaiToAnthropicMessage({ ...completion, choices: [{ ...completion.choices[0], finish_reason: "stop", message: { content: "Visible answer", reasoning_content: "Private reasoning" } }] }).content, [{ type: "text", text: "Visible answer" }]);
+  assert.deepEqual(openaiToAnthropicMessage(completion, { keepReasoning: true }).content, [
+    { type: "thinking", thinking: "Private reasoning" },
+    { type: "text", text: "Visible answer" },
+    { type: "tool_use", id: "call_1", name: "lookup", input: {} },
+  ]);
+  const codec = createAnthropicStreamCodec({ model: "test", keepReasoning: true });
+  const events = [
+    ...codec.push(JSON.stringify({ choices: [{ delta: { reasoning_content: "Private " } }] })),
+    ...codec.push(JSON.stringify({ choices: [{ delta: { reasoning_content: "thought", tool_calls: [{ index: 0, id: "call_1", function: { name: "lookup", arguments: "{}" } }] } }] })),
+    ...codec.push(JSON.stringify({ choices: [{ finish_reason: "tool_calls" }] })),
+    ...codec.end(),
+  ];
+  assert.deepEqual(collectAnthropicStream(events).content, [
+    { type: "thinking", thinking: "Private " },
+    { type: "thinking", thinking: "thought" },
+    { type: "tool_use", id: "call_1", name: "lookup", input: {} },
+  ]);
 });
 
 test("an OpenAI completion becomes an Anthropic message with tool_use blocks", () => {

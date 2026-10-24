@@ -1,7 +1,7 @@
 import http from "node:http";
 import https from "node:https";
 import { anthropicToOpenAI } from "./anthropic-openai-codec.mjs";
-import { GATE_TOOLS, shapeZenRequest, zenHeaders } from "./opencode-zen-gate.mjs";
+import { shapeZenRequest, zenHeaders } from "./opencode-zen-gate.mjs";
 import { canonicalCredentialFile, createTokenProvider } from "./opencode-zen-credential.mjs";
 import { createSessionPool } from "./opencode-zen-session.mjs";
 export { createSessionPool };
@@ -177,9 +177,9 @@ async function zenAttempt(candidate, { body, env, accountPool, stickyKey, exclud
   // Zen serves the free tier on chat completions only, so an Anthropic caller is
   // translated rather than forwarded.
   const upstream = candidate.protocol === "messages"
-    ? anthropicToOpenAI(request, { gateTools: GATE_TOOLS, forceStream: true })
+    ? anthropicToOpenAI(request, { forceStream: true })
     : request;
-  const shaped = shapeZenRequest(upstream, { gateTools: GATE_TOOLS });
+  const shaped = shapeZenRequest(upstream);
   throwIfAborted(signal);
   return {
     body: Buffer.from(JSON.stringify(shaped)),
@@ -191,7 +191,7 @@ async function zenAttempt(candidate, { body, env, accountPool, stickyKey, exclud
       orgId,
     }),
     codec: candidate.protocol === "messages"
-      ? { kind: "anthropic-from-openai", stream: request.stream === true, model: candidate.upstreamModel }
+      ? { kind: "anthropic-from-openai", stream: request.stream === true, model: candidate.upstreamModel, keepReasoning: Boolean(request.thinking && request.thinking.type !== "disabled") }
       : null,
     poolAccount: account || null,
     poolGeneration,
