@@ -146,7 +146,7 @@ async function inference(request: Request) {
   const scope = request.headers.get("x-opencode-bridge-session")
   if (!scope || !/^[A-Za-z0-9._:-]{1,128}$/.test(scope)) throw new BridgeInputError("A gateway-scoped x-opencode-bridge-session is required")
   const sessionKey = createHash("sha256").update(`${scope}\0${input.model}`).digest("hex")
-  if (active.has(sessionKey)) return Response.json({ error: { type: "native_bridge_error", code: "native_session_busy", message: "This native session already has an active request" } }, { status: 409, headers: headers() })
+  if (active.has(sessionKey)) return Response.json({ error: { type: "native_bridge_error", code: "native_session_busy", message: "This native session already has an active request" } }, { status: 409, headers: headers({ "retry-after": "1" }) })
   if (active.size >= 4) return Response.json({ error: { type: "native_bridge_error", code: "native_worker_busy", message: "Native worker concurrency limit reached" } }, { status: 503, headers: headers({ "retry-after": "1" }) })
   active.add(sessionKey)
   const cancel = new AbortController()
@@ -158,9 +158,10 @@ async function inference(request: Request) {
   const cleanup = () => cleanupTask ??= (async () => {
     clearTimeout(deadline)
     request.signal.removeEventListener("abort", onAbort)
-    try { await registry.touch(sessionKey) }
+    const persisted = registry.touch(sessionKey)
+    active.delete(sessionKey)
+    try { await persisted }
     catch { console.warn(JSON.stringify({ event: "native_session_touch_failed" })) }
-    finally { active.delete(sessionKey) }
   })()
   try {
     const ref = Model.Ref.make({ providerID: Provider.ID.make(providerID), id: Model.ID.make(input.model) })

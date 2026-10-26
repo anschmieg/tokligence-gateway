@@ -49,10 +49,12 @@ export async function createSessionRegistry({ file, limit, ttlMs, allocateID, cr
   };
   return {
     touch(key) {
-      return serialize(async () => {
-        const entry = sessions.get(key);
-        if (entry && !entry.removing) { entry.lastUsed = now(); await save(); }
-      });
+      // Update the idle timestamp before releasing the request's active lease.
+      // The write remains ordered before any subsequently queued allocation.
+      const entry = sessions.get(key);
+      if (!entry || entry.removing) return Promise.resolve();
+      entry.lastUsed = now();
+      return serialize(save);
     },
     get(key, model, active) {
       return serialize(async () => {

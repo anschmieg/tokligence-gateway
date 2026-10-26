@@ -184,7 +184,15 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
     await assert.rejects(pending);
     await Promise.race([closed, new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error('Native cancellation did not close the provider connection')), 3000); timer.unref(); })]);
     mode = 'text';
-    response = await call();
+    // Peer socket close can precede native fiber finalization. A brief conflict
+    // is valid; a leaked active lease must not survive the bounded retry window.
+    for (let attempt = 0; attempt < 50; attempt++) {
+      response = await call();
+      if (response.status !== 409) break;
+      assert.equal(response.headers.get('retry-after'), '1');
+      await response.arrayBuffer();
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
     assert.equal(response.status, 200, await response.clone().text());
     mode = 'wait-after-text';
     const streamingClosed = new Promise(resolve => { cancelledUpstream = resolve; });
