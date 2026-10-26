@@ -32,7 +32,7 @@ RUN npm install -g @tokligence/gateway@0.4.0
 # with a FreeTierError. The user-agent sent upstream is read from this binary at
 # runtime, so the two cannot disagree. Pin with --version when needed; the build
 # prints the resolved version so a silent downgrade stays visible.
-ARG OPENCODE_VERSION=1.18.32
+ARG OPENCODE_VERSION=2.1.4
 RUN set -eux; \
     if [ -n "${OPENCODE_VERSION}" ]; then \
       curl -fsSL https://opencode.ai/v2/install | bash -s -- --version "${OPENCODE_VERSION}" --no-modify-path; \

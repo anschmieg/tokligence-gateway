@@ -335,7 +335,7 @@ providers:
     credential_file_env: OPENCODE_ZEN_CREDENTIAL_FILE
     token_url: https://opencode.ai/console/auth/device/token
     client_id: opencode-cli
-    client_version: "1.18.32"
+    client_version: "2.1.4"
     serve_command: opencode
     serve_port: 4096
     refresh_skew_ms: 600000
