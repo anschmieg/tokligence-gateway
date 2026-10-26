@@ -49,7 +49,7 @@ export function validateNativeAnthropicRequest(request) {
   if (request.system !== undefined) textOnly(request.system, "Native system prompt");
   if (!Array.isArray(request.messages)) invalid("Native messages must be an array");
   for (const message of request.messages) {
-    if (!object(message) || !["user", "assistant"].includes(message.role)) invalid("Unsupported native Messages role");
+    if (!object(message) || !["user", "assistant", "system"].includes(message.role)) invalid("Unsupported native Messages role");
     if (typeof message.content === "string") continue;
     if (!Array.isArray(message.content)) invalid("Native message content must be text or content blocks");
     for (const block of message.content) {
@@ -66,7 +66,6 @@ export function validateNativeAnthropicRequest(request) {
       if (block.type === "tool_result" && message.role === "user") {
         if (typeof block.tool_use_id !== "string" || !block.tool_use_id) invalid("Invalid native tool result ID");
         if (block.is_error !== undefined && typeof block.is_error !== "boolean") invalid("Native tool error flags must be boolean");
-        if (block.is_error === true) invalid("Native tool error flags are not yet supported");
         textOnly(block.content, "Native tool result");
         continue;
       }
@@ -75,7 +74,7 @@ export function validateNativeAnthropicRequest(request) {
   }
 }
 
-export function anthropicToOpenAI(request, { forceStream = true } = {}) {
+export function anthropicToOpenAI(request, { forceStream = true, preserveToolErrors = false } = {}) {
   const out = {};
   for (const key of ["model", "max_tokens", "temperature", "top_p", "user"]) {
     if (request?.[key] !== undefined) out[key] = request[key];
@@ -131,6 +130,7 @@ export function anthropicToOpenAI(request, { forceStream = true } = {}) {
         toolResults.push({
           role: "tool",
           tool_call_id: block.tool_use_id,
+          ...(preserveToolErrors && block.is_error === true ? { is_error: true } : {}),
           content: textOf(block.content) || (typeof block.content === "string" ? block.content : ""),
         });
       }
@@ -331,7 +331,7 @@ export function createAnthropicStreamCodec({ model, messageId, strictCompletion 
 
     end() {
       if (strictCompletion && !finishReason && !terminalDone) throw Object.assign(new Error("OpenCode stream ended without a finish reason or terminal marker"), { upstreamStreamError: true });
-      if (strictCompletion && !semanticStarted && finishReason !== "content_filter") throw Object.assign(new Error("OpenCode stream completed without a message or tool call"), { upstreamStreamError: true });
+      if (strictCompletion && !semanticStarted && !["content_filter", "length"].includes(finishReason)) throw Object.assign(new Error("OpenCode stream completed without a message or tool call"), { upstreamStreamError: true });
       if (!started) {
         started = true;
         emit("message_start", {

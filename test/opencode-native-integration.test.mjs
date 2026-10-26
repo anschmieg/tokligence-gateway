@@ -4,11 +4,19 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 
 test('gateway exposes the native lane explicitly and translates caller-owned tool turns', { timeout: 15000 }, async () => {
-  let status = 200;
+  let status = 200, emptyLength = false;
   const requests = [];
   const worker = http.createServer(async (req, res) => {
     let raw = ''; for await (const part of req) raw += part;
     requests.push({ headers: req.headers, body: JSON.parse(raw) });
+    if (emptyLength) {
+      const stream = requests.at(-1).body.stream;
+      res.writeHead(200, { 'content-type': stream ? 'text/event-stream' : 'application/json', 'x-opencode-native-version': '2.1.4' });
+      const choice = { index: 0, finish_reason: 'length', ...(stream ? { delta: {} } : { message: { role: 'assistant', content: null } }) };
+      const completion = { id: 'fixture', choices: [choice] };
+      res.end(stream ? `data: ${JSON.stringify(completion)}\n\ndata: [DONE]\n\n` : JSON.stringify(completion));
+      return;
+    }
     res.writeHead(status, { 'content-type': 'application/json', 'x-opencode-native-version': '2.1.4', 'x-opencode-native-session': 'ses_fixture', ...(status === 429 ? { 'retry-after': '60' } : {}) });
     res.end(JSON.stringify(status === 429 ? { error: { code: 'FreeUsageLimitError', type: 'rate_limit_error', message: 'Native quota exhausted', retry_after_seconds: 60, upstream_request_id: 'fixture-request' } } : { id: 'chatcmpl_fixture', object: 'chat.completion', model: 'beam-free', choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: null, reasoning_content: 'preserve this reasoning', tool_calls: [{ id: 'call_fixture', type: 'function', function: { name: 'read_file', arguments: '{"path":"README.md"}' } }] } }], usage: { prompt_tokens: 10, completion_tokens: 5 } }));
   });
@@ -37,6 +45,9 @@ test('gateway exposes the native lane explicitly and translates caller-owned too
     assert.equal(requests.at(-1).body.messages.at(-2).reasoning_content, 'preserve this reasoning');
     assert.equal(requests.at(-1).body.messages.at(-1).tool_call_id, 'call_fixture');
     assert.equal(requests[0].headers['x-opencode-bridge-session'], requests[1].headers['x-opencode-bridge-session']);
+    const errorResult = await send({ ...body, messages: [...body.messages, { role: 'assistant', content: result.content }, { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_fixture', content: 'File not found', is_error: true }] }] });
+    assert.equal(errorResult.status, 200, await errorResult.clone().text());
+    assert.equal(requests.at(-1).body.messages.at(-1).is_error, true);
     const beforeRejected = requests.length;
     for (const block of [
       { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'synthetic' } },
@@ -53,6 +64,18 @@ test('gateway exposes the native lane explicitly and translates caller-owned too
     status = 429; response = await send(body);
     assert.equal(response.status, 429); assert.equal(response.headers.get('retry-after'), '60');
     assert.equal((await response.json()).error.upstream_request_id, 'fixture-request');
+    status = 200; emptyLength = true;
+    response = await send(body);
+    assert.equal(response.status, 200, await response.clone().text());
+    const lengthResult = await response.json();
+    assert.equal(lengthResult.stop_reason, 'max_tokens');
+    assert.deepEqual(lengthResult.content, []);
+    response = await send({ ...body, stream: true });
+    assert.equal(response.status, 200);
+    const lengthStream = await response.text();
+    assert.match(lengthStream, /"stop_reason":"max_tokens"/);
+    assert.match(lengthStream, /event: message_stop/);
+    assert.doesNotMatch(lengthStream, /"type":"tool_use"/);
     const count = requests.length;
     response = await send({ ...body, model: 'opencode-native/unknown' });
     assert.equal(response.status, 400); assert.equal(requests.length, count);

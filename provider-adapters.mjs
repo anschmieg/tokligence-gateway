@@ -220,7 +220,7 @@ async function zenAttempt(candidate, { body, env, accountPool, stickyKey, exclud
 // native pass-through instead.
 function translatedRequest(body) {
   const request = Buffer.isBuffer(body) ? JSON.parse(body.toString("utf8")) : body;
-  const upstreamBody = anthropicToOpenAI(request, { forceStream: false });
+  const upstreamBody = anthropicToOpenAI(request, { forceStream: false, preserveToolErrors: true });
   return {
     upstreamBody,
     // Preserve upstream reasoning for replay even when the caller did not
@@ -557,11 +557,13 @@ export async function startAttempt({ candidate, req, path, body, env = process.e
     }
     const request = JSON.parse(Buffer.isBuffer(body) ? body.toString("utf8") : body);
     if (candidate.protocol === "messages") validateNativeAnthropicRequest(request);
-    const translated = candidate.protocol === "messages" ? anthropicToOpenAI(request, { forceStream: false }) : request;
+    const translated = candidate.protocol === "messages" ? anthropicToOpenAI(request, { forceStream: false, preserveToolErrors: true }) : request;
     if (candidate.protocol === "messages" && request.system !== undefined) {
       const system = typeof request.system === "string" ? request.system : request.system.map((part) => part.text || "").join("");
-      translated.messages = translated.messages.filter((message) => message.role !== "system");
-      translated.messages.unshift({ role: "system", content: system });
+      // Replace only the top-level system prompt inserted by the codec. Inline
+      // system reminders in Claude Code history must retain their position.
+      if (system.trim()) translated.messages[0] = { role: "system", content: system };
+      else translated.messages.unshift({ role: "system", content: system });
     }
     translated.model = translated.model.replace(/^opencode-native\//i, "");
     const target = requestUrl(candidate, path, env, { suffix: "chat/completions" });

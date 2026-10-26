@@ -41,12 +41,13 @@ export function decodeChatRequest(body) {
   let conversationStarted = false;
   const messages = body.messages.map((message) => {
     if (!object(message) || !["system", "user", "assistant", "tool"].includes(message.role)) return fail("Unsupported message role");
-    const allowed = new Set(["role", "content", "reasoning_content", "reasoning", "tool_calls", "tool_call_id", "provider_metadata"]);
+    const allowed = new Set(["role", "content", "reasoning_content", "reasoning", "tool_calls", "tool_call_id", "is_error", "provider_metadata"]);
     for (const key of Object.keys(message)) if (!allowed.has(key)) return fail(`Unsupported native bridge message field: ${key}`);
     const content = textParts(message.content);
+    if (message.is_error !== undefined && (message.role !== "tool" || typeof message.is_error !== "boolean")) return fail("is_error must be a boolean on tool results");
     if (message.provider_metadata !== undefined) return fail("Opaque provider metadata replay is not supported by this experimental bridge");
     if (message.role === "system") {
-      if (conversationStarted) return fail("System messages must precede conversation history");
+      if (conversationStarted) return { role: "system", content };
       system.push(...content);
       return null;
     }
@@ -71,7 +72,7 @@ export function decodeChatRequest(body) {
     if (message.role === "tool") {
       const name = calls.get(message.tool_call_id);
       if (!name) return fail("Tool results must reference an earlier assistant tool call");
-      return { role: "tool", content: [{ type: "tool-result", id: message.tool_call_id, name, result: { type: "text", value: content.map((part) => part.text).join("") } }] };
+      return { role: "tool", content: [{ type: "tool-result", id: message.tool_call_id, name, result: { type: message.is_error ? "error" : "text", value: content.map((part) => part.text).join("") } }] };
     }
     return { role: message.role, content, ...(message.provider_metadata ? { providerMetadata: message.provider_metadata } : {}) };
   }).filter(Boolean);

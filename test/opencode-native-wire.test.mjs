@@ -33,7 +33,6 @@ for (const [label, change] of [
   ["media", (body) => { body.messages[0].content = [{ type: "image_url", image_url: { url: "https://example.invalid/private" } }]; }],
   ["unmatched tool results", (body) => { body.messages = [{ role: "tool", tool_call_id: "missing", content: "result" }]; }],
   ["strict schemas", (body) => { body.tools = [{ ...tool, function: { ...tool.function, strict: true } }]; }],
-  ["late system prompts", (body) => { body.messages.push({ role: "system", content: "late" }); }],
 ]) test(`native input rejects ${label} explicitly`, () => {
   const body = { model: "beam-free", messages: [{ role: "user", content: "hello" }] };
   change(body);
@@ -96,4 +95,14 @@ for (const [reason, expected] of [["length", "length"], ["content-filter", "cont
   const result = encoder.completion().choices[0];
   assert.equal(result.finish_reason, expected);
   assert.equal(result.message.tool_calls, undefined);
+});
+
+test("native history preserves inline system reminders and tool errors", () => {
+  const result = decodeChatRequest({ model: "beam-free", messages: [
+    { role: "user", content: "hello" }, { role: "system", content: "inline reminder" },
+    { role: "assistant", content: null, tool_calls: [{ id: "one", type: "function", function: { name: "Read", arguments: "{}" } }] },
+    { role: "tool", tool_call_id: "one", content: "file missing", is_error: true },
+  ] });
+  assert.deepEqual(result.messages[1], { role: "system", content: [{ type: "text", text: "inline reminder" }] });
+  assert.equal(result.messages.at(-1).content[0].result.type, "error");
 });

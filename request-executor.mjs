@@ -408,7 +408,7 @@ async function respondWithCodec({ response, codec, res, status, requestId, model
     const text = typeof message.content === "string" && message.content.trim().length > 0;
     const reasoning = codec.keepReasoning && openaiReasoningText(message).length > 0;
     const tools = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
-    if (!text && !reasoning && !tools && finish !== "content_filter") {
+    if (!text && !reasoning && !tools && !["content_filter", "length"].includes(finish)) {
       throw Object.assign(new Error("Upstream completed without a message or tool call"), { upstreamStreamError: true });
     }
   };
