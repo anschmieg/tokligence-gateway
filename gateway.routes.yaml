@@ -372,7 +372,29 @@ providers:
       capabilities: [coding, reasoning, tool_calling]
       quota_type: free_tier
 
+  # Experimental native OpenCode worker. It has exclusive staging credentials
+  # and is never part of the existing canonical/profile fallback chains.
+  - id: opencode-native
+    adapter: opencode-native
+    enabled_env: OPENCODE_NATIVE_ENABLED
+    base_url_env: OPENCODE_NATIVE_URL
+    api_key_env: OPENCODE_NATIVE_KEY
+    billing_class: free
+    protocols: [chat_completions]
+    models:
+      - opencode-native/beam-free
+      - opencode-native/deepseek-v4.1-flash-free
+      - opencode-native/glm-5.3-flash-free
+      - opencode-native/mimo-v2.6-flash-free
+    metadata:
+      cost_class: free
+      capabilities: [coding, reasoning, tool_calling]
+      parallel_tools: true
+      quota_type: free_tier
+
 routes:
+  - provider: opencode-native
+    prefixes: [opencode-native/]
   - provider: opencode-zen
     # Jev is served only through native /v1/systemone; do not route it through chat.
     # The exact free model ids come first: several of them (nemotron-*, glm-*,

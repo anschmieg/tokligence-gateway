@@ -1,0 +1,8 @@
+{
+  "version": "2.1.4",
+  "commit": "68bc26b7da1990ce10ffecfbc1e09eb13aa5d824",
+  "archive": "https://codeload.github.com/anomalyco/opencode/tar.gz/refs/tags/v2.1.4",
+  "sha256": "eb16e1b9c504fff1e7d8679d7a88421967a403a7bb223e8993879a46735ff61f",
+  "bun": "1.4.4",
+  "license": "MIT"
+}

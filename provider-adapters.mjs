@@ -1,6 +1,7 @@
 import http from "node:http";
 import https from "node:https";
 import tls from "node:tls";
+import { randomUUID } from "node:crypto";
 import { anthropicToOpenAI } from "./anthropic-openai-codec.mjs";
 import { shapeZenRequest, zenHeaders } from "./opencode-zen-gate.mjs";
 import { canonicalCredentialFile, createTokenProvider } from "./opencode-zen-credential.mjs";
@@ -550,6 +551,33 @@ function sendThroughProxy({ target, headers, body, signal, proxy, trace }) {
 
 export async function startAttempt({ candidate, req, path, body, env = process.env, signal, trace, adapters = {}, accountPool = null, stickyKey = null, excludedAccounts = [] }) {
   throwIfAborted(signal);
+  if (candidate.provider.adapter === "opencode-native") {
+    if (env.OPENCODE_NATIVE_ENABLED !== "true" || !env.OPENCODE_NATIVE_URL || !env.OPENCODE_NATIVE_KEY) {
+      throw Object.assign(new Error("The native worker is not enabled or configured"), { statusCode: 503, code: "native_bridge_disabled" });
+    }
+    const request = JSON.parse(Buffer.isBuffer(body) ? body.toString("utf8") : body);
+    const translated = candidate.protocol === "messages" ? anthropicToOpenAI(request, { forceStream: false }) : request;
+    if (candidate.protocol === "messages" && request.system !== undefined) {
+      const system = typeof request.system === "string" ? request.system : request.system.map((part) => part.text || "").join("");
+      translated.messages = translated.messages.filter((message) => message.role !== "system");
+      translated.messages.unshift({ role: "system", content: system });
+    }
+    translated.model = translated.model.replace(/^opencode-native\//i, "");
+    const target = requestUrl(candidate, path, env, { suffix: "chat/completions" });
+    const payload = Buffer.from(JSON.stringify(translated));
+    const headers = {
+      "content-type": "application/json", "content-length": String(payload.length),
+      authorization: `Bearer ${env.OPENCODE_NATIVE_KEY}`,
+      "x-opencode-bridge-session": stickyKey || trace?.id || randomUUID(),
+    };
+    const { response, upstream } = await send({ target, headers, body: payload, signal, trace });
+    if (response.headers["x-opencode-native-version"] !== "2.1.4") {
+      response.destroy();
+      throw Object.assign(new Error("The native worker did not identify the pinned OpenCode version"), { statusCode: 502, code: "native_worker_version_mismatch" });
+    }
+    return { response, upstream, target, nativeBridge: true,
+      codec: candidate.protocol === "messages" ? { kind: "anthropic-from-openai", stream: request.stream === true, keepReasoning: true } : null };
+  }
   if (candidate.provider.adapter === "chatgpt-responses") {
     const endpoint = env.CHATGPT_SERVICE_URL;
     const token = env.CHATGPT_SERVICE_TOKEN;

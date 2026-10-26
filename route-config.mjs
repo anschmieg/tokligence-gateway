@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { openCodeChatAllowed } from "./opencode-free-models.mjs";
 import { parse, stringify } from "yaml";
 
-const VALID_ADAPTERS = new Set(["tokligence", "oauth-proxy", "middleware", "copilot-sdk", "openai-compatible", "cline-oauth", "opencode-zen", "chatgpt-responses"]);
+const VALID_ADAPTERS = new Set(["tokligence", "oauth-proxy", "middleware", "copilot-sdk", "openai-compatible", "cline-oauth", "opencode-zen", "opencode-native", "chatgpt-responses"]);
 
 function requireString(value, label) {
   if (typeof value !== "string" || !value.trim()) {
@@ -125,6 +125,9 @@ export function parseRoutingConfig(source) {
     }
     if (adapter === "chatgpt-responses" && provider.enabled_env !== "CHATGPT_RESPONSES_ENABLED") {
       throw new Error(`providers[${index}] chatgpt-responses must use the explicit enable gate`);
+    }
+    if (adapter === "opencode-native" && provider.enabled_env !== "OPENCODE_NATIVE_ENABLED") {
+      throw new Error(`providers[${index}] opencode-native must use the explicit enable gate`);
     }
     if (provider.messages_translation != null && typeof provider.messages_translation !== "boolean") {
       throw new Error(`providers[${index}].messages_translation must be a boolean`);
@@ -343,6 +346,9 @@ export function loadRoutingConfig(path) {
 
 export function providerEnabled(provider, env = process.env) {
   if (!envEnabled(provider, env)) return false;
+  if (provider.adapter === "opencode-native") {
+    return env.OPENCODE_NATIVE_ENABLED === "true" && Boolean(env.OPENCODE_NATIVE_URL && env.OPENCODE_NATIVE_KEY);
+  }
   if (provider.adapter === "chatgpt-responses") {
     return env.CHATGPT_RESPONSES_ENABLED === "true"
       && Boolean(env.CHATGPT_SERVICE_URL && env.CHATGPT_SERVICE_TOKEN);

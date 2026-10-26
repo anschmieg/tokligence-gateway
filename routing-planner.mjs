@@ -31,7 +31,7 @@ function requestTokenEstimate(body) {
 // and the reply. Adapters with their own request pipeline (Codex, Copilot,
 // Zen) are excluded: they already own their protocol handling and must not be
 // handed a translated body.
-const TRANSLATING_ADAPTERS = new Set(["middleware", "openai-compatible", "cline-oauth"]);
+const TRANSLATING_ADAPTERS = new Set(["middleware", "openai-compatible", "cline-oauth", "opencode-native"]);
 
 // A profile or route may address a model as `<provider>/<id>` while the
 // provider's catalog stores the bare id. Strip the prefix only when the
@@ -144,6 +144,10 @@ export function buildRoutePlan(config, { model, protocol, body, requestClass = n
   // Direct provider IDs must use the same verified-free pool as catalog IDs;
   // returning null here would hand them to the legacy API-key proxy.
   const direct = providerById(config, matchConfiguredProvider(config, model));
+  if (direct?.adapter === "opencode-native") {
+    if (!providerEnabled(direct, env)) return { error: { status: 503, code: "native_bridge_disabled", message: "The experimental OpenCode native bridge is not enabled or configured" } };
+    if (!direct.models.some((entry) => entry.id.toLowerCase() === model.toLowerCase())) return { error: { status: 400, code: "native_model_not_declared", message: "Select an explicitly configured native bridge model" } };
+  }
   const freeOnly = providerById(config, "opencode-zen")?.catalog?.discover_free_only === true;
   if (freeOnly && (direct?.id === "opencode-go" || /^(?:opencode-go|go)\//i.test(model))) {
     return { error: { status: 403, code: "opencode_paid_route_disabled", message: "Only verified free OpenCode models are available" } };

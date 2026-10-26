@@ -1,0 +1,10 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+const source = path.resolve(process.env.OPENCODE_NATIVE_SOURCE || '.cache/opencode-native');
+if (!fs.existsSync(path.join(source, 'packages/sdk/src/tokligence-bridge.ts'))) throw new Error('Run npm run prepare:native and install the pinned source dependencies before native verification');
+const bun = process.env.OPENCODE_NATIVE_BUN || 'bun';
+const check = spawnSync(bun, ['--version'], { encoding: 'utf8' });
+if (check.status !== 0 || check.stdout.trim() !== '1.4.4') throw new Error('Native verification requires Bun 1.4.4; set OPENCODE_NATIVE_BUN');
+const run = spawnSync(process.execPath, ['--test', 'test/opencode-native-worker.test.mjs'], { stdio: 'inherit', env: { ...process.env, OPENCODE_NATIVE_SOURCE: source, OPENCODE_NATIVE_BUN: bun } });
+process.exit(run.status ?? 1);

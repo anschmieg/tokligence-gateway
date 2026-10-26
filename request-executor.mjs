@@ -663,7 +663,7 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
           }
           status = response.statusCode || 502;
           trace?.emit("upstream_headers", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel, status });
-          status429Info = status === 429 && !candidate.specialist ? await status429Diagnostics(response, aborter.signal) : null;
+          status429Info = status === 429 && !candidate.specialist && !attemptResult.nativeBridge ? await status429Diagnostics(response, aborter.signal) : null;
           if (status >= 200 && status < 300) {
             if (attemptResult.poolAccount && !String(response.headers?.["content-type"] || "").includes("text/event-stream")) {
               openCodeAccountPool.markFailure(attemptResult.poolAccount, new Error("OpenCode returned an unexpected response protocol"));
@@ -749,6 +749,17 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
         const { response, codec, specialist, specialistProtocol, poolAccount, poolGeneration, poolStickyKey, streamPreflight } = attemptResult;
         if (aborter.signal.aborted) break;
         if (status < 200 || status >= 300) {
+          if (attemptResult.nativeBridge) {
+            const raw = await readBodyText(response, aborter.signal, 16384);
+            let failure;
+            try { failure = JSON.parse(raw)?.error; } catch { /* An invalid worker response is never forwarded verbatim. */ }
+            const valid = failure && typeof failure.code === "string" && /^[A-Za-z0-9_.-]{1,80}$/.test(failure.code) && typeof failure.message === "string" && failure.message.length <= 2048;
+            const retryAfter = response.headers["retry-after"];
+            res.writeHead(status, { "content-type": "application/json", "x-gateway-request-id": requestId, "x-gateway-provider": candidate.provider.id,
+              ...(typeof retryAfter === "string" && /^\d{1,8}$/.test(retryAfter) ? { "retry-after": retryAfter } : {}) });
+            res.end(JSON.stringify({ error: { ...(valid ? failure : { code: "native_worker_invalid_error", message: "The native worker returned an invalid error response", type: "native_bridge_error" }), request_id: requestId } }));
+            return { committed: false, requestId, provider: candidate.provider.id };
+          }
           if (specialist) {
             const rawError = await readBodyText(response, aborter.signal, 4096).catch(() => "");
             let upstreamError;
@@ -782,6 +793,12 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
           continue;
         }
         observeUpstreamResponse(response, candidate, onUpstreamResponse);
+        if (attemptResult.nativeBridge) {
+          for (const name of ["x-opencode-native-version", "x-opencode-native-session"]) {
+            const value = response.headers[name];
+            if (typeof value === "string" && /^[A-Za-z0-9._-]{1,128}$/.test(value)) res.setHeader(name, value);
+          }
+        }
         if (poolAccount && !codec && candidate.protocol === "chat_completions" && body?.stream !== true && String(response.headers?.["content-type"] || "").includes("text/event-stream")) {
           const completion = await collectOpenAIChatCompletion(response, streamPreflight, candidate.upstreamModel);
           const base = { "x-gateway-request-id": requestId, "x-gateway-model": plan.publicModel, "x-gateway-provider": candidate.provider.id, "x-gateway-upstream-model": candidate.upstreamModel };
@@ -956,6 +973,11 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
           return { committed: false, requestId, specialist: true };
         }
         const isLastCandidate = candidate === plan.candidates[plan.candidates.length - 1];
+        if (candidate.provider.adapter === "opencode-native") {
+          res.writeHead(error?.statusCode === 400 ? 400 : error?.statusCode === 503 ? 503 : 502, { "content-type": "application/json", "x-gateway-request-id": requestId, "x-gateway-provider": candidate.provider.id });
+          res.end(JSON.stringify({ error: { code: error?.statusCode === 400 ? "unsupported_bridge_request" : error?.code === "native_worker_version_mismatch" ? error.code : "native_worker_unavailable", type: "native_bridge_error", message: "The experimental OpenCode native worker is unavailable or incompatible; no legacy fallback was attempted", request_id: requestId } }));
+          return { committed: false, requestId, provider: candidate.provider.id };
+        }
         if (isLastCandidate && candidate.provider.adapter === "cline-oauth" && error?.status && error?.code) {
           runtimeState.cooldowns?.set(`${candidate.provider.id}:${candidate.model?.id || candidate.upstreamModel}:${candidate.protocol}`, Date.now() + errorCooldownMs(error));
           res.writeHead(error.status, { "content-type": "application/json" });

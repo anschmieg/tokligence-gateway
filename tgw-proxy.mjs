@@ -2326,7 +2326,7 @@ server.on("upgrade", (req, socket, head) => {
   handleSpecialistUpgrade(req, socket, head, { config: ROUTING, env: process.env });
 });
 
-server.listen(PROXY_PORT, "0.0.0.0", () => {
+server.listen(PROXY_PORT, process.env.PROXY_HOST || "0.0.0.0", () => {
   const address = server.address();
   const listeningPort = typeof address === "object" && address ? address.port : PROXY_PORT;
   console.log(`tgw-proxy :${listeningPort} -> tgw ${TGW_HOST}:${TGW_PORT}`);
