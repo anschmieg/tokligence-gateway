@@ -616,18 +616,24 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
           trace?.emit("attempt_start", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel, attempt_number: attemptNumber });
           try {
             attemptResult = await startAttemptUntilAbort({ candidate, req, path, body: candidateBody, env, signal: aborter.signal, adapters, trace, accountPool: candidate.provider.adapter === "opencode-zen" ? openCodeAccountPool : null, stickyKey: affinityKey, excludedAccounts }, attemptStarter);
-          } catch (error) {
-            const failedAccount = error.poolAccount;
-            if (failedAccount && !aborter.signal.aborted) {
-              openCodeAccountPool.markFailure(failedAccount, error);
-              if (poolAttempt + 1 < maxPoolAttempts) {
-                excludedAccounts.push(failedAccount.id);
-                poolAttempt += 1;
-                continue;
-              }
-            }
-            throw error;
-          }
+           } catch (error) {
+             const failedAccount = error.poolAccount;
+             if (failedAccount && !aborter.signal.aborted) {
+               openCodeAccountPool.markFailure(failedAccount, error);
+               if (poolAttempt + 1 < maxPoolAttempts) {
+                 excludedAccounts.push(failedAccount.id);
+                 poolAttempt += 1;
+                 continue;
+               }
+             }
+             if (error?.poolExhausted && !aborter.signal.aborted) {
+               // OpenCode account pool exhausted for this candidate; try the
+               // next configured route instead of aborting the whole request.
+               attemptResult = null;
+               continue candidateLoop;
+             }
+             throw error;
+           }
           const { response } = attemptResult;
           activeResponse = response;
           if (aborter.signal.aborted) {
