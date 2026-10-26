@@ -558,6 +558,9 @@ export async function startAttempt({ candidate, req, path, body, env = process.e
     const request = JSON.parse(Buffer.isBuffer(body) ? body.toString("utf8") : body);
     if (candidate.protocol === "messages") validateNativeAnthropicRequest(request);
     const translated = candidate.protocol === "messages" ? anthropicToOpenAI(request, { forceStream: false, preserveToolErrors: true }) : request;
+    if (candidate.protocol === "messages" && request.tool_choice?.disable_parallel_tool_use !== undefined) {
+      translated.parallel_tool_calls = !request.tool_choice.disable_parallel_tool_use;
+    }
     if (candidate.protocol === "messages" && request.system !== undefined) {
       const system = typeof request.system === "string" ? request.system : request.system.map((part) => part.text || "").join("");
       // Replace only the top-level system prompt inserted by the codec. Inline

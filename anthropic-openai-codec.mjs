@@ -39,6 +39,15 @@ function toolChoiceToOpenAI(choice) {
 export function validateNativeAnthropicRequest(request) {
   const invalid = (message) => { throw Object.assign(new Error(message), { statusCode: 400, code: "unsupported_bridge_request" }); };
   const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+  if (request.tool_choice !== undefined) {
+    const choice = request.tool_choice;
+    if (!object(choice) || !["auto", "any", "none", "tool"].includes(choice.type)) invalid("Unsupported native tool_choice");
+    if (choice.type === "tool" && (typeof choice.name !== "string" || !choice.name)) invalid("Native selected tool requires a name");
+    if (choice.disable_parallel_tool_use !== undefined) {
+      if (choice.type === "none" || typeof choice.disable_parallel_tool_use !== "boolean") invalid("Invalid native disable_parallel_tool_use");
+      if (request.parallel_tool_calls !== undefined && request.parallel_tool_calls !== !choice.disable_parallel_tool_use) invalid("Conflicting native parallel tool settings");
+    }
+  }
   const textOnly = (content, label) => {
     if (typeof content === "string") return;
     if (!Array.isArray(content)) invalid(`${label} must contain text`);

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
+import { decodeChatRequest } from '../native/opencode/bridge-wire.mjs';
 
 test('gateway exposes the native lane explicitly and translates caller-owned tool turns', { timeout: 15000 }, async () => {
   let status = 200, emptyLength = false;
@@ -31,6 +32,7 @@ test('gateway exposes the native lane explicitly and translates caller-owned too
     });
     const send = (body) => fetch(`http://127.0.0.1:${port}/v1/messages`, { method: 'POST', headers: { authorization: 'Bearer sk-ant-fixture-public', 'content-type': 'application/json', 'x-session-id': 'caller-session' }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
     const body = { model: 'opencode-native/beam-free', max_tokens: 1000, system: '  Exact caller system\n', messages: [{ role: 'user', content: 'read the file' }], tools: [{ name: 'read_file', description: 'Owned by caller', input_schema: { type: 'object', properties: { path: { type: 'string' } } } }] };
+    body.tool_choice = { type: 'any', disable_parallel_tool_use: true };
     let response = await send(body);
     assert.equal(response.status, 200, await response.clone().text());
     assert.equal(response.headers.get('x-opencode-native-session'), 'ses_fixture');
@@ -39,6 +41,7 @@ test('gateway exposes the native lane explicitly and translates caller-owned too
     assert.equal(result.content.find(block => block.type === 'tool_use').id, 'call_fixture');
     assert.equal(result.content.find(block => block.type === 'thinking').thinking, 'preserve this reasoning');
     assert.equal(requests[0].body.messages[0].content, body.system);
+    assert.deepEqual(decodeChatRequest(requests[0].body).toolChoice, { type: 'required', disableParallelToolUse: true });
     assert.equal(requests[0].headers.authorization, 'Bearer fixture-worker-key');
     response = await send({ ...body, messages: [...body.messages, { role: 'assistant', content: result.content }, { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_fixture', content: 'file contents' }] }] });
     assert.equal(response.status, 200, await response.clone().text());

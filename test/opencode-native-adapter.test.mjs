@@ -50,6 +50,22 @@ test('native adapter is opt-in, isolates authorization, preserves session and fa
       await assert.rejects(startAttempt({ ...args, candidate: messagesCandidate, body: JSON.stringify({ model: 'opencode-native/beam-free', messages: [{ role, content: [{ ...block, text: 'would swallow the block' }] }] }) }), error => error.statusCode === 400 && /non-text blocks/.test(error.message));
       assert.equal(received.length, beforeAmbiguous);
     }
+    for (const disabled of [true, false]) {
+      const singleTool = await startAttempt({ ...args, candidate: messagesCandidate, body: JSON.stringify({ model: 'opencode-native/beam-free', messages: [{ role: 'user', content: 'use tools' }], tool_choice: { type: 'any', disable_parallel_tool_use: disabled } }) });
+      singleTool.response.resume();
+      assert.equal(received.at(-1).body.parallel_tool_calls, !disabled);
+      assert.equal(received.at(-1).body.tool_choice, 'required');
+    }
+    const beforeInvalidChoice = received.length;
+    for (const options of [
+      { tool_choice: { type: 'any', disable_parallel_tool_use: 'true' } },
+      { tool_choice: { type: 'any', disable_parallel_tool_use: true }, parallel_tool_calls: true },
+      { tool_choice: { type: 'unknown' } },
+      { tool_choice: { type: 'tool' } },
+    ]) {
+      await assert.rejects(startAttempt({ ...args, candidate: messagesCandidate, body: JSON.stringify({ model: 'opencode-native/beam-free', messages: history, ...options }) }), error => error.statusCode === 400);
+      assert.equal(received.length, beforeInvalidChoice);
+    }
     version = 'unexpected';
     await assert.rejects(startAttempt(args), { code: 'native_worker_version_mismatch' });
   } finally { worker.closeAllConnections(); await new Promise(resolve => worker.close(resolve)); }

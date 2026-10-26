@@ -74,3 +74,5 @@ Cancellation finalization retains a session lease until the native request has s
 The native verification script runs the expensive SDK fixture groups sequentially to avoid cold-start resource interference on small VPSs. The lifecycle fixture still starts competing owners concurrently, and the worker fixture still exercises simultaneous slow uploads. Cancellation probes use unique request markers, bind close observers to the matching provider request, and repeat five times before checking mid-stream cancellation.
 
 Native Messages accepts an omitted `tool_result.content` as an empty tool result, matching the installed Anthropic SDK contract. Ambiguous non-text blocks with a string `text` field are rejected before the shared codec can reinterpret a tool or thinking block as plain text. Adapter regressions verify both behaviors at dispatch.
+
+Messages `tool_choice.disable_parallel_tool_use` is preserved through OpenAI translation into native `disableParallelToolUse`. Unsupported tool-choice types, invalid flags and conflicting parallel settings return 400 before dispatch.
