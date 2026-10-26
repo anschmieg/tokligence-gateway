@@ -454,8 +454,8 @@ model_catalog:
         - { provider: openrouter, model: minimax/minimax-m3.1-flash:free }
     beam-free:
       routes:
-        - { provider: opencode-zen, model: beam-free }
         - { provider: cline-oauth, model: cline/reflection/beam-free }
+        - { provider: opencode-zen, model: beam-free }
     nemotron-3.5-lightning-free:
       routes:
         - { provider: opencode-zen, model: nemotron-3.5-lightning-free }
