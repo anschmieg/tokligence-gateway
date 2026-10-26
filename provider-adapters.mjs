@@ -191,7 +191,7 @@ async function zenAttempt(candidate, { body, env, accountPool, stickyKey, exclud
       orgId,
     }),
     codec: candidate.protocol === "messages"
-      ? { kind: "anthropic-from-openai", stream: request.stream === true, model: candidate.upstreamModel, keepReasoning: Boolean(request.thinking && request.thinking.type !== "disabled") }
+      ? { kind: "anthropic-from-openai", stream: request.stream === true, model: candidate.upstreamModel, keepReasoning: true }
       : null,
     poolAccount: account || null,
     poolGeneration,
@@ -207,7 +207,9 @@ function translatedRequest(body) {
   const upstreamBody = anthropicToOpenAI(request, { forceStream: false });
   return {
     upstreamBody,
-    codec: { kind: "anthropic-from-openai", stream: upstreamBody.stream === true },
+    // Preserve upstream reasoning for replay even when the caller did not
+    // request thinking. Reflection requires it on every earlier assistant turn.
+    codec: { kind: "anthropic-from-openai", stream: upstreamBody.stream === true, keepReasoning: true },
   };
 }
 

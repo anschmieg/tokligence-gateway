@@ -71,8 +71,8 @@ test("Zen Messages translation sends only caller tools and does not leak injecte
   assert.equal(payload.stop_reason, "tool_use");
 });
 
-test("streaming Messages keeps reasoning separate from visible text", async (t) => {
-  const body = { ...requestBody, thinking: { type: "enabled", budget_tokens: 1024 } };
+test("streaming Messages preserves reasoning without a thinking opt-in", async (t) => {
+  const body = { ...requestBody };
   const fixture = await runFixture(t, (_req, res) => {
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.end(`data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "private thought", content: "visible answer" }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
