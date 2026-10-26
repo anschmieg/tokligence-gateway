@@ -129,11 +129,12 @@ function errorResponse(error: unknown) {
   }) })
 }
 
+function discardBody(request: Request) { void request.body?.cancel().catch(() => {}) }
 let ingesting = 0
 const requestTimeoutMs = positiveSetting("OPENCODE_NATIVE_REQUEST_TIMEOUT_MS", 120000, 600000)
 const bodyTimeoutMs = positiveSetting("OPENCODE_NATIVE_BODY_TIMEOUT_MS", 30000, 30000)
 async function inference(request: Request) {
-  if (ingesting + active.size >= 4) return Response.json({ error: { type: "native_bridge_error", code: "native_worker_busy", message: "Native worker concurrency limit reached" } }, { status: 503, headers: headers({ "retry-after": "1" }) })
+  if (ingesting + active.size >= 4) { discardBody(request); return Response.json({ error: { type: "native_bridge_error", code: "native_worker_busy", message: "Native worker concurrency limit reached" } }, { status: 503, headers: headers({ "retry-after": "1" }) }) }
   ingesting++
   let raw
   try { raw = await readChatBody(request, { timeoutMs: bodyTimeoutMs }) }
@@ -262,9 +263,9 @@ const server = Bun.serve({
   idleTimeout: 0,
   async fetch(request) {
     const url = new URL(request.url)
-    if (url.pathname === "/health") return Response.json({ status: "ok", worker: "opencode-native", version: source.version, commit: source.commit, fixture: Boolean(fixture) })
-    if (!authorized(request)) return Response.json({ error: { code: "unauthorized", message: "Invalid native worker authorization" } }, { status: 401 })
-    if (url.pathname !== "/v1/chat/completions" || request.method !== "POST") return Response.json({ error: { code: "not_found", message: "Unknown native worker endpoint" } }, { status: 404 })
+    if (url.pathname === "/health") { discardBody(request); return Response.json({ status: "ok", worker: "opencode-native", version: source.version, commit: source.commit, fixture: Boolean(fixture) }) }
+    if (!authorized(request)) { discardBody(request); return Response.json({ error: { code: "unauthorized", message: "Invalid native worker authorization" } }, { status: 401 }) }
+    if (url.pathname !== "/v1/chat/completions" || request.method !== "POST") { discardBody(request); return Response.json({ error: { code: "not_found", message: "Unknown native worker endpoint" } }, { status: 404 }) }
     try { return await inference(request) } catch (error) { return errorResponse(error) }
   },
 })
