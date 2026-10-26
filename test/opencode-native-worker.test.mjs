@@ -18,7 +18,7 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
   cliForbiddenPath = path.join(canaryRoot, 'outside.txt');
   await writeFile(cliForbiddenPath, 'SYNTHETIC_SECRET_DO_NOT_FORWARD');
   let cliTurns = 0;
-  let cancelledUpstream = () => {};
+  const closureObservers = new Map();
   const provider = http.createServer(async (req, res) => {
     let raw = ''; for await (const part of req) raw += part;
     captures.push({ headers: req.headers, body: JSON.parse(raw) });
@@ -35,7 +35,7 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
     }
     if (mode === 'quota') { res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '60' }); res.end(JSON.stringify({ error: { type: 'FreeUsageLimitError', message: 'PRIVATE_UPSTREAM_BODY' } })); return; }
     res.writeHead(200, { 'content-type': 'text/event-stream' });
-    if (mode === 'wait' || mode === 'wait-after-text') { res.on('close', () => cancelledUpstream()); res.write(mode === 'wait' ? ': waiting\n\n' : 'data: {"choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]}\n\n'); return; }
+    if (mode === 'wait' || mode === 'wait-after-text') { const onClosed = captures.at(-1).body.messages.map(message => closureObservers.get(message.content)).find(Boolean) || (() => {}); res.on('close', onClosed); res.write(mode === 'wait' ? ': waiting\n\n' : 'data: {"choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]}\n\n'); return; }
     const delta = mode.startsWith('tools') ? { reasoning_content: 'native reasoning to replay', tool_calls: [
       { index: 0, id: 'call_one', type: 'function', function: { name: 'read_file', arguments: '{"path":"one"}' } },
       { index: 1, id: 'call_two', type: 'function', function: { name: 'read_file', arguments: '{"path":"two"}' } },
@@ -172,31 +172,35 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
     response = await call();
     assert.equal(response.status, 504, await response.clone().text());
     assert.equal((await response.json()).error.code, 'native_request_deadline');
-    mode = 'wait';
-    const closed = new Promise(resolve => { cancelledUpstream = resolve; });
-    const abort = new AbortController();
-    const before = captures.length;
-    const pending = call({ stream: true }, key, abort.signal);
-    pending.catch(() => {});
-    for (let i = 0; i < 100 && captures.length === before; i++) await new Promise(resolve => setTimeout(resolve, 10));
-    assert.ok(captures.length > before, 'cancellation fixture reached upstream');
-    abort.abort();
-    await assert.rejects(pending);
-    await Promise.race([closed, new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error('Native cancellation did not close the provider connection')), 3000); timer.unref(); })]);
-    mode = 'text';
-    // Peer socket close can precede native fiber finalization. A brief conflict
-    // is valid; a leaked active lease must not survive the bounded retry window.
-    for (let attempt = 0; attempt < 50; attempt++) {
-      response = await call();
-      if (response.status !== 409) break;
-      assert.equal(response.headers.get('retry-after'), '1');
-      await response.arrayBuffer();
-      await new Promise(resolve => setTimeout(resolve, 20));
+    for (let cancellation = 0; cancellation < 5; cancellation++) {
+      mode = 'wait';
+      const marker = `cancellation-probe-${cancellation}`;
+      const closed = new Promise(resolve => { closureObservers.set(marker, resolve); });
+      const abort = new AbortController();
+      const reached = () => captures.some(capture => capture.body.messages.some(message => message.content === marker));
+      const pending = call({ stream: true, messages: [{ role: "user", content: marker }] }, key, abort.signal);
+      pending.catch(() => {});
+      for (let i = 0; i < 100 && !reached(); i++) await new Promise(resolve => setTimeout(resolve, 10));
+      assert.ok(reached(), 'the exact cancellation probe reached upstream');
+      abort.abort();
+      await assert.rejects(pending);
+      await Promise.race([closed, new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error('Native cancellation did not close the provider connection')), 3000); timer.unref(); })]);
+      mode = 'text';
+      // Peer socket close can precede native fiber finalization. A brief conflict
+      // is valid; a leaked active lease must not survive the bounded retry window.
+      for (let attempt = 0; attempt < 50; attempt++) {
+        response = await call();
+        if (response.status !== 409) break;
+        assert.equal(response.headers.get('retry-after'), '1');
+        await response.arrayBuffer();
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      assert.equal(response.status, 200, await response.clone().text());
     }
-    assert.equal(response.status, 200, await response.clone().text());
     mode = 'wait-after-text';
-    const streamingClosed = new Promise(resolve => { cancelledUpstream = resolve; });
-    response = await call({ stream: true });
+    const streamMarker = "mid-stream-cancellation-probe";
+    const streamingClosed = new Promise(resolve => { closureObservers.set(streamMarker, resolve); });
+    response = await call({ stream: true, messages: [{ role: "user", content: streamMarker }] });
     const reader = response.body.getReader();
     assert.match(new TextDecoder().decode((await reader.read()).value), /partial/);
     await reader.cancel();
