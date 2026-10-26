@@ -294,26 +294,62 @@ async function atomicWriteCredentials(destination, credentials) {
   }
 }
 
-function nodePostJson(url, body, headers, signal) {
+function nodePostJson(url, body, headers, signal, proxy) {
   const target = new URL(url);
-  const client = target.protocol === "https:" ? https : http;
   const payload = Buffer.from(JSON.stringify(body));
+  const mergedHeaders = {
+    ...headers,
+    "Content-Type": "application/json",
+    "Content-Length": String(payload.length),
+  };
+  if (!proxy) {
+    const client = target.protocol === "https:" ? https : http;
+    return new Promise((resolve, reject) => {
+      const request = client.request({
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port || undefined,
+        path: `${target.pathname}${target.search}`,
+        method: "POST",
+        headers: mergedHeaders,
+        signal,
+      }, resolve);
+      request.once("error", reject);
+      request.end(payload);
+    });
+  }
+  const proxyUrl = new URL(proxy);
+  const targetPort = Number(target.port) || (target.protocol === "https:" ? 443 : 80);
   return new Promise((resolve, reject) => {
-    const request = client.request({
-      protocol: target.protocol,
-      hostname: target.hostname,
-      port: target.port || undefined,
-      path: `${target.pathname}${target.search}`,
-      method: "POST",
-      headers: {
-        ...headers,
-        "Content-Type": "application/json",
-        "Content-Length": String(payload.length),
-      },
-      signal,
-    }, resolve);
-    request.once("error", reject);
-    request.end(payload);
+    const connectReq = http.request({
+      host: proxyUrl.hostname,
+      port: Number(proxyUrl.port) || 80,
+      method: "CONNECT",
+      path: `${target.hostname}:${targetPort}`,
+    });
+    connectReq.once("error", reject);
+    connectReq.on("connect", (res, socket) => {
+      if (res.statusCode !== 200) {
+        reject(new Error(`proxy CONNECT failed: ${res.statusCode}`));
+        socket.destroy();
+        return;
+      }
+      const client = target.protocol === "https:" ? https : http;
+      const request = client.request({
+        socket,
+        servername: target.hostname,
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port || undefined,
+        path: `${target.pathname}${target.search}`,
+        method: "POST",
+        headers: mergedHeaders,
+        signal,
+      }, resolve);
+      request.once("error", reject);
+      request.end(payload);
+    });
+    connectReq.end();
   });
 }
 
@@ -324,6 +360,7 @@ export class ClineOAuthAdapter {
   #requestTimeoutMs;
   #refreshBufferMs;
   #modelCacheTtlMs;
+  #proxy;
   #fetch;
   #now;
   #sleep;
@@ -344,6 +381,7 @@ export class ClineOAuthAdapter {
     this.#requestTimeoutMs = boundedNumber(provider.request_timeout_ms, DEFAULT_REQUEST_TIMEOUT_MS, 1, 120_000);
     this.#refreshBufferMs = boundedNumber(provider.refresh_buffer_ms, DEFAULT_REFRESH_BUFFER_MS, 0, 60 * 60_000);
     this.#modelCacheTtlMs = boundedNumber(provider.model_cache_ttl_ms, DEFAULT_MODEL_CACHE_TTL_MS, 0, DEFAULT_MODEL_CACHE_TTL_MS);
+    this.#proxy = nonEmptyString(env.CLINE_PROXY) || nonEmptyString(env.OPENCODE_ZEN_PROXY) || null;
     this.#fetch = fetchImpl;
     this.#now = now;
     this.#sleep = sleep;
@@ -649,6 +687,7 @@ export class ClineOAuthAdapter {
         payload,
         headers,
         signal,
+        this.#proxy,
       );
       if (response.statusCode && (response.statusCode < 200 || response.statusCode >= 300)) {
         const responseText = await nodeResponseText(response);
