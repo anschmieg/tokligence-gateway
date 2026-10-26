@@ -167,11 +167,12 @@ export function buildRoutePlan(config, { model, protocol, body, requestClass = n
     const cooledCompatibleUntil = [];
     // Catalog routes are already ordered free -> subscription -> paid. Do not
     // let sticky affinity promote a paid route above a recovered free backend.
-    for (const reference of catalogModel.routes) {
-      const provider = providerById(config, reference.provider);
-      if (!provider || !providerEnabled(provider, env) || !reference.supported_endpoints.includes(endpoint)) continue;
-      const translate = translationFor(provider, protocol);
-      if (translate === null || (translate && !TRANSLATING_ADAPTERS.has(provider.adapter))) continue;
+     for (const reference of catalogModel.routes) {
+       const provider = providerById(config, reference.provider);
+       const translate = translationFor(provider, protocol);
+       if (!provider || !providerEnabled(provider, env)) continue;
+       if (!reference.supported_endpoints.includes(endpoint) && translate === null) continue;
+       if (translate === null || (translate && !TRANSLATING_ADAPTERS.has(provider.adapter))) continue;
       if (!candidateSupports(provider, reference, required, body, Boolean(translate))) continue;
       const cooldownUntil = runtimeState?.cooldowns?.get(`${provider.id}:${reference.model}:${protocol}`) || 0;
       if (cooldownUntil > Date.now()) {
