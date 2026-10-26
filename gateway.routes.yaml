@@ -442,7 +442,7 @@ routes:
   - provider: modal
     prefixes: [glm-5, zai-org/GLM-5]
   - provider: antigravity
-    prefixes: [antigravity/, antigrav/]
+    prefixes: [antigravity/, agy/]
   - provider: copilot-auto
     prefixes: [copilot/]
   - provider: openrouter
