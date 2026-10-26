@@ -128,12 +128,29 @@
           </div>
           <div class="detail" id="cline-url" style="margin-top:12px;"></div>
         </div>
-      </div>
-    </section>
+       </div>
+     </section>
 
-    <section>
-      <div class="toolbar">
-        <h2 style="margin:0;">Routing preferences</h2>
+     <section>
+       <div class="toolbar">
+         <h2 style="margin:0;">OpenCode Zen Account Enrollment</h2>
+         <span class="sub">Add secondary OpenCode Console OAuth accounts for pool failover.</span>
+       </div>
+       <div class="panel">
+         <div class="sub">Manual steps on the gateway host (admin):</div>
+         <ol style="margin:8px 0 0 18px; line-height:1.7;">
+           <li>Run isolated Console login: <code>GATEWAY_AUTH_DIR="$(mktemp -d)"; env HOME="$GATEWAY_AUTH_DIR" XDG_DATA_HOME="$GATEWAY_AUTH_DIR/.local/share" XDG_CONFIG_HOME="$GATEWAY_AUTH_DIR/.config" ~/.opencode/bin/opencode auth login opencode --method device --standalone</code></li>
+           <li>Extract the credential from the SQLite DB into <code>~/zen-secondary-oauth.pending.json</code> (mode 0600).</li>
+           <li>Install: <code>sudo bash scripts/admin-install-zen-secondary-oauth.sh ~/zen-secondary-oauth.pending.json</code></li>
+           <li>Add the account to <code>gateway.routes.yaml</code> under <code>opencode_pool.accounts</code> and redeploy.</li>
+         </ol>
+         <div class="sub" style="margin-top:8px;">Note: Cline uses a single credential file; additional Cline accounts are not supported by the current adapter. OpenCode is routed through the configured VPN proxy (<code>OPENCODE_ZEN_PROXY</code>); Cline now honors <code>CLINE_PROXY</code> (falls back to <code>OPENCODE_ZEN_PROXY</code>).</div>
+       </div>
+     </section>
+
+     <section>
+       <div class="toolbar">
+         <h2 style="margin:0;">Routing preferences</h2>
         <span class="sub" id="pref-hint">Overrides apply immediately and persist across restarts.</span>
         <span class="spacer"></span>
         <button id="pref-bake" class="primary" title="Write current overrides into gateway.routes.yaml (source of truth)">Persist to config</button>
