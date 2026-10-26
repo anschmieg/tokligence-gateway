@@ -26,7 +26,8 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
       const text = 'CLAUDE_NATIVE_RECOVERY_OK ' + 'Validated native tool continuation. '.repeat(200);
       const delta = results.length < 2 ? { reasoning_content: 'fixture native thought', tool_calls: [{ index: 0, id: `cli_call_${results.length}`, type: 'function', function: { name: 'Read', arguments: JSON.stringify({ file_path: results.length ? cliFixturePath : `${state}/missing-fixture.txt` }) } }] } : { content: text };
       res.writeHead(200, { 'content-type': 'text/event-stream' });
-      res.end(`data: ${JSON.stringify({ id: 'fixture', choices: [{ index: 0, delta, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ id: 'fixture', choices: [{ index: 0, delta: {}, finish_reason: results.length < 2 ? 'tool_calls' : 'stop' }] })}\n\ndata: [DONE]\n\n`);
+      const deltas = results.length < 2 ? [delta] : text.match(/.{1,48}/g).map(content => ({ content }));
+      res.end(deltas.map(delta => `data: ${JSON.stringify({ id: 'fixture', choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`).join('') + `data: ${JSON.stringify({ id: 'fixture', choices: [{ index: 0, delta: {}, finish_reason: results.length < 2 ? 'tool_calls' : 'stop' }] })}\n\ndata: [DONE]\n\n`);
       return;
     }
     if (mode === 'quota') { res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '60' }); res.end(JSON.stringify({ error: { type: 'FreeUsageLimitError', message: 'PRIVATE_UPSTREAM_BODY' } })); return; }
@@ -123,6 +124,7 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
         assert.equal(exit, 0, stdout + stderr + JSON.stringify(cliRoles));
         const result = JSON.parse(stdout);
         assert.match(result.result, /CLAUDE_NATIVE_RECOVERY_OK/);
+        assert.ok(result.result.length > 6000, "real CLI consumed the long multi-frame answer");
         const reminder = cliSystems.find(text => text.trim());
         assert.ok(reminder, 'real CLI fixture included an inline system reminder');
         assert.ok(captures.some(capture => JSON.stringify(capture.body.messages).includes(JSON.stringify(reminder).slice(1, -1))), 'native protocol preserves the inline reminder text');
