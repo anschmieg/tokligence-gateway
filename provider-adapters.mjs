@@ -603,7 +603,7 @@ export async function startAttempt({ candidate, req, path, body, env = process.e
   const translation = candidate.translate === "anthropic-from-openai" ? translatedRequest(body) : null;
   const attemptBody = translation ? Buffer.from(JSON.stringify(translation.upstreamBody)) : body;
 
-  if (candidate.provider.adapter === "cline-oauth") {
+  if (candidate.provider.adapter === "cliproxyapi") {
     const adapter = adapters[candidate.provider.id];
     if (!adapter) throw new Error("Cline OAuth adapter is not configured");
     const response = await adapter.createChatCompletion(JSON.parse(attemptBody.toString()), { signal, trace });

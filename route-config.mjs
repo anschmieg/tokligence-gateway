@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { openCodeChatAllowed } from "./opencode-free-models.mjs";
 import { parse, stringify } from "yaml";
 
-const VALID_ADAPTERS = new Set(["tokligence", "oauth-proxy", "middleware", "copilot-sdk", "openai-compatible", "cline-oauth", "opencode-zen", "opencode-native", "chatgpt-responses"]);
+const VALID_ADAPTERS = new Set(["tokligence", "oauth-proxy", "middleware", "copilot-sdk", "openai-compatible", "opencode-zen", "opencode-native", "chatgpt-responses"]);
 
 function requireString(value, label) {
   if (typeof value !== "string" || !value.trim()) {
@@ -40,7 +40,7 @@ function normalizeClineOAuthProvider(provider, index) {
       : "https://api.workos.com",
     credentials_path: provider.credentials_path
       ? requireString(provider.credentials_path, `${label}.credentials_path`)
-      : "/data/cline-oauth/credentials.json",
+      : "/data/cliproxyapi/credentials.json",
     model_cache_ttl_ms: optionalBoundedInteger(
       provider.model_cache_ttl_ms,
       `${label}.model_cache_ttl_ms`,
@@ -136,10 +136,10 @@ export function parseRoutingConfig(source) {
     if (!Array.isArray(betaAllowlist) || betaAllowlist.some((value) => typeof value !== "string" || !value.trim())) {
       throw new Error(`providers[${index}].anthropic_beta_allowlist must contain only non-empty strings`);
     }
-    if (betaAllowlist.length && ["oauth-proxy", "opencode-zen", "cline-oauth", "copilot-sdk", "tokligence"].includes(adapter)) {
+    if (betaAllowlist.length && ["oauth-proxy", "opencode-zen", "cliproxyapi", "copilot-sdk", "tokligence"].includes(adapter)) {
       throw new Error(`providers[${index}] cannot allow Anthropic betas on the ${adapter} adapter`);
     }
-    const normalizedProvider = adapter === "cline-oauth"
+    const normalizedProvider = adapter === "cliproxyapi"
       ? normalizeClineOAuthProvider(provider, index)
       : provider;
     const opencodePool = provider.opencode_pool;

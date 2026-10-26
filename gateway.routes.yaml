@@ -110,6 +110,31 @@ providers:
       capabilities: [coding, reasoning, tool_calling]
       quota_type: free_tier
 
+  # Antigravity OAuth provider using CLIProxyAPI
+  - id: antigravity
+    adapter: oauth-proxy
+    enabled_env: ANTIGRAVITY_PROXY_ENABLED
+    internal_api_key_env: ANTIGRAVITY_PROXY_API_KEY
+    external_base_url_env: ANTIGRAVITY_PROXY_BASE_URL
+    auth_dir: /data/antigravity/auth
+    protocols: [chat_completions, messages, responses]
+    proxy-url: "socks5://127.0.0.1:9377"
+    models:
+      - id: antigravity/antigravity-free
+        family: antigravity
+        context_window: 128000
+    credential_pool:
+      strategy: round-robin
+      session_affinity: true
+      session_affinity_ttl: 1h
+      request_retry: 1
+      max_retry_credentials: 2
+      max_retry_interval: 30
+    metadata:
+      cost_class: free
+      capabilities: [coding, reasoning, tool_calling]
+      quota_type: free_tier
+
   # === NEUE PROVIDER (Quota-basiert) ===
   - id: mistral
     adapter: middleware
@@ -416,6 +441,8 @@ routes:
     prefixes: [cline/]
   - provider: modal
     prefixes: [glm-5, zai-org/GLM-5]
+  - provider: antigravity
+    prefixes: [antigravity/, antigrav/]
   - provider: copilot-auto
     prefixes: [copilot/]
   - provider: openrouter
@@ -499,6 +526,9 @@ model_catalog:
       routes:
         - { provider: openrouter, model: poolside/laguna-xs-2.1:free }
         - { provider: openrouter, model: poolside/laguna-xs-2.1 }
+    antigravity/antigravity-free:
+      routes:
+        - { provider: antigravity, model: antigravity/antigravity-free }
     thinkingmachines/inkling:
       routes:
         - { provider: openrouter, model: thinkingmachines/inkling:free }
