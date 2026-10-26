@@ -113,7 +113,7 @@ export function createOpenCodeAccountPool({ provider, env = process.env, getToke
     entry.generation += 1;
     const retry = Number(retryAfterMs);
     const hasRetryAfter = retryAfterMs !== undefined && retryAfterMs !== null && retryAfterMs !== "" && !Number.isNaN(retry);
-    const delay = hasRetryAfter ? Math.max(1000, Math.min(retry, MAX_RETRY_AFTER_MS)) : Math.min(30000 * 2 ** Math.min(entry.failures - 1, 6), MAX_COOLDOWN_MS);
+    const delay = hasRetryAfter ? Math.max(1000, Math.min(retry, MAX_RETRY_AFTER_MS)) : Math.min(5000 * 2 ** Math.min(entry.failures - 1, 4), MAX_COOLDOWN_MS);
     entry.until = Math.max(entry.until, now() + delay);
   }
   function markSessionFailure(account, stickyKey) {
