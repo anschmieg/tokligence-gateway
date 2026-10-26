@@ -12,11 +12,13 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
   const state = await mkdtemp(path.join(tmpdir(), 'native-worker-test-'));
   const captures = [];
   let mode = 'text';
+  let cancelledUpstream = () => {};
   const provider = http.createServer(async (req, res) => {
     let raw = ''; for await (const part of req) raw += part;
     captures.push({ headers: req.headers, body: JSON.parse(raw) });
     if (mode === 'quota') { res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '60' }); res.end(JSON.stringify({ error: { type: 'FreeUsageLimitError', message: 'PRIVATE_UPSTREAM_BODY' } })); return; }
     res.writeHead(200, { 'content-type': 'text/event-stream' });
+    if (mode === 'wait') { res.on('close', () => cancelledUpstream()); res.write(': waiting\n\n'); return; }
     const delta = mode === 'tools' ? { reasoning_content: 'native reasoning to replay', tool_calls: [
       { index: 0, id: 'call_one', type: 'function', function: { name: 'read_file', arguments: '{"path":"one"}' } },
       { index: 1, id: 'call_two', type: 'function', function: { name: 'read_file', arguments: '{"path":"two"}' } },
@@ -42,7 +44,7 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
     const endpoint = `http://127.0.0.1:${port}/v1/chat/completions`;
     const messages = [{ role: 'system', content: 'EXACT_CALLER_SYSTEM' }, { role: 'user', content: 'Long input '.repeat(5000) }];
     const tools = [{ type: 'function', function: { name: 'read_file', description: 'Caller-owned tool', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } }];
-    const call = (extra = {}, auth = key) => fetch(endpoint, { method: 'POST', headers: { authorization: `Bearer ${auth}`, 'content-type': 'application/json', 'x-opencode-bridge-session': 'same-caller-session' }, body: JSON.stringify({ model: 'test-model', messages, tools, ...extra }) });
+    const call = (extra = {}, auth = key, signal) => fetch(endpoint, { method: 'POST', headers: { authorization: `Bearer ${auth}`, 'content-type': 'application/json', 'x-opencode-bridge-session': 'same-caller-session' }, body: JSON.stringify({ model: 'test-model', messages, tools, ...extra }), signal });
     assert.equal((await call({}, 'wrong')).status, 401);
     let response = await call();
     assert.equal(response.status, 200, await response.clone().text());
@@ -70,6 +72,20 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
     const truncated = await response.text();
     assert.match(truncated, /native_stream_incomplete|native_stream_invalid|native_/);
     assert.doesNotMatch(truncated, /data: \[DONE\]/);
+    mode = 'wait';
+    const closed = new Promise(resolve => { cancelledUpstream = resolve; });
+    const abort = new AbortController();
+    const before = captures.length;
+    const pending = call({ stream: true }, key, abort.signal);
+    pending.catch(() => {});
+    for (let i = 0; i < 100 && captures.length === before; i++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.ok(captures.length > before, 'cancellation fixture reached upstream');
+    abort.abort();
+    await assert.rejects(pending);
+    await Promise.race([closed, new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error('Native cancellation did not close the provider connection')), 3000); timer.unref(); })]);
+    mode = 'text';
+    response = await call();
+    assert.equal(response.status, 200, await response.clone().text());
   } finally {
     worker.kill('SIGTERM');
     await new Promise(resolve => { if (worker.exitCode !== null) resolve(); else { worker.once('exit', resolve); setTimeout(() => { worker.kill('SIGKILL'); resolve(); }, 3000).unref(); } });

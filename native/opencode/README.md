@@ -18,13 +18,15 @@ npm run lint
 npm run test:native
 ```
 
-Use Bun 1.4.4. If source/Bun live elsewhere, set `OPENCODE_NATIVE_SOURCE` and `OPENCODE_NATIVE_BUN`. Ordinary unit tests skip the real-runtime fixture when these are absent; `npm run test:native` explicitly fails when prerequisites are missing. The runtime fixture starts the real pinned host against a loopback synthetic provider; it does not need or read production credentials. It exercises large prompts/answers, unchanged system prompts, native headers and stable sessions, parallel tool calls, tool results, reasoning replay, streaming, buffered completion, quota errors, and truncated output. Separate tests exercise the gateway Messages translation and native authorization boundary.
+Use Bun 1.4.4. If source/Bun live elsewhere, set `OPENCODE_NATIVE_SOURCE` and `OPENCODE_NATIVE_BUN`. Ordinary unit tests skip the real-runtime fixture when these are absent; `npm run test:native` explicitly fails when prerequisites are missing. The runtime fixture starts the real pinned host against a loopback synthetic provider; it does not need or read production credentials. It exercises large prompts/answers, unchanged system prompts, native headers and stable sessions, parallel tool calls, tool results, reasoning replay, streaming, buffered completion, quota errors, and truncated output. Separate tests exercise the gateway Messages translation and native authorization boundary. Cancellation is checked against the real provider connection.
 
 A separate image can be built from the repository root:
 
 ```sh
 docker build -f native/opencode/Dockerfile -t tokligence-opencode-native:staging .
 ```
+
+For upstream SDK typechecking, additionally install the root and script workspaces with the frozen lockfile (`--filter opencode --filter @opencode/script` alongside the filters above), then run `bun run --cwd .cache/opencode-native/packages/sdk typecheck`. This check passed with the overlay.
 
 The Dockerfile is provided but has not been image-built in this environment; VPS verification uses the same prepared source and pinned Bun directly.
 
@@ -55,10 +57,4 @@ Synthetic runtime tests passed locally and on the VPS. Live direct-VPS native pr
 
 A T3 task titled **Run OpenCode staging tests after quota reset** is scheduled for **October 27, 00:05 UTC** in this thread. The timer uses the daily fixed-time scheduler; its first action must disable itself, making this a single intended test round. Run a bounded sequential live matrix after reset: actual Claude Code, long prompts/responses, textual reasoning replay, caller-owned tools, parallel calls, and tool-result continuation across the configured free models. Stop requests for an account if a fresh quota response persists. Report blocked cases separately from successful validation. Do not change egress/accounts to circumvent limits.
 
-For local access, SSH forwarding must explicitly override `ClearAllForwardings=yes` in the SSH config:
-
-```sh
-ssh -F /home/t3/.ssh/fra-agent.conf -o ClearAllForwardings=no -N -L 127.0.0.1:4190:127.0.0.1:4190 fra-agent
-```
-
-`/tmp/tokligence-claude-staging.py` is a local bounded CLI probe that reads the staging gateway key privately over SSH and passes it only via child environment. Review/extend it for the live matrix. Do not use production credentials to make staging tests pass. Cline testing needs its own refresh-ownership check before importing any existing account.
+Claude Code is installed privately as `runtime/claude`. Run it directly on the VPS: SSH TCP forwarding is **administratively prohibited** for this account. `claude-check.py` in the staging root is the working bounded probe; it loads the gateway key privately into the CLI child environment. The CLI reached the native model and surfaced `api_error_status: 429` / `FreeUsageLimitError` before reset. Extend that runner for the post-reset matrix. The old local tunnel-based probe is obsolete. Do not use production credentials to make staging tests pass. Cline testing needs its own refresh-ownership check before importing any existing account.

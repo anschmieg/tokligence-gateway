@@ -4,7 +4,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { createHash, timingSafeEqual, randomUUID } from "node:crypto"
 import { Effect, Stream, Layer, Schema, Cause, Exit } from "effect"
-import { LLMClient, Message, SystemPart, ToolDefinition } from "@opencode/ai"
+import { LLMClient, Message, SystemPart, ToolDefinition, type ToolChoice } from "@opencode/ai"
 import { EmbeddedHost } from "./internal/host"
 import { LocationServiceMap } from "@opencode/core/location-services"
 import { Location } from "@opencode/core/location"
@@ -26,6 +26,12 @@ import { llmClient } from "@opencode/core/effect/app-node-platform"
 import { BridgeInputError, decodeChatRequest, createChatEncoder, safeNativeError } from "./tokligence-bridge-wire.mjs"
 import source from "./tokligence-source.json"
 
+function errorCode(error: unknown) { return error && typeof error === "object" && "code" in error ? error.code : undefined }
+type BridgeInput = {
+  model: string; stream: boolean; system: Array<{ text: string }>
+  messages: Array<ConstructorParameters<typeof Message>[0]>
+  tools: Array<ToolDefinition.Input>; toolChoice?: ToolChoice.Input; options: Readonly<Record<string, unknown>>
+}
 const state = path.resolve(process.env.OPENCODE_NATIVE_STATE || "/state/opencode-native")
 for (const name of ["XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"]) {
   const value = process.env[name]
@@ -44,10 +50,10 @@ try {
   const previous = Number(await fs.readFile(lockPath, "utf8"))
   if (Number.isSafeInteger(previous) && previous > 0) {
     try { process.kill(previous, 0); throw new Error("This native state already has a live worker owner") }
-    catch (error) { if (error.code !== "ESRCH") throw error }
+    catch (error) { if (errorCode(error) !== "ESRCH") throw error }
   }
   await fs.unlink(lockPath)
-} catch (error) { if (error.code !== "ENOENT") throw error }
+} catch (error) { if (errorCode(error) !== "ENOENT") throw error }
 const lock = await fs.open(lockPath, "wx", 0o600)
 await lock.writeFile(String(process.pid))
 await lock.close()
@@ -64,7 +70,7 @@ const host = await Effect.runPromise(EmbeddedHost.create({
   database: { path: path.join(state, "opencode.db") },
   config: { directory: path.join(state, "config"), project: false, claude: false, content: JSON.stringify(config) },
   models: { fetch: !fixture }, fs: { filewatcher: false, fff: false },
-  log: { level: "none" },
+  log: { level: "error", emit: () => {} },
 }))
 const seed = process.env.OPENCODE_NATIVE_SEED_FILE
 if (seed) {
@@ -75,7 +81,7 @@ if (seed) {
     return yield* credentials.list(Integration.ID.make("opencode"))
   }))
   let pending
-  try { pending = await fs.readFile(seed, "utf8") } catch (error) { if (error.code !== "ENOENT") throw error }
+  try { pending = await fs.readFile(seed, "utf8") } catch (error) { if (errorCode(error) !== "ENOENT") throw error }
   if (pending && !values.length) {
     let value
     try { value = Schema.decodeUnknownSync(Credential.OAuth)(JSON.parse(pending)) } catch { throw new Error("Invalid staging credential seed; contents withheld") }
@@ -102,7 +108,7 @@ const sessions = new Map<string, SessionEntry>()
 try {
   const saved = JSON.parse(await fs.readFile(sessionsPath, "utf8"))
   for (const [id, value] of Object.entries(saved)) sessions.set(id, value as SessionEntry)
-} catch (error) { if (error.code !== "ENOENT") throw error }
+} catch (error) { if (errorCode(error) !== "ENOENT") throw error }
 const active = new Set<string>()
 let saving = Promise.resolve()
 const save = () => {
@@ -129,7 +135,7 @@ const headers = (extra: Record<string, string> = {}) => ({
 function errorResponse(error: unknown) {
   const result = safeNativeError(error)
   return Response.json({ error: result.error }, { status: result.status, headers: headers({
-    ...(result.error.retry_after_seconds ? { "retry-after": String(result.error.retry_after_seconds) } : {}),
+    ...("retry_after_seconds" in result.error && result.error.retry_after_seconds ? { "retry-after": String(result.error.retry_after_seconds) } : {}),
   }) })
 }
 
@@ -139,7 +145,7 @@ async function inference(request: Request) {
   if (Buffer.byteLength(raw) > 16 * 1024 * 1024) throw new BridgeInputError("Request exceeds the 16 MiB bridge limit")
   let value
   try { value = JSON.parse(raw) } catch { throw new BridgeInputError("Request body must be valid JSON") }
-  const input = decodeChatRequest(value)
+  const input = decodeChatRequest(value) as BridgeInput
   if (!allow.has(input.model)) throw new BridgeInputError("Model is not enabled on this native worker", "native_model_not_allowed")
   const scope = request.headers.get("x-opencode-bridge-session")
   if (!scope || !/^[A-Za-z0-9._:-]{1,128}$/.test(scope)) throw new BridgeInputError("A gateway-scoped x-opencode-bridge-session is required")
@@ -205,7 +211,7 @@ async function inference(request: Request) {
     })), { signal: cancel.signal }).then((exit) => {
       if (Exit.isFailure(exit)) {
         const reasons = exit.cause.reasons
-        failure = reasons.map((reason) => Cause.isFailReason(reason) ? (reason.error.error ?? reason.error) : Cause.isDieReason(reason) ? reason.defect : undefined).find(Boolean) || new Error("Native request interrupted")
+        failure = reasons.map((reason) => Cause.isFailReason(reason) ? ("error" in reason.error ? reason.error.error : reason.error) : Cause.isDieReason(reason) ? reason.defect : undefined).find(Boolean) || new Error("Native request interrupted")
       }
       done = true
       notify()
