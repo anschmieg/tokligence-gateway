@@ -464,46 +464,48 @@ test("client disconnect aborts and closes the upstream request", async (t) => {
 test("translated reasoning survives response and history replay without a thinking opt-in", async (t) => {
   for (const adapter of ["openai-compatible", "cline-oauth"]) {
     for (const stream of [false, true]) {
-      await t.test(`${adapter}, stream=${stream}`, async (t) => {
-        const requests = [];
-        const completion = { choices: [{ finish_reason: "stop", message: { content: "answer", reasoning_content: "synthetic reasoning" } }] };
-        const frames = `data: ${JSON.stringify({ choices: [{ delta: completion.choices[0].message, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`;
-        const upstream = http.createServer((req, res) => {
-          const chunks = [];
-          req.on("data", (chunk) => chunks.push(chunk));
-          req.on("end", () => {
-            requests.push(JSON.parse(Buffer.concat(chunks)));
-            res.writeHead(200, { "content-type": stream ? "text/event-stream" : "application/json" });
-            res.end(stream ? frames : JSON.stringify(completion));
+      for (const reasoningField of ["reasoning_content", "reasoning"]) {
+        await t.test(`${adapter}, stream=${stream}, ${reasoningField}`, async (t) => {
+          const requests = [];
+          const completion = { choices: [{ finish_reason: "stop", message: { content: "answer", [reasoningField]: "synthetic reasoning" } }] };
+          const frames = `data: ${JSON.stringify({ choices: [{ delta: completion.choices[0].message, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`;
+          const upstream = http.createServer((req, res) => {
+            const chunks = [];
+            req.on("data", (chunk) => chunks.push(chunk));
+            req.on("end", () => {
+              requests.push(JSON.parse(Buffer.concat(chunks)));
+              res.writeHead(200, { "content-type": stream ? "text/event-stream" : "application/json" });
+              res.end(stream ? frames : JSON.stringify(completion));
+            });
           });
+          const candidate = makeCandidate({ id: "reasoning", adapter, port: await listen(upstream), translate: "anthropic-from-openai" });
+          t.after(() => close(upstream));
+          const adapters = { reasoning: { async createChatCompletion(body) {
+            requests.push(body);
+            const response = Readable.from([Buffer.from(stream ? frames : JSON.stringify(completion))]);
+            response.statusCode = 200;
+            response.headers = { "content-type": stream ? "text/event-stream" : "application/json" };
+            return response;
+          } } };
+          const { gatewayPort } = await fixture(t, () => {}, { candidates: [candidate], adapters });
+          const messages = [{ role: "user", content: "hello" }];
+          const send = () => fetch(`http://127.0.0.1:${gatewayPort}/v1/messages`, {
+            method: "POST", body: JSON.stringify({ ...STREAM_BODY, stream, messages }),
+          });
+          const first = await send();
+          assert.equal(first.status, 200);
+          const reply = stream ? collectAnthropicStream([await first.text()]) : await first.json();
+          assert.deepEqual(reply.content, [
+            { type: "thinking", thinking: "synthetic reasoning" },
+            { type: "text", text: "answer" },
+          ]);
+          messages.push({ role: "assistant", content: reply.content }, { role: "user", content: "continue" });
+          const second = await send();
+          await second.text();
+          assert.equal(second.status, 200);
+          assert.equal(requests[1].messages.find((message) => message.role === "assistant").reasoning_content, "synthetic reasoning");
         });
-        const candidate = makeCandidate({ id: "reasoning", adapter, port: await listen(upstream), translate: "anthropic-from-openai" });
-        t.after(() => close(upstream));
-        const adapters = { reasoning: { async createChatCompletion(body) {
-          requests.push(body);
-          const response = Readable.from([Buffer.from(stream ? frames : JSON.stringify(completion))]);
-          response.statusCode = 200;
-          response.headers = { "content-type": stream ? "text/event-stream" : "application/json" };
-          return response;
-        } } };
-        const { gatewayPort } = await fixture(t, () => {}, { candidates: [candidate], adapters });
-        const messages = [{ role: "user", content: "hello" }];
-        const send = () => fetch(`http://127.0.0.1:${gatewayPort}/v1/messages`, {
-          method: "POST", body: JSON.stringify({ ...STREAM_BODY, stream, messages }),
-        });
-        const first = await send();
-        assert.equal(first.status, 200);
-        const reply = stream ? collectAnthropicStream([await first.text()]) : await first.json();
-        assert.deepEqual(reply.content, [
-          { type: "thinking", thinking: "synthetic reasoning" },
-          { type: "text", text: "answer" },
-        ]);
-        messages.push({ role: "assistant", content: reply.content }, { role: "user", content: "continue" });
-        const second = await send();
-        await second.text();
-        assert.equal(second.status, 200);
-        assert.equal(requests[1].messages.find((message) => message.role === "assistant").reasoning_content, "synthetic reasoning");
-      });
+      }
     }
   }
 });

@@ -129,6 +129,13 @@ export function anthropicToOpenAI(request, { forceStream = true } = {}) {
   return out;
 }
 
+// Vercel/Cline returns `reasoning`; other OpenAI-compatible upstreams use
+// `reasoning_content`. Replay both as reasoning_content on the next request.
+export function openaiReasoningText(message) {
+  return typeof message?.reasoning_content === "string" ? message.reasoning_content
+    : typeof message?.reasoning === "string" ? message.reasoning : "";
+}
+
 function usageOf(usage) {
   return {
     input_tokens: Number(usage?.prompt_tokens || usage?.input_tokens || 0),
@@ -140,8 +147,8 @@ export function openaiToAnthropicMessage(completion, { model, keepReasoning = fa
   const choice = completion?.choices?.[0];
   const message = choice?.message || {};
   const content = [];
-  if (keepReasoning && typeof message.reasoning_content === "string" && message.reasoning_content) {
-    content.push({ type: "thinking", thinking: message.reasoning_content });
+  if (keepReasoning && openaiReasoningText(message)) {
+    content.push({ type: "thinking", thinking: openaiReasoningText(message) });
   }
   const text = typeof message.content === "string" ? message.content : textOf(message.content);
   if (text) content.push({ type: "text", text });
@@ -246,13 +253,14 @@ export function createAnthropicStreamCodec({ model, messageId, strictCompletion 
       if (!choice) return drain();
       const delta = choice.delta || {};
 
-      if (typeof delta.reasoning_content === "string" && delta.reasoning_content.length) {
+      const reasoning = openaiReasoningText(delta);
+      if (reasoning) {
         semanticStarted = true;
         if (keepReasoning) {
           closeOpen();
           const block = nextBlock++;
           emit("content_block_start", { index: block, content_block: { type: "thinking", thinking: "" } });
-          emit("content_block_delta", { index: block, delta: { type: "thinking_delta", thinking: delta.reasoning_content } });
+          emit("content_block_delta", { index: block, delta: { type: "thinking_delta", thinking: reasoning } });
           emit("content_block_stop", { index: block });
         }
       }

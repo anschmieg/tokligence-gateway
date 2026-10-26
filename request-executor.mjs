@@ -5,6 +5,7 @@ import {
   createAnthropicStreamCodec,
   createSseChunkReader,
   openaiToAnthropicMessage,
+  openaiReasoningText,
 } from "./anthropic-openai-codec.mjs";
 import { anthropicMessageToSse, respondWithAnthropicPassthrough } from "./anthropic-passthrough.mjs";
 import { createSseWriter, sseHeaders, endSseError } from "./sse-stream.mjs";
@@ -393,7 +394,7 @@ async function respondWithCodec({ response, codec, res, status, requestId, model
     }
     const message = choice.message || {};
     const text = typeof message.content === "string" && message.content.trim().length > 0;
-    const reasoning = codec.keepReasoning && typeof message.reasoning_content === "string" && message.reasoning_content.length > 0;
+    const reasoning = codec.keepReasoning && openaiReasoningText(message).length > 0;
     const tools = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
     if (!text && !reasoning && !tools && finish !== "content_filter") {
       throw Object.assign(new Error("Upstream completed without a message or tool call"), { upstreamStreamError: true });
