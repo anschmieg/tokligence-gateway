@@ -106,3 +106,29 @@ test("native history preserves inline system reminders and tool errors", () => {
   assert.deepEqual(result.messages[1], { role: "system", content: [{ type: "text", text: "inline reminder" }] });
   assert.equal(result.messages.at(-1).content[0].result.type, "error");
 });
+
+for (const [label, mutate] of [
+  ['duplicate tool results', body => body.messages.push({ ...body.messages.at(-1) })],
+  ['reasoning on system history', body => body.messages.unshift({ role: 'system', content: 'prompt', reasoning_content: 'must not be discarded' })],
+  ['calls on system history', body => body.messages.unshift({ role: 'system', content: 'prompt', tool_calls: [] })],
+  ['result IDs on assistant history', body => { body.messages[0].tool_call_id = 'one'; }],
+  ['conflicting reasoning', body => { body.messages[0].reasoning = 'one'; body.messages[0].reasoning_content = 'two'; }],
+  ['conflicting limits', body => { body.max_tokens = 1; body.max_completion_tokens = 2; }],
+  ['invalid stream options', body => { body.stream_options = { include_usage: 'yes' }; }],
+  ['invalid descriptions', body => { body.tools = [{ type: 'function', function: { name: 'Read', description: 42, parameters: {} } }]; }],
+]) test(`native boundary rejects ${label} without dropping fields`, () => {
+  const body = { model: 'beam-free', messages: [
+    { role: 'assistant', content: null, tool_calls: [{ id: 'one', type: 'function', function: { name: 'Read', arguments: '{}' } }] },
+    { role: 'tool', tool_call_id: 'one', content: 'result' },
+  ] };
+  mutate(body);
+  assert.throws(() => decodeChatRequest(body), error => error.status === 400);
+});
+
+test('native streaming respects usage opt-in while buffered completions retain accounting', () => {
+  const encoder = createChatEncoder({ model: 'fixture', id: 'one', includeUsage: false });
+  encoder.push({ type: 'text-delta', text: 'hello' });
+  const chunks = encoder.push({ type: 'finish', reason: { normalized: 'stop' }, usage: { inputTokens: 2, outputTokens: 1 } });
+  assert.equal(chunks.at(-1).usage, undefined);
+  assert.equal(encoder.completion().usage.total_tokens, 3);
+});

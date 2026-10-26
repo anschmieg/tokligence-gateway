@@ -23,7 +23,7 @@ test('native registry evicts idle LRU and expired sessions, migrates timestamps 
   const file = path.join(root, 'sessions.json');
   let clock = 100, sequence = 0;
   const removed = [];
-  const options = { file, limit: 2, ttlMs: 50, now: () => clock, create: async () => `ses_${++sequence}`, remove: async id => { removed.push(id); } };
+  const options = { file, limit: 2, ttlMs: 50, now: () => clock, allocateID: () => `ses_${++sequence}`, create: async () => {}, remove: async id => { removed.push(id); } };
   try {
     const registry = await createSessionRegistry(options);
     const active = new Set();
@@ -53,7 +53,7 @@ test('native registry serializes simultaneous allocation under its capacity', as
   let sequence = 0;
   const removed = [];
   try {
-    const registry = await createSessionRegistry({ file, limit: 2, ttlMs: 1000, create: async () => `ses_${++sequence}`, remove: async id => { removed.push(id); } });
+    const registry = await createSessionRegistry({ file, limit: 2, ttlMs: 1000, allocateID: () => `ses_${++sequence}`, create: async () => {}, remove: async id => { removed.push(id); } });
     await Promise.all(Array.from({ length: 8 }, (_, i) => registry.get(String(i), 'model', new Set())));
     assert.equal(Object.keys(JSON.parse(await readFile(file))).length, 2);
     assert.equal(removed.length, 6);
@@ -64,7 +64,7 @@ test('native registry resumes interrupted removal from a durable marker', async 
   const root = await mkdtemp(path.join(os.tmpdir(), 'native-registry-recovery-'));
   const file = path.join(root, 'sessions.json');
   let sequence = 0, interrupt = true;
-  const options = { file, limit: 1, ttlMs: 1000, create: async () => `ses_${++sequence}`, remove: async () => { if (interrupt) throw new Error('Interrupted native deletion'); } };
+  const options = { file, limit: 1, ttlMs: 1000, allocateID: () => `ses_${++sequence}`, create: async () => {}, remove: async () => { if (interrupt) throw new Error('Interrupted native deletion'); } };
   try {
     const first = await createSessionRegistry(options);
     await first.get('a', 'model', new Set());
@@ -74,5 +74,58 @@ test('native registry resumes interrupted removal from a durable marker', async 
     const recovered = await createSessionRegistry(options);
     await recovered.get('b', 'model', new Set());
     assert.deepEqual(Object.keys(JSON.parse(await readFile(file))), ['b']);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('native registry journals creation identity and persists end-of-request timestamps', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'native-registry-create-'));
+  const file = path.join(root, 'sessions.json');
+  let clock = 100, count = 0, interrupt = true;
+  const native = new Set();
+  const options = { file, limit: 2, ttlMs: 100, now: () => clock, allocateID: () => `ses_${++count}`, create: async (model, id) => { native.add(id); if (interrupt) throw new Error('Crash after native creation'); }, remove: async id => { native.delete(id); } };
+  try {
+    const first = await createSessionRegistry(options);
+    await assert.rejects(first.get('a', 'model', new Set()), /Crash/);
+    const pending = JSON.parse(await readFile(file));
+    assert.equal(pending.a.creating, true); assert.equal(pending.a.id, 'ses_1');
+    interrupt = false;
+    const recovered = await createSessionRegistry(options);
+    assert.equal((await recovered.get('a', 'model', new Set())).id, 'ses_1');
+    assert.equal(count, 1); assert.equal(native.size, 1);
+    clock = 150; await recovered.touch('a');
+    const restarted = await createSessionRegistry(options);
+    clock = 220;
+    assert.equal((await restarted.get('a', 'model', new Set())).id, 'ses_1');
+    assert.equal(JSON.parse(await readFile(file)).a.creating, undefined);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('fault-injected registry operations retain a bounded, recoverable native identity set', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'native-registry-faults-'));
+  const file = path.join(root, 'sessions.json');
+  let sequence = 0, clock = 100, random = 17, failCreate = false, failRemove = false;
+  const native = new Set();
+  const options = { file, limit: 3, ttlMs: 80, now: () => clock, allocateID: () => `ses_${++sequence}`, create: async (model, id) => { native.add(id); if (failCreate) { failCreate = false; throw new Error('Interrupted creation'); } }, remove: async id => { native.delete(id); if (failRemove) { failRemove = false; throw new Error('Interrupted removal'); } } };
+  try {
+    let registry = await createSessionRegistry(options);
+    for (let step = 0; step < 80; step++) {
+      random = (random * 1664525 + 1013904223) >>> 0;
+      clock += random % 25;
+      failCreate = step % 9 === 0; failRemove = step % 11 === 0;
+      try {
+        const entry = await registry.get(`scope-${random % 7}`, 'model', new Set());
+        assert.ok(native.has(entry.id), 'a successful lease must reference a native session');
+        await registry.touch(`scope-${random % 7}`);
+      } catch (error) { assert.match(error.message, /Interrupted/); }
+      const persisted = Object.values(JSON.parse(await readFile(file)));
+      assert.ok(native.size <= 3, 'native identities remain bounded even across interrupted operations');
+      assert.ok([...native].every(id => persisted.some(entry => entry.id === id)), 'no native session is orphaned outside the creation journal');
+      registry = await createSessionRegistry(options); // Process restart loses all in-memory state.
+    }
+    failCreate = false; failRemove = false;
+    clock += 100;
+    await registry.get('final', 'model', new Set());
+    assert.equal(native.size, 1);
+    assert.equal(Object.keys(JSON.parse(await readFile(file))).length, 1);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -23,13 +23,13 @@ import { WebSocketConstructor } from "@opencode/core/effect/websocket-constructo
 import { App } from "@opencode/core/app"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { llmClient } from "@opencode/core/effect/app-node-platform"
-import { BridgeInputError, decodeChatRequest, createChatEncoder, safeNativeError } from "./tokligence-bridge-wire.mjs"
+import { BridgeInputError, readChatBody, decodeChatRequest, createChatEncoder, safeNativeError } from "./tokligence-bridge-wire.mjs"
 import source from "./tokligence-source.json"
 import { acquireStateLock, createSessionRegistry } from "./tokligence-state-store.mjs"
 
 function errorCode(error: unknown) { return error && typeof error === "object" && "code" in error ? error.code : undefined }
 type BridgeInput = {
-  model: string; stream: boolean; system: Array<{ text: string }>
+  model: string; stream: boolean; includeUsage: boolean; system: Array<{ text: string }>
   messages: Array<ConstructorParameters<typeof Message>[0]>
   tools: Array<ToolDefinition.Input>; toolChoice?: ToolChoice.Input; options: Readonly<Record<string, unknown>>
 }
@@ -102,9 +102,10 @@ const registry = await createSessionRegistry({
   file: path.join(state, "bridge-sessions.json"),
   limit: positiveSetting("OPENCODE_NATIVE_SESSION_LIMIT", 4096, 4096),
   ttlMs: positiveSetting("OPENCODE_NATIVE_SESSION_TTL_MS", 86400000, 2592000000),
-  create: async (model: string) => {
+  allocateID: () => Session.ID.create(),
+  create: async (model: string, id: string) => {
     const ref = Model.Ref.make({ providerID: Provider.ID.make(providerID), id: Model.ID.make(model) })
-    return (await host.runtime.runPromise(host.sessions.create({ location, model: ref, agent: Agent.ID.make("build") }))).id
+    return (await host.runtime.runPromise(host.sessions.create({ id: Session.ID.make(id), location, model: ref, agent: Agent.ID.make("build") }))).id
   },
   remove: async (id: string) => { await host.runtime.runPromise(host.sessions.remove(Session.ID.make(id)).pipe(Effect.catchTag("Session.NotFoundError", () => Effect.void))) },
 })
@@ -128,10 +129,15 @@ function errorResponse(error: unknown) {
   }) })
 }
 
+let ingesting = 0
+const requestTimeoutMs = positiveSetting("OPENCODE_NATIVE_REQUEST_TIMEOUT_MS", 120000, 600000)
+const bodyTimeoutMs = positiveSetting("OPENCODE_NATIVE_BODY_TIMEOUT_MS", 30000, 30000)
 async function inference(request: Request) {
-  if (Number(request.headers.get("content-length")) > 16 * 1024 * 1024) throw new BridgeInputError("Request exceeds the 16 MiB bridge limit")
-  const raw = await request.text()
-  if (Buffer.byteLength(raw) > 16 * 1024 * 1024) throw new BridgeInputError("Request exceeds the 16 MiB bridge limit")
+  if (ingesting + active.size >= 4) return Response.json({ error: { type: "native_bridge_error", code: "native_worker_busy", message: "Native worker concurrency limit reached" } }, { status: 503, headers: headers({ "retry-after": "1" }) })
+  ingesting++
+  let raw
+  try { raw = await readChatBody(request, { timeoutMs: bodyTimeoutMs }) }
+  finally { ingesting-- }
   let value
   try { value = JSON.parse(raw) } catch { throw new BridgeInputError("Request body must be valid JSON") }
   const input = decodeChatRequest(value) as BridgeInput
@@ -143,22 +149,24 @@ async function inference(request: Request) {
   if (active.size >= 4) return Response.json({ error: { type: "native_bridge_error", code: "native_worker_busy", message: "Native worker concurrency limit reached" } }, { status: 503, headers: headers({ "retry-after": "1" }) })
   active.add(sessionKey)
   const cancel = new AbortController()
-  const deadline = setTimeout(() => cancel.abort(new Error("Native bridge request deadline")), 120000)
+  const deadline = setTimeout(() => cancel.abort(new BridgeInputError("Native model request deadline exceeded", "native_request_deadline", 504)), requestTimeoutMs)
   const onAbort = () => cancel.abort(request.signal.reason)
   request.signal.addEventListener("abort", onAbort, { once: true })
   if (request.signal.aborted) onAbort()
-  const cleanup = () => {
+  let cleanupTask: Promise<void> | undefined
+  const cleanup = () => cleanupTask ??= (async () => {
     clearTimeout(deadline)
     request.signal.removeEventListener("abort", onAbort)
-    registry.touch(sessionKey)
-    active.delete(sessionKey)
-  }
+    try { await registry.touch(sessionKey) }
+    catch { console.warn(JSON.stringify({ event: "native_session_touch_failed" })) }
+    finally { active.delete(sessionKey) }
+  })()
   try {
     const ref = Model.Ref.make({ providerID: Provider.ID.make(providerID), id: Model.ID.make(input.model) })
     let entry
     try { entry = await registry.get(sessionKey, input.model, active) }
     catch (error) {
-      if (errorCode(error) === "native_session_capacity") { cleanup(); return Response.json({ error: { code: "native_session_capacity", message: "All native sessions are active; retry shortly" } }, { status: 503, headers: headers({ "retry-after": "1" }) }) }
+      if (errorCode(error) === "native_session_capacity") { await cleanup(); return Response.json({ error: { code: "native_session_capacity", message: "All native sessions are active; retry shortly" } }, { status: 503, headers: headers({ "retry-after": "1" }) }) }
       throw error
     }
     const session = await host.runtime.runPromise(host.sessions.get(Session.ID.make(entry.id)))
@@ -182,7 +190,7 @@ async function inference(request: Request) {
         return client.stream(prepared.request, prepared.options)
       })).pipe(Stream.provide(nativeLayers), Stream.provide(AppNodeBuilder.build(llmClient)), Stream.provide(locations.get(location)))
     }))
-    const encoder = createChatEncoder({ model: input.model, id: `chatcmpl_${randomUUID()}` })
+    const encoder = createChatEncoder({ model: input.model, includeUsage: input.includeUsage, id: `chatcmpl_${randomUUID()}` })
     const chunks: Array<Record<string, unknown>> = []
     let notify = () => {}
     let drain = () => {}
@@ -199,7 +207,7 @@ async function inference(request: Request) {
     })), { signal: cancel.signal }).then((exit) => {
       if (Exit.isFailure(exit)) {
         const reasons = exit.cause.reasons
-        failure = reasons.map((reason) => Cause.isFailReason(reason) ? ("error" in reason.error ? reason.error.error : reason.error) : Cause.isDieReason(reason) ? reason.defect : undefined).find(Boolean) || new Error("Native request interrupted")
+        failure = cancel.signal.reason instanceof BridgeInputError ? cancel.signal.reason : reasons.map((reason) => Cause.isFailReason(reason) ? ("error" in reason.error ? reason.error.error : reason.error) : Cause.isDieReason(reason) ? reason.defect : undefined).find(Boolean) || new Error("Native request interrupted")
       }
       done = true
       notify()
@@ -214,7 +222,7 @@ async function inference(request: Request) {
     if (!input.stream) {
       while (await next()) { /* The encoder folds the same native stream. */ }
       await running
-      cleanup()
+      await cleanup()
       return Response.json(encoder.completion(), { headers: headers({ "x-opencode-native-session": session.id }) })
     }
     // Do not commit HTTP 200 for lifecycle events or a failed model call.
@@ -228,7 +236,7 @@ async function inference(request: Request) {
           if (!value) {
             controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
             controller.close()
-            cleanup()
+            await cleanup()
             return
           }
           controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(value)}\n\n`))
@@ -236,14 +244,14 @@ async function inference(request: Request) {
           const result = safeNativeError(error)
           controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ error: result.error })}\n\n`))
           controller.close()
-          cleanup()
+          await cleanup()
         }
       },
-      async cancel() { cancel.abort(); await running; cleanup() },
+      async cancel() { cancel.abort(); await running; await cleanup() },
     }), { headers: headers({ "content-type": "text/event-stream", "cache-control": "no-cache", "x-opencode-native-session": session.id }) })
   } catch (error) {
     cancel.abort()
-    cleanup()
+    await cleanup()
     throw error
   }
 }

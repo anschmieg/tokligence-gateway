@@ -45,7 +45,7 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
   const fixture = path.join(state, 'fixture.json');
   await writeFile(fixture, JSON.stringify({ providers: { fixture: { package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: `http://127.0.0.1:${provider.address().port}/v1`, apiKey: 'synthetic' }, models: { 'test-model': { limit: { context: 64000, output: 16000 } } } } } }));
   const key = 'synthetic-private-worker-key-0000000000';
-  const worker = spawn(bun, ['run', path.join(source, 'packages/sdk/src/tokligence-bridge.ts')], { env: { ...process.env, OPENCODE_NATIVE_STATE: state, OPENCODE_NATIVE_PORT: '0', OPENCODE_NATIVE_KEY: key, OPENCODE_NATIVE_MODELS: 'test-model', OPENCODE_NATIVE_FIXTURE_CONFIG: fixture, ...Object.fromEntries(['DATA', 'CONFIG', 'CACHE', 'STATE'].map(name => [`XDG_${name}_HOME`, path.join(state, name.toLowerCase())])) }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const worker = spawn(bun, ['run', path.join(source, 'packages/sdk/src/tokligence-bridge.ts')], { env: { ...process.env, OPENCODE_NATIVE_STATE: state, OPENCODE_NATIVE_PORT: '0', OPENCODE_NATIVE_KEY: key, OPENCODE_NATIVE_MODELS: 'test-model', OPENCODE_NATIVE_BODY_TIMEOUT_MS: '2000', OPENCODE_NATIVE_REQUEST_TIMEOUT_MS: '5000', OPENCODE_NATIVE_FIXTURE_CONFIG: fixture, ...Object.fromEntries(['DATA', 'CONFIG', 'CACHE', 'STATE'].map(name => [`XDG_${name}_HOME`, path.join(state, name.toLowerCase())])) }, stdio: ['ignore', 'pipe', 'pipe'] });
   let logs = '';
   worker.stderr.on('data', value => { logs += value; });
   try {
@@ -60,6 +60,22 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
     const tools = [{ type: 'function', function: { name: 'read_file', description: 'Caller-owned tool', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } }];
     const call = (extra = {}, auth = key, signal) => fetch(endpoint, { method: 'POST', headers: { authorization: `Bearer ${auth}`, 'content-type': 'application/json', 'x-opencode-bridge-session': 'same-caller-session' }, body: JSON.stringify({ model: 'test-model', messages, tools, ...extra }), signal });
     assert.equal((await call({}, 'wrong')).status, 401);
+    const slow = Array.from({ length: 4 }, (_, index) => new Promise((resolve, reject) => {
+      const req = http.request(endpoint, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json', 'x-opencode-bridge-session': `slow-${index}` } }, response => {
+        let body = ''; response.on('data', value => { body += value; }); response.on('end', () => { req.end(); resolve({ status: response.statusCode, body }); });
+      });
+      req.on('error', reject); req.setTimeout(5000, () => req.destroy(new Error('Slow-body fixture timed out')));
+      req.write('{"model":');
+    }));
+    await new Promise(resolve => setTimeout(resolve, 150));
+    const refused = await call();
+    assert.equal(refused.status, 503, await refused.clone().text());
+    assert.equal(captures.length, 0, 'slow body admission does not start model calls');
+    for (const result of await Promise.all(slow)) {
+      assert.equal(result.status, 408, result.body);
+      assert.equal(JSON.parse(result.body).error.code, 'native_request_body_timeout');
+    }
+
     let response = await call();
     assert.equal(response.status, 200, await response.clone().text());
     const session = response.headers.get('x-opencode-native-session');
@@ -140,6 +156,10 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
     const truncated = await response.text();
     assert.match(truncated, /native_stream_incomplete|native_stream_invalid|native_/);
     assert.doesNotMatch(truncated, /data: \[DONE\]/);
+    mode = 'wait';
+    response = await call();
+    assert.equal(response.status, 504, await response.clone().text());
+    assert.equal((await response.json()).error.code, 'native_request_deadline');
     mode = 'wait';
     const closed = new Promise(resolve => { cancelledUpstream = resolve; });
     const abort = new AbortController();

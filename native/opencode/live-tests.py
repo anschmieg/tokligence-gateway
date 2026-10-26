@@ -5,6 +5,7 @@ import argparse, datetime, json, os, pathlib, subprocess, tempfile, urllib.reque
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--root', default='/home/agent/tokligence-staging')
 parser.add_argument('--url', default='http://127.0.0.1:4190')
+parser.add_argument('--request-timeout', type=float, default=690)
 parser.add_argument('--not-before', default='2026-10-27T00:05:00+00:00')
 args = parser.parse_args()
 if datetime.datetime.now(datetime.timezone.utc) < datetime.datetime.fromisoformat(args.not_before):
@@ -20,7 +21,7 @@ def request(model, messages, scope, **options):
     headers = {'Authorization': 'Bearer sk-ant-' + config['TOKLIGENCE_AUTH_SECRET'], 'Content-Type': 'application/json', 'x-session-id': scope}
     req = urllib.request.Request(args.url + '/v1/chat/completions', data=json.dumps(body).encode(), headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=150) as response: return json.load(response)
+        with urllib.request.urlopen(req, timeout=args.request_timeout) as response: return json.load(response)
     except urllib.error.HTTPError as error:
         try: failure = json.load(error).get('error', {})
         except (ValueError, AttributeError): failure = {}
@@ -30,18 +31,20 @@ def request(model, messages, scope, **options):
         raise RuntimeError('HTTP %s: %s' % (error.code, failure.get('code', 'invalid_error_response')))
 
 def record(model, name, action):
+    print(json.dumps({"model": model, "test": name, "phase": "started"}), flush=True)
     try:
         results.append({'model': model, 'test': name, 'passed': True, **(action() or {})})
     except Quota: raise
     except Exception as error:
         results.append({'model': model, 'test': name, 'passed': False, 'error_type': type(error).__name__, 'check': str(error)[:200] if isinstance(error, AssertionError) else None})
 
-def matrix(model):
-    scope = 'live-matrix-' + uuid.uuid4().hex
+scopes = {}
+def matrix(model, phase):
+    scope = scopes.setdefault(model, 'live-matrix-' + uuid.uuid4().hex)
     def basic():
         result = request(model, [{'role': 'user', 'content': 'Reply exactly STAGING_OK.'}], scope)
         assert 'STAGING_OK' in (result['choices'][0]['message'].get('content') or ''), 'basic text marker missing'
-    record(model, 'basic', basic)
+    if phase == 'basic': record(model, 'basic', basic)
     def long():
         context = '\n'.join('Fixture record %d: token_%d has value %d.' % (i, i, i * 3) for i in range(3000))
         prompt = context + '\nGive the value of token_2999. Then write at least 1800 words explaining how to validate these records. Finish with LONG_DONE.'
@@ -51,9 +54,9 @@ def matrix(model):
         assert len(text) >= 6000, 'response too short for the long-output check'
         assert 'LONG_DONE' in text and choice['finish_reason'] == 'stop', 'long output incomplete'
         return {'input_characters': len(prompt), 'output_characters': len(text)}
-    record(model, 'long-input-output', long)
+    if phase == 'long': record(model, 'long-input-output', long)
     reasoning_check = {'model': model, 'test': 'reasoning-replay', 'passed': None, 'status': 'untested', 'reason': 'No reasoning-bearing continuation completed'}
-    results.append(reasoning_check)
+    if phase == 'tools': results.append(reasoning_check)
     def tools():
         tool = {'type': 'function', 'function': {'name': 'fixture_lookup', 'description': 'Return a named synthetic fixture value.', 'parameters': {'type': 'object', 'properties': {'key': {'type': 'string', 'enum': ['alpha', 'beta']}}, 'required': ['key']}}}
         messages = [{'role': 'user', 'content': 'Call fixture_lookup for alpha and beta in parallel. After both results arrive, report their sum.'}]
@@ -78,14 +81,14 @@ def matrix(model):
         else:
             reasoning_check['reason'] = 'Model returned no textual reasoning; tool continuation alone does not verify reasoning replay'
         return {'tool_calls': len(calls)}
-    record(model, 'parallel-tools', tools)
+    if phase == 'tools': record(model, 'parallel-tools', tools)
     def claude():
         with tempfile.TemporaryDirectory(prefix='live-claude-', dir=root) as state:
             fixture = pathlib.Path(state) / 'fixture.txt'
             fixture.write_text('Marker: CLAUDE_TOOL_OK.\n' + 'Synthetic fixture context.\n' * 1000)
             env = {'PATH': str(root / 'runtime') + ':/usr/bin:/bin', 'HOME': state, 'CLAUDE_CONFIG_DIR': state, 'ANTHROPIC_BASE_URL': args.url, 'ANTHROPIC_AUTH_TOKEN': 'sk-ant-' + config['TOKLIGENCE_AUTH_SECRET'], 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC': '1', 'DISABLE_TELEMETRY': '1'}
             prompt = 'Use Read to read %s. Quote its marker, then write at least 1500 words about validating the fixture. Finish with CLAUDE_LONG_DONE.' % fixture
-            run = subprocess.run([str(root / 'runtime/claude'), '-p', prompt, '--model', 'opencode-native/' + model, '--tools', 'Read', '--allowedTools', 'Read', '--max-turns', '5', '--output-format', 'json', '--setting-sources', ''], env=env, cwd=state, text=True, capture_output=True, timeout=240)
+            run = subprocess.run([str(root / 'runtime/claude'), '-p', prompt, '--model', 'opencode-native/' + model, '--tools', 'Read', '--allowedTools', 'Read', '--max-turns', '5', '--output-format', 'json', '--setting-sources', ''], env=env, cwd=state, text=True, capture_output=True, timeout=900)
             result = json.loads(run.stdout)
             if result.get('api_error_status') == 429:
                 results.append({'model': model, 'test': 'claude-code', 'status': 429}); raise Quota()
@@ -95,10 +98,12 @@ def matrix(model):
             assert result.get('num_turns', 0) >= 2, 'Claude did not complete a tool continuation'
             assert len(text) >= 5000, 'Claude output too short'
             return {'turns': result.get('num_turns'), 'output_characters': len(text)}
-    record(model, 'claude-code-read-and-long-output', claude)
+    if phase == 'claude': record(model, 'claude-code-read-and-long-output', claude)
 
 try:
-    for model in models: matrix(model)
+    # Verify short cases for every model before spending quota on long outputs.
+    for phase in ['basic', 'tools', 'long', 'claude']:
+        for model in models: matrix(model, phase)
 except Quota:
     results.append({'status': 'stopped', 'reason': 'Fresh upstream quota response; no further account traffic'})
 finally:

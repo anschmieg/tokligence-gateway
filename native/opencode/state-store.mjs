@@ -16,7 +16,7 @@ export async function acquireStateLock(file) {
   return handle;
 }
 
-export async function createSessionRegistry({ file, limit, ttlMs, create, remove, now = Date.now }) {
+export async function createSessionRegistry({ file, limit, ttlMs, allocateID, create, remove, now = Date.now }) {
   const sessions = new Map();
   try {
     const saved = JSON.parse(await fs.readFile(file, 'utf8'));
@@ -48,7 +48,12 @@ export async function createSessionRegistry({ file, limit, ttlMs, create, remove
     await save();
   };
   return {
-    touch(key) { const entry = sessions.get(key); if (entry) entry.lastUsed = now(); },
+    touch(key) {
+      return serialize(async () => {
+        const entry = sessions.get(key);
+        if (entry && !entry.removing) { entry.lastUsed = now(); await save(); }
+      });
+    },
     get(key, model, active) {
       return serialize(async () => {
         for (const [candidate, entry] of sessions) {
@@ -62,8 +67,15 @@ export async function createSessionRegistry({ file, limit, ttlMs, create, remove
             if (!oldest) throw Object.assign(new Error('All native sessions are active'), { code: 'native_session_capacity' });
             await discard(oldest[0]);
           }
-          entry = { id: await create(model), model, lastUsed: now() };
+          entry = { id: allocateID(), model, lastUsed: now(), creating: true };
           sessions.set(key, entry);
+        }
+        if (entry.creating) {
+          // Persist identity BEFORE invoking native creation. OpenCode accepts
+          // this native ID and returns the same session on retries after a crash.
+          await save();
+          await create(model, entry.id);
+          delete entry.creating;
         }
         entry.lastUsed = now();
         await save();

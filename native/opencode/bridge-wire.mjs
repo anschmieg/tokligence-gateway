@@ -1,9 +1,9 @@
 // Wire adaptation only. OpenCode owns model resolution, auth, request
 // preparation, provider serialization and inference. This module executes no tools.
 export class BridgeInputError extends Error {
-  constructor(message, code = "unsupported_bridge_request") {
+  constructor(message, code = "unsupported_bridge_request", status = 400) {
     super(message);
-    this.status = 400;
+    this.status = status;
     this.code = code;
   }
 }
@@ -26,6 +26,42 @@ const textParts = (content) => {
   });
 };
 
+// Enforce limits while reading, before buffering or JSON parsing can consume
+// an arbitrarily large chunked upload. Cancellation never starts inference.
+export async function readChatBody(request, { limit = 16 * 1024 * 1024, timeoutMs = 30000 } = {}) {
+  const length = request.headers.get("content-length");
+  if (length !== null && !/^\d+$/.test(length)) throw new BridgeInputError("Invalid Content-Length header", "native_request_length_invalid");
+  if (length !== null && Number(length) > limit) throw new BridgeInputError("Request exceeds the native bridge body limit", "native_request_too_large", 413);
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  let reject, failure;
+  const interrupted = new Promise((_, fail) => { reject = fail; });
+  const stop = (error) => {
+    if (failure) return;
+    failure = error; reject(error);
+    void reader.cancel().catch(() => {});
+  };
+  const abort = () => stop(new BridgeInputError("Request body was cancelled", "native_request_cancelled", 408));
+  const timer = setTimeout(() => stop(new BridgeInputError("Request body upload deadline exceeded", "native_request_body_timeout", 408)), timeoutMs);
+  request.signal.addEventListener("abort", abort, { once: true });
+  if (request.signal.aborted) abort();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (true) {
+      const part = await Promise.race([reader.read(), interrupted]);
+      if (failure) throw failure;
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > limit) throw new BridgeInputError("Request exceeds the native bridge body limit", "native_request_too_large", 413);
+      chunks.push(part.value);
+    }
+    try { return new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)); }
+    catch { throw new BridgeInputError("Request body must be valid UTF-8", "native_request_encoding_invalid"); }
+  } catch (error) { void reader.cancel().catch(() => {}); throw error; }
+  finally { clearTimeout(timer); request.signal.removeEventListener("abort", abort); reader.releaseLock(); }
+}
+
 export function decodeChatRequest(body) {
   if (!object(body)) return fail("Request must be a JSON object");
   const supported = new Set(["model", "messages", "stream", "stream_options", "max_tokens", "max_completion_tokens", "temperature", "top_p", "stop", "tools", "tool_choice", "parallel_tool_calls", "reasoning_effort", "user"]);
@@ -33,10 +69,11 @@ export function decodeChatRequest(body) {
   if (typeof body.model !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(body.model)) return fail("Select a bare model ID from the native worker catalog");
   if (!Array.isArray(body.messages) || !body.messages.length || body.messages.length > 4096) return fail("messages must contain between 1 and 4096 messages");
   if (body.stream !== undefined && typeof body.stream !== "boolean") return fail("stream must be boolean");
-  if (body.stream_options && (!object(body.stream_options) || Object.keys(body.stream_options).some((key) => key !== "include_usage"))) return fail("Unsupported stream_options");
+  if (body.stream_options != null && (!object(body.stream_options) || Object.keys(body.stream_options).some((key) => key !== "include_usage") || (body.stream_options.include_usage !== undefined && typeof body.stream_options.include_usage !== "boolean"))) return fail("Unsupported stream_options");
   if (body.user !== undefined) return fail("The native bridge does not forward user attribution; use the gateway session header");
 
   const calls = new Map();
+  const results = new Set();
   const system = [];
   let conversationStarted = false;
   const messages = body.messages.map((message) => {
@@ -46,13 +83,18 @@ export function decodeChatRequest(body) {
     const content = textParts(message.content);
     if (message.is_error !== undefined && (message.role !== "tool" || typeof message.is_error !== "boolean")) return fail("is_error must be a boolean on tool results");
     if (message.provider_metadata !== undefined) return fail("Opaque provider metadata replay is not supported by this experimental bridge");
+    if ((message.reasoning_content !== undefined || message.reasoning !== undefined) && message.role !== "assistant") return fail("Reasoning fields must belong to an assistant message");
+    if ([message.reasoning_content, message.reasoning].some(value => value != null && typeof value !== "string")) return fail("Reasoning must be textual");
+    if (message.reasoning_content != null && message.reasoning != null && message.reasoning_content !== message.reasoning) return fail("Conflicting assistant reasoning fields");
+    if (message.tool_calls !== undefined && (message.role !== "assistant" || !Array.isArray(message.tool_calls))) return fail("tool_calls must belong to an assistant message");
+    if (message.tool_call_id !== undefined && message.role !== "tool") return fail("tool_call_id must belong to a tool result");
     if (message.role === "system") {
       if (conversationStarted) return { role: "system", content };
       system.push(...content);
       return null;
     }
     conversationStarted = true;
-    const reasoning = message.reasoning_content ?? message.reasoning;
+    const reasoning = message.reasoning_content ?? message.reasoning ?? undefined;
     if (reasoning !== undefined) {
       if (message.role !== "assistant" || typeof reasoning !== "string") return fail("reasoning_content is supported only as assistant text");
       content.unshift({ type: "reasoning", text: reasoning });
@@ -72,6 +114,8 @@ export function decodeChatRequest(body) {
     if (message.role === "tool") {
       const name = calls.get(message.tool_call_id);
       if (!name) return fail("Tool results must reference an earlier assistant tool call");
+      if (results.has(message.tool_call_id)) return fail("Each tool call must have only one result");
+      results.add(message.tool_call_id);
       return { role: "tool", content: [{ type: "tool-result", id: message.tool_call_id, name, result: { type: message.is_error ? "error" : "text", value: content.map((part) => part.text).join("") } }] };
     }
     return { role: message.role, content, ...(message.provider_metadata ? { providerMetadata: message.provider_metadata } : {}) };
@@ -83,6 +127,8 @@ export function decodeChatRequest(body) {
     if (!object(tool) || tool.type !== "function" || !object(tool.function)) return fail("Only function tools are supported");
     const fn = tool.function;
     if (typeof fn.name !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(fn.name) || names.has(fn.name)) return fail("Tool names must be valid and unique");
+    if (fn.description !== undefined && typeof fn.description !== "string") return fail("Tool descriptions must be text");
+    if (fn.strict !== undefined && typeof fn.strict !== "boolean") return fail("Tool strict flags must be boolean");
     if (fn.strict === true) return fail("Strict tool schemas are not supported by the pinned native chat compiler");
     if (!object(fn.parameters)) return fail("Function tools require a JSON schema object");
     names.add(fn.name);
@@ -99,6 +145,7 @@ export function decodeChatRequest(body) {
     toolChoice = { ...(toolChoice || { type: "auto" }), disableParallelToolUse: !body.parallel_tool_calls };
   }
   const options = {};
+  if (body.max_completion_tokens !== undefined && body.max_tokens !== undefined && body.max_completion_tokens !== body.max_tokens) return fail("Conflicting output token limits");
   const max = body.max_completion_tokens ?? body.max_tokens;
   if (max !== undefined) {
     if (!Number.isSafeInteger(max) || max < 1 || max > 262144) return fail("Invalid output token limit");
@@ -118,11 +165,11 @@ export function decodeChatRequest(body) {
     if (!["none", "minimal", "low", "medium", "high", "xhigh"].includes(body.reasoning_effort)) return fail("Unsupported reasoning_effort");
     options.reasoningEffort = body.reasoning_effort;
   }
-  return { model: body.model, stream: body.stream === true, system, messages, tools, toolChoice, options };
+  return { model: body.model, stream: body.stream === true, includeUsage: body.stream_options?.include_usage === true, system, messages, tools, toolChoice, options };
 }
 
 export function safeNativeError(error) {
-  if (error instanceof BridgeInputError) return { status: error.status, error: { type: error.status === 400 ? "invalid_request_error" : "native_bridge_error", code: error.code, message: error.message } };
+  if (error instanceof BridgeInputError) return { status: error.status, error: { type: error.status >= 400 && error.status < 500 ? "invalid_request_error" : "native_bridge_error", code: error.code, message: error.message } };
   const reason = error?.reason || error?.cause?.reason || {};
   const tag = reason._tag;
   const upstreamStatus = reason.http?.status;
@@ -149,7 +196,7 @@ export function safeNativeError(error) {
   } };
 }
 
-export function createChatEncoder({ model, id, created = Math.floor(Date.now() / 1000) }) {
+export function createChatEncoder({ model, id, created = Math.floor(Date.now() / 1000), includeUsage = true }) {
   const tools = new Map();
   const blocks = new Map();
   let content = "", reasoning = "", finished = false, finishReason = "stop", usage;
@@ -191,7 +238,7 @@ export function createChatEncoder({ model, id, created = Math.floor(Date.now() /
       if (!content && !reasoning && !tools.size && finishReason === "stop") throw new BridgeStreamError("Native stream completed without semantic output", "native_stream_empty");
       finished = true;
       usage = event.usage && { prompt_tokens: event.usage.inputTokens || 0, completion_tokens: event.usage.outputTokens || 0, total_tokens: (event.usage.inputTokens || 0) + (event.usage.outputTokens || 0) };
-      return [...tools.values()].map((call, index) => chunk({ tool_calls: [{ index, ...call }] })).concat(chunk({}, finishReason, usage ? { usage } : {}));
+      return [...tools.values()].map((call, index) => chunk({ tool_calls: [{ index, ...call }] })).concat(chunk({}, finishReason, usage && includeUsage ? { usage } : {}));
     },
     end() { if (!finished) throw new BridgeStreamError("Native stream ended without a terminal event", "native_stream_incomplete"); },
     completion() {

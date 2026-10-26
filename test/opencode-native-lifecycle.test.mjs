@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { createHash } from 'node:crypto';
 import http from 'node:http';
 import path from 'node:path';
 import os from 'node:os';
@@ -51,11 +52,19 @@ test('native worker excludes concurrent owners, survives SIGKILL and removes evi
     const a = await call('a'), b = await call('b');
     assert.equal(await call('a'), a);
     await call('c');
-    assert.notEqual(await call('b'), b, 'LRU eviction creates a new real native session');
+    const bReplacement = await call('b');
+    assert.notEqual(bReplacement, b, 'LRU eviction creates a new real native session');
     const savedPath = path.join(state, 'bridge-sessions.json');
     const saved = JSON.parse(await readFile(savedPath));
     assert.equal(Object.keys(saved).length, 2);
     assert.ok(!Object.values(saved).some(entry => entry.id === a || entry.id === b));
+    owner.kill('SIGKILL'); await once(owner, 'exit');
+    const bKey = createHash('sha256').update('b\0test-model').digest('hex');
+    saved[bKey].creating = true; // Crash after native create but before clearing journal.
+    await writeFile(savedPath, JSON.stringify(saved));
+    owner = launch(); port = await ready(owner);
+    assert.equal(await call('b'), bReplacement, 'native creation retry must reuse the journaled identity');
+    assert.equal(JSON.parse(await readFile(savedPath))[bKey].creating, undefined);
     owner.kill('SIGKILL'); await once(owner, 'exit');
     // Exercise expiry of real persisted sessions, not just a mocked callback.
     for (const entry of Object.values(saved)) entry.lastUsed = 0;
