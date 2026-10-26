@@ -101,12 +101,13 @@ export function createOpenCodeAccountPool({ provider, env = process.env, getToke
     if (current.generation !== generation) return;
     current.until = 0;
     current.failures = 0;
+    delete current.diagnostic;
     pruneAffinity();
     affinity.delete(stickyKey);
     affinity.set(stickyKey, { accountId: account.id, until: now() + 60 * 60 * 1000 });
     while (affinity.size > MAX_STICKY) affinity.delete(affinity.keys().next().value);
   }
-  function markFailure(account, error, { retryAfterMs } = {}) {
+  function markFailure(account, error, { retryAfterMs, diagnostic } = {}) {
     if (!account) return;
     const entry = state.get(account.id);
     entry.failures += 1;
@@ -114,6 +115,7 @@ export function createOpenCodeAccountPool({ provider, env = process.env, getToke
     const retry = Number(retryAfterMs);
     const hasRetryAfter = retryAfterMs !== undefined && retryAfterMs !== null && retryAfterMs !== "" && !Number.isNaN(retry);
     const delay = hasRetryAfter ? Math.max(1000, Math.min(retry, MAX_RETRY_AFTER_MS)) : Math.min(5000 * 2 ** Math.min(entry.failures - 1, 4), MAX_COOLDOWN_MS);
+    if (diagnostic && now() + delay >= entry.until) entry.diagnostic = diagnostic;
     entry.until = Math.max(entry.until, now() + delay);
   }
   function markSessionFailure(account, stickyKey) {
@@ -148,7 +150,7 @@ export function createOpenCodeAccountPool({ provider, env = process.env, getToke
         else if (!account.api_key && !readCredential(fileFor(account))?.access) reason = "missing_credential";
         else if (exclude.includes(account.id)) reason = "excluded_after_failure";
         else if (cooldownRemaining > 0) reason = "cooldown";
-        return { slot: slotById.get(account.id), reason, ...(cooldownRemaining > 0 ? { remaining_ms: cooldownRemaining } : {}) };
+        return { slot: slotById.get(account.id), reason, ...(cooldownRemaining > 0 ? { remaining_ms: cooldownRemaining, ...(state.get(account.id).diagnostic ? { failure: state.get(account.id).diagnostic } : {}) } : {}) };
       });
     },
     state,

@@ -30,6 +30,7 @@ export function createRequestTrace(req, res, { logger = console.info } = {}) {
         const value = safeTraceId(extra[key]);
         if (value) safeExtra[key] = value;
       }
+      if (["direct", "proxy"].includes(extra.egress)) safeExtra.egress = extra.egress;
       if (["FreeUsageLimitError", "FreeTierError", "rate_limit_error"].includes(extra.provider_error_code)) safeExtra.provider_error_code = extra.provider_error_code;
       if (["FreeUsageLimitError", "FreeTierError", "rate_limit_error"].includes(extra.upstream_error_code)) safeExtra.upstream_error_code = extra.upstream_error_code;
       if (["cline_auth_error", "cline_daily_free_quota_exhausted", "cline_model_retired", "cline_request_rejected", "cline_upstream_error"].includes(extra.cline_classification)) safeExtra.cline_classification = extra.cline_classification;
@@ -38,7 +39,7 @@ export function createRequestTrace(req, res, { logger = console.info } = {}) {
       if (["session_id", "authorization", "credential", "client_version", "proxy_connect", "connection", "tls", "body_sent", "upstream_headers_wait", "pool_selection"].includes(extra.phase)) safeExtra.phase = extra.phase;
       if (["ok", "error", "cancelled", "completed_after_cancel", "failed_after_cancel", "reused", "rejected", "exhausted", "timeout"].includes(extra.outcome)) safeExtra.outcome = extra.outcome;
       if (["eligible", "excluded_after_failure", "model_ineligible", "missing_credential", "cooldown"].includes(extra.reason)) safeExtra.reason = extra.reason;
-      if (["accountquota", "modelcapacity", "rate_limit", "free_usage_limit", "free_tier_rejection", "unknown"].includes(extra.category)) safeExtra.category = extra.category;
+      if (["accountquota", "modelcapacity", "rate_limit", "free_usage_limit", "free_tier_rejection", "network_rejection", "authentication", "access_denied", "request_rejected", "upstream_server_error", "unknown"].includes(extra.category)) safeExtra.category = extra.category;
       if (Number.isSafeInteger(extra.duration_ms) && extra.duration_ms >= 0) safeExtra.duration_ms = extra.duration_ms;
       logger(JSON.stringify({ trace: "inference", event, ...fields, elapsed_ms: Math.round(performance.now() - started), ...safeExtra }));
     } catch {}

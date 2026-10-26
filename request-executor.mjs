@@ -26,6 +26,14 @@ function failureStatus(status) {
   return 502;
 }
 
+function upstreamRequestId(response) {
+  for (const key of ["x-opencode-log-id", "x-request-id", "request-id"]) {
+    const value = response?.headers?.[key];
+    if (typeof value === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(value)) return value;
+  }
+  return null;
+}
+
 function cooldownMs(response) {
   const retryAfter = Number(response?.headers?.["retry-after"]);
   return Number.isFinite(retryAfter) ? Math.min(Math.max(retryAfter * 1000, 1000), 30000) : ERROR_COOLDOWN_MS;
@@ -41,16 +49,19 @@ function errorCooldownMs(error) {
 // Peeks the body of a 429 to distinguish daily/period quota exhaustion from
 // per-minute rate limits, which usually arrive without a usable retry-after.
 // Capped at ~1s so a stalled upstream never delays failover.
-const SAFE_ZEN_429_CODES = new Set(["FreeUsageLimitError", "FreeTierError", "rate_limit_error"]);
+const SAFE_ZEN_ERROR_CODES = new Set(["FreeUsageLimitError", "FreeTierError", "rate_limit_error", "invalid_request_error", "authentication_error", "permission_error", "model_not_found"]);
 
-function classify429Body(text) {
+function classifyZenErrorBody(text) {
   if (typeof text !== "string") return { category: "unknown", providerErrorCode: null };
   let errorCode = "";
   let errorType = "";
   let detail = text;
+  let parameter;
   try {
     const parsed = JSON.parse(text);
     const error = parsed?.error;
+    const candidateParam = typeof error?.param === "string" ? error.param : /Missing required parameter: ['"]([^'"]+)['"]/.exec(error?.message || "")?.[1];
+    if (typeof candidateParam === "string" && /^(messages|tools|model|max_tokens|stream|temperature|reasoning)([.\[\]a-zA-Z0-9_-]*)$/.test(candidateParam) && candidateParam.length <= 128) parameter = candidateParam;
     errorCode = typeof error?.code === "string" ? error.code : typeof parsed?.code === "string" ? parsed.code : "";
     errorType = typeof error?.type === "string" ? error.type : typeof parsed?.type === "string" ? parsed.type : "";
     if (typeof error === "string") detail = error;
@@ -61,13 +72,14 @@ function classify429Body(text) {
   let category = "unknown";
   if (["FreeUsageLimitError", "FreeTierError"].includes(errorCode) || ["FreeUsageLimitError", "FreeTierError"].includes(errorType)) {
     category = errorCode === "FreeUsageLimitError" || errorType === "FreeUsageLimitError" ? "free_usage_limit" : "free_tier_rejection";
-  } else if (["rate_limit_error"].includes(errorCode) || ["rate_limit_error"].includes(errorType)
+  } else if (/abusive traffic|suspicious traffic|ip address.*blocked|blocked.*ip address/.test(normalized)) category = "network_rejection";
+  else if (["rate_limit_error"].includes(errorCode) || ["rate_limit_error"].includes(errorType)
     || /rate limit error|rate limit|too many requests/.test(normalized)) category = "rate_limit";
   else if (/account quota|daily quota|monthly quota|quota exhausted|quota exceeded|insufficient credits|out of credits/.test(normalized)
     || DAILY_QUOTA_BODY_PATTERN.test(normalized)) category = "accountquota";
   else if (/model capacity|capacity for (this )?model|model overloaded|model unavailable/.test(normalized)) category = "modelcapacity";
-  const providerErrorCode = SAFE_ZEN_429_CODES.has(errorCode) ? errorCode : SAFE_ZEN_429_CODES.has(errorType) ? errorType : null;
-  return { category, providerErrorCode };
+  const providerErrorCode = SAFE_ZEN_ERROR_CODES.has(errorCode) ? errorCode : SAFE_ZEN_ERROR_CODES.has(errorType) ? errorType : null;
+  return { category, providerErrorCode, ...(parameter ? { parameter } : {}) };
 }
 
 async function status429Diagnostics(response, signal) {
@@ -77,7 +89,7 @@ async function status429Diagnostics(response, signal) {
   let legacyCooldown = cooldownMs(response);
   try {
     const text = await readBodyText(response, signal, 4096, 1000);
-    classification = classify429Body(text);
+    classification = classifyZenErrorBody(text);
     if (typeof text === "string" && DAILY_QUOTA_BODY_PATTERN.test(text)) legacyCooldown = DAILY_QUOTA_COOLDOWN_MS;
   } catch {
     // Diagnostics must not interfere with the established retry policy.
@@ -595,6 +607,7 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
   const onClose = () => { if (!res.writableEnded) cancel(); };
   res.once("close", onClose);
   let lastStatus = 502;
+  const upstreamFailures = [];
   if (plan.deadline <= Date.now()) {
     aborter.abort(Object.assign(new Error("upstream deadline exceeded"), { code: "TOTAL_DEADLINE" }));
   }
@@ -628,6 +641,13 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
                }
              }
              if (error?.poolExhausted && !aborter.signal.aborted) {
+               for (const slot of error.poolDiagnostics || []) {
+                 if (slot.reason === "model_ineligible") continue;
+                 const remaining = Math.max(0, Number(slot.remaining_ms) || 0);
+                 upstreamFailures.push({ provider: candidate.provider.id, model: candidate.upstreamModel,
+                   account_slot: slot.slot, category: slot.failure?.category || slot.reason,
+                   ...(slot.failure || {}), ...(remaining ? { retry_after_seconds: Math.ceil(remaining / 1000), retry_at: new Date(Date.now() + remaining).toISOString() } : {}) });
+               }
                // OpenCode account pool exhausted for this candidate; try the
                // next configured route instead of aborting the whole request.
                attemptResult = null;
@@ -688,7 +708,21 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
             if (retryable) {
               const retryAfter = Number(response.headers?.["retry-after"]);
               const retryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : undefined;
-              openCodeAccountPool.markFailure(attemptResult.poolAccount, new Error(`upstream ${status}`), { retryAfterMs });
+              let info = status429Info;
+              if (!info) {
+                const raw = await readBodyText(response, aborter.signal, 4096, 1000).catch(() => "");
+                info = classifyZenErrorBody(raw);
+              }
+              const diagnostic = { provider: candidate.provider.id, model: candidate.upstreamModel,
+                account_slot: openCodeAccountPool.slot?.(attemptResult.poolAccount), egress: attemptResult.egress,
+                upstream_status: status, ...(upstreamRequestId(response) ? { upstream_request_id: upstreamRequestId(response) } : {}), category: info.category === "unknown" ? (status === 401 ? "authentication" : status === 403 ? "access_denied" : status >= 500 ? "upstream_server_error" : "request_rejected") : info.category,
+                ...(info.providerErrorCode ? { upstream_error_code: info.providerErrorCode } : {}),
+                ...(info.parameter ? { parameter: info.parameter } : {}) };
+              openCodeAccountPool.markFailure(attemptResult.poolAccount, new Error(`upstream ${status}`), { retryAfterMs, diagnostic });
+              const until = openCodeAccountPool.state.get(attemptResult.poolAccount.id)?.until || 0;
+              if (until > Date.now()) Object.assign(diagnostic, { retry_after_seconds: Math.ceil((until - Date.now()) / 1000), retry_at: new Date(until).toISOString() });
+              upstreamFailures.push(diagnostic);
+              trace?.emit("upstream_diagnostic", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel, status, slot: diagnostic.account_slot, egress: diagnostic.egress, category: diagnostic.category, upstream_error_code: diagnostic.upstream_error_code });
               if (status429Info) {
                 const cooldownUntil = openCodeAccountPool.state.get(attemptResult.poolAccount.id)?.until || 0;
                 trace?.emit("upstream_429", {
@@ -728,6 +762,15 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
           lastStatus = status;
           trace?.emit("upstream_rejected", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel, status });
           if (poolAccount) {
+            if (![429, 401, 403].includes(status) && status < 500) {
+              const raw = await readBodyText(response, aborter.signal, 4096, 1000).catch(() => "");
+              const info = classifyZenErrorBody(raw);
+              upstreamFailures.push({ provider: candidate.provider.id, model: candidate.upstreamModel,
+                account_slot: openCodeAccountPool.slot?.(poolAccount), egress: attemptResult.egress,
+                upstream_status: status, ...(upstreamRequestId(response) ? { upstream_request_id: upstreamRequestId(response) } : {}), category: "request_rejected",
+                ...(info.providerErrorCode ? { upstream_error_code: info.providerErrorCode } : {}),
+                ...(info.parameter ? { parameter: info.parameter } : {}) });
+            }
             discard(response);
             continue candidateLoop;
           }
@@ -940,8 +983,28 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
       : "No eligible upstream completed the request";
     res.end(JSON.stringify({ error: { message, type: timedOut ? "gateway_timeout" : "gateway_upstream_error", request_id: requestId, model: plan.publicModel } }));
   } else if (!res.headersSent && !aborter.signal.aborted) {
-    res.writeHead(failureStatus(lastStatus), { "content-type": "application/json", "x-gateway-request-id": requestId });
-    res.end(JSON.stringify({ error: { message: "No eligible upstream completed the request", type: "gateway_upstream_error", request_id: requestId, model: plan.publicModel } }));
+    const failures = [...new Map(upstreamFailures.map((item) => [`${item.provider}/${item.model}/${item.account_slot}`, item])).values()].slice(-32);
+    const limited = failures.length && failures.every((item) => item.upstream_status === 429);
+    const rejected = failures.length && failures.every((item) => item.upstream_status === 400);
+    const retry = limited ? Math.min(...failures.map((item) => item.retry_after_seconds).filter((value) => value > 0)) : null;
+    const commonStatus = failures.length && failures.every((item) => item.upstream_status === failures[0].upstream_status) ? failures[0].upstream_status : null;
+    const freeTierRejected = failures.some((item) => item.upstream_error_code === "FreeTierError");
+    const status = commonStatus >= 400 && commonStatus < 500 ? commonStatus : failureStatus(lastStatus);
+    const message = limited
+      ? "OpenCode Zen free usage or rate limit reached on all eligible accounts; see upstream_errors for account, egress, reason, and reset time."
+      : freeTierRejected ? "OpenCode Zen rejected free-tier access (client/session/authentication gate); see upstream_errors. This is distinct from free usage quota exhaustion."
+      : commonStatus === 401 ? "OpenCode Zen rejected authentication; see upstream_errors for account and egress."
+      : rejected ? "OpenCode Zen rejected the request; see upstream_errors for the error code and parameter."
+      : failures.length ? "OpenCode Zen accounts are unavailable; see upstream_errors for individual causes."
+      : "No eligible upstream completed the request";
+    const diagnosticSummary = failures.slice(0, 8).map((item) =>
+      `account ${item.account_slot ?? "unknown"} (${item.egress || "unknown egress"}): ${item.upstream_status ? `HTTP ${item.upstream_status} ` : ""}${item.upstream_error_code || item.category}${item.parameter ? ` parameter=${item.parameter}` : ""}${item.retry_at ? ` retry_at=${item.retry_at}` : ""}`
+    ).join("; ");
+    res.writeHead(status, { "content-type": "application/json", "x-gateway-request-id": requestId,
+      ...(Number.isFinite(retry) ? { "retry-after": String(retry) } : {}) });
+    res.end(JSON.stringify({ error: { message: diagnosticSummary ? `${message} ${diagnosticSummary}` : message, type: limited ? "rate_limit_error" : rejected ? "invalid_request_error" : "gateway_upstream_error",
+      code: limited ? "opencode_accounts_rate_limited" : freeTierRejected ? "opencode_free_tier_rejected" : rejected ? "opencode_request_rejected" : "upstreams_unavailable",
+      request_id: requestId, model: plan.publicModel, ...(failures.length ? { upstream_errors: failures } : {}) } }));
   }
   return { committed: false, requestId };
 }

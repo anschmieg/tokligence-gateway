@@ -15,10 +15,10 @@ function makePool(firstStatusFailure = false) {
   return {
     state, failures, accounts, maxAttempts: 2,
     slot(account) { return accounts.indexOf(account) + 1; },
-    diagnostic(_endpoint, _model, { exclude = [] } = {}) { return accounts.map((account, index) => ({ slot: index + 1, reason: exclude.includes(account.id) ? "excluded_after_failure" : failures.has(account.id) ? "cooldown" : "eligible", ...(failures.has(account.id) ? { remaining_ms: 5000 } : {}) })); },
+    diagnostic(_endpoint, _model, { exclude = [] } = {}) { return accounts.map((account, index) => ({ slot: index + 1, reason: exclude.includes(account.id) ? "excluded_after_failure" : failures.has(account.id) ? "cooldown" : "eligible", ...(failures.has(account.id) ? { remaining_ms: Math.max(0, (state.get(account.id).until || 0) - Date.now()), failure: state.get(account.id).diagnostic } : {}) })); },
     select(_endpoint, _model, _sticky, { exclude = [] } = {}) { return accounts.find((a) => !exclude.includes(a.id) && !failures.has(a.id)) || (firstStatusFailure && !exclude.includes("b") ? accounts[1] : null); },
     servicesFor(account) { return { tokens: { authorization: async () => `Bearer ${account.id}`, credential: async () => ({ metadata: { orgID: "org" } }) }, sessions: { sessionId: async () => ({ id: `session-${account.id}`, project: "global" }), clientVersion: async () => "1.18.32" } }; },
-    markFailure(account, _error, options = {}) { failures.add(account.id); state.get(account.id).generation += 1; account.retryAfterMs = options.retryAfterMs; state.get(account.id).until = Date.now() + (options.retryAfterMs || 10000); },
+    markFailure(account, _error, options = {}) { failures.add(account.id); state.get(account.id).generation += 1; account.retryAfterMs = options.retryAfterMs; state.get(account.id).diagnostic = options.diagnostic || state.get(account.id).diagnostic; state.get(account.id).until = Date.now() + (options.retryAfterMs || 10000); },
     markSuccess() {},
   };
 }
@@ -51,9 +51,11 @@ test("Zen Messages translation sends only caller tools and does not leak injecte
   const bodyWithTool = { ...body, tools: [bashTool] };
   const injectedCall = { id: "call_synthetic_bash", type: "function", function: { name: "bash", arguments: "{\"command\":\"synthetic\"}" } };
   const fixture = await runFixture(t, (req, res) => {
+    assert.equal(req.headers["content-type"], "application/json");
     const chunks = [];
     req.on("data", (chunk) => chunks.push(chunk));
     req.on("end", () => {
+      assert.equal(Number(req.headers["content-length"]), Buffer.concat(chunks).length);
       upstreamRequest = JSON.parse(Buffer.concat(chunks).toString("utf8"));
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: "Synthetic reasoning", tool_calls: [injectedCall] }, finish_reason: "tool_calls" }] })}\n\ndata: [DONE]\n\n`);
@@ -503,4 +505,48 @@ test("pooled direct chat forwards semantic frames before upstream completion", a
   assert.match(tail, /finish_reason.*stop/);
   assert.match(tail, /\[DONE\]/);
   assert.equal(pool.failures.size, 0);
+});
+
+
+test("quota exhaustion returns account diagnostics and reset timing, including subsequent locally cooled requests", async (t) => {
+  let calls = 0;
+  const fixture = await runFixture(t, (_req, res) => {
+    calls++;
+    res.writeHead(429, { "content-type": "application/json", "retry-after": "3600", "x-opencode-log-id": "upstream-fixture-123" });
+    res.end(JSON.stringify({ error: { type: "FreeUsageLimitError", message: "PRIVATE_TOKEN private prompt detail" } }));
+  });
+  fixture.pool.maxAttempts = 3;
+  for (let turn = 0; turn < 2; turn++) {
+    const response = await post(fixture.gatewayPort);
+    const text = await response.text();
+    assert.equal(response.status, 429);
+    assert.ok(Number(response.headers.get("retry-after")) >= 3598);
+    assert.doesNotMatch(text, /PRIVATE_TOKEN|private prompt/);
+    const error = JSON.parse(text).error;
+    assert.equal(error.code, "opencode_accounts_rate_limited");
+    assert.deepEqual(error.upstream_errors.map((item) => item.account_slot), [1, 2]);
+    for (const item of error.upstream_errors) {
+      assert.equal(item.upstream_error_code, "FreeUsageLimitError");
+      assert.equal(item.upstream_request_id, "upstream-fixture-123");
+      assert.equal(item.category, "free_usage_limit");
+      assert.equal(item.egress, "direct");
+      assert.ok(Date.parse(item.retry_at) > Date.now());
+    }
+  }
+  assert.equal(calls, 2, "cooled requests must not probe upstream again");
+});
+
+for (const status of [400, 403]) test(`Zen ${status} diagnostics distinguish malformed requests from client gates without leaking raw text`, async (t) => {
+  const fixture = await runFixture(t, (_req, res) => {
+    res.writeHead(status, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: { type: status === 403 ? "FreeTierError" : "invalid_request_error", param: "messages[5].reasoning_content", message: "PRIVATE_SECRET" } }));
+  });
+  const response = await post(fixture.gatewayPort);
+  const text = await response.text();
+  assert.equal(response.status, status);
+  assert.doesNotMatch(text, /PRIVATE_SECRET/);
+  const error = JSON.parse(text).error;
+  assert.equal(error.upstream_errors[0].upstream_status, status);
+  assert.equal(error.upstream_errors[0].parameter, "messages[5].reasoning_content");
+  assert.equal(error.code, status === 403 ? "opencode_free_tier_rejected" : "opencode_request_rejected");
 });

@@ -117,6 +117,15 @@ function waitForOpenCodeSetup(promise, signal) {
   });
 }
 
+export function openCodeAccountTransport(account, env = process.env) {
+  if (account?.egress === "direct") return { egress: "direct", proxy: undefined };
+  const proxy = env.OPENCODE_ZEN_PROXY || undefined;
+  if (account?.egress === "proxy" && !proxy) {
+    throw Object.assign(new Error("OpenCode account requires OPENCODE_ZEN_PROXY"), { code: "OPENCODE_PROXY_NOT_CONFIGURED" });
+  }
+  return { egress: proxy ? "proxy" : "direct", proxy };
+}
+
 async function zenAttempt(candidate, { body, env, accountPool, stickyKey, excludedAccounts = [], signal, trace }) {
   const provider = candidate.provider;
   const request = Buffer.isBuffer(body) ? JSON.parse(body.toString("utf8")) : body;
@@ -129,7 +138,8 @@ async function zenAttempt(candidate, { body, env, accountPool, stickyKey, exclud
   const account = accountPool?.select("chat", candidate.upstreamModel, stickyKey, { exclude: excludedAccounts });
   if (accountPool && account) trace?.emit("pool_account_selected", { slot: accountPool.slot?.(account) });
   if (accountPool) trace?.emit("transport_phase_end", { phase: "pool_selection", outcome: account ? "ok" : "exhausted", duration_ms: Math.max(0, Date.now() - poolSelectionStarted) });
-  if (accountPool && !account) throw Object.assign(new Error("No eligible OpenCode account is available"), { statusCode: 503, poolExhausted: true, code: "OPENCODE_POOL_EXHAUSTED" });
+  if (accountPool && !account) throw Object.assign(new Error("No eligible OpenCode account is available"), { statusCode: 503, poolExhausted: true, code: "OPENCODE_POOL_EXHAUSTED", poolDiagnostics: accountPool.diagnostic?.("chat", candidate.upstreamModel) || [] });
+  let transport;
   const poolGeneration = account ? accountPool.state.get(account.id)?.generation : null;
   const { tokens, sessions } = account ? accountPool.servicesFor(account) : zenServicesFor(provider, env);
   let minted;
@@ -137,6 +147,8 @@ async function zenAttempt(candidate, { body, env, accountPool, stickyKey, exclud
   let credential;
   let clientVersion;
   try {
+    transport = openCodeAccountTransport(account, env);
+    trace?.emit("account_egress", { slot: accountPool?.slot?.(account), egress: transport.egress });
     if (signal?.aborted) throw signal.reason || new Error("OpenCode request cancelled");
     const setup = [
       ["session_id", () => sessions.sessionId(stickyKey)],
@@ -180,19 +192,21 @@ async function zenAttempt(candidate, { body, env, accountPool, stickyKey, exclud
     ? anthropicToOpenAI(request, { forceStream: true })
     : request;
   const shaped = shapeZenRequest(upstream);
+  const payload = Buffer.from(JSON.stringify(shaped));
   throwIfAborted(signal);
   return {
-    body: Buffer.from(JSON.stringify(shaped)),
-    headers: zenHeaders({
+    body: payload,
+    headers: { "content-type": "application/json", "content-length": String(payload.length), ...zenHeaders({
       session: minted.id,
       authorization,
       clientVersion: clientVersion || provider.client_version || "1.18.32",
       project: minted.project || provider.client_project || "global",
       orgId,
-    }),
+    }) },
     codec: candidate.protocol === "messages"
       ? { kind: "anthropic-from-openai", stream: request.stream === true, model: candidate.upstreamModel, keepReasoning: true }
       : null,
+    ...transport,
     poolAccount: account || null,
     poolGeneration,
   };
@@ -568,13 +582,13 @@ export async function startAttempt({ candidate, req, path, body, env = process.e
     const target = requestUrl(candidate, path, env);
     let sent;
     try {
-      sent = await send({ target, headers: prepared.headers, body: prepared.body, signal, trace, proxy: env.OPENCODE_ZEN_PROXY });
+      sent = await send({ target, headers: prepared.headers, body: prepared.body, signal, trace, proxy: prepared.proxy });
     } catch (error) {
       if (prepared.poolAccount) { error.poolAccount = prepared.poolAccount; error.poolStickyKey = stickyKey; }
       throw error;
     }
     const { response, upstream } = sent;
-    return { response, upstream, target, codec: prepared.codec, poolAccount: prepared.poolAccount, poolGeneration: prepared.poolGeneration, poolStickyKey: stickyKey };
+    return { response, upstream, target, codec: prepared.codec, egress: prepared.egress, poolAccount: prepared.poolAccount, poolGeneration: prepared.poolGeneration, poolStickyKey: stickyKey };
   }
 
   const target = requestUrl(candidate, path, env);

@@ -80,12 +80,24 @@ this implementation.
 Selection is sticky by hash of gateway principal plus request session (or a
 stable default session). It is not round-robin. A failed account receives a
 cooldown; requests use the preferred healthy account, then eligible backups up
-to `max_attempts`. `Retry-After` is honored for 429 responses (bounded to one
-hour); other failures get bounded cooldowns. The original model is retained for
+to `max_attempts`. `Retry-After` is honored for 429 responses (bounded to 30
+days); other failures get bounded cooldowns. The original model is retained for
 every attempt; no cross-model or paid fallback occurs. Per-endpoint model
 eligibility is explicit per pool member. Native calls use a 30-second total
 budget and a 10-second per-attempt budget so a hung primary can be quarantined
 and a backup attempted. Caller cancellation is not an account failure.
+
+For chat traffic, each OAuth entry can set `egress: direct` or `egress: proxy`.
+Direct bypasses `OPENCODE_ZEN_PROXY`; proxy requires it and never silently falls
+back to direct. Omitted egress inherits the existing proxy environment setting.
+The shipped primary uses the residential proxy and the secondary uses direct
+VPS egress. Native SystemOne requests retain their existing direct transport.
+Chat errors report safe per-account slot, egress, upstream HTTP status, known
+error code/category, schema parameter where available, and cooldown reset time.
+Quota-only exhaustion returns HTTP 429 with `Retry-After`, including requests
+rejected locally during cooldown; provider response bodies and secrets are not
+copied into diagnostics. A model rejection still cools the whole account, so
+these diagnostics do not establish exhaustion of every other model.
 
 Chat streams can retry an account after upstream streaming starts but before
 meaningful output is exposed. Once text, reasoning, or a tool call is visible,

@@ -3,7 +3,7 @@ import http from "node:http";
 import net from "node:net";
 import { once } from "node:events";
 import test from "node:test";
-import { startAttempt } from "../provider-adapters.mjs";
+import { startAttempt, openCodeAccountTransport } from "../provider-adapters.mjs";
 import { executeRoutePlan } from "../request-executor.mjs";
 
 const candidate = { provider: { id: "zen", adapter: "opencode-zen", base_url: "http://127.0.0.1:1" }, model: { id: "beam-free" }, upstreamModel: "beam-free", protocol: "messages" };
@@ -142,9 +142,12 @@ test("Zen alone uses its explicitly configured proxy across native and translate
     proxyServer.close(); upstreamServer.close();
   });
 
-  async function dispatch(candidate, path, requestBody, env) {
+  async function dispatch(candidate, path, requestBody, env, accountEgress) {
+    const accountPool = pool();
+    const selected = accountPool.select();
+    if (accountEgress) selected.egress = accountEgress;
     const events = [];
-    const result = await startAttempt({ candidate, req: { headers: candidate.provider.adapter === "chatgpt-responses" ? { "idempotency-key": "fixture-key" } : {} }, path, body: Buffer.from(JSON.stringify(requestBody)), env, accountPool: candidate.provider.adapter === "opencode-zen" ? pool() : null, trace: { id: "00000000-0000-4000-8000-000000000001", emit: (event, fields) => events.push({ event, ...fields }) } });
+    const result = await startAttempt({ candidate, req: { headers: candidate.provider.adapter === "chatgpt-responses" ? { "idempotency-key": "fixture-key" } : {} }, path, body: Buffer.from(JSON.stringify(requestBody)), env, accountPool: candidate.provider.adapter === "opencode-zen" ? accountPool : null, trace: { id: "00000000-0000-4000-8000-000000000001", emit: (event, fields) => events.push({ event, ...fields }) } });
     const statusCode = result.response.statusCode;
     result.response.resume();
     return { events, statusCode };
@@ -156,6 +159,11 @@ test("Zen alone uses its explicitly configured proxy across native and translate
   const specialist = await dispatch({ provider: { id: "specialist", adapter: "chatgpt-responses" }, upstreamModel: "fixture", protocol: "responses", specialistInstructions: "Review carefully." }, "/v1/responses", { model: "specialist", input: "synthetic" }, { ...baseEnv, CHATGPT_RESPONSES_ENABLED: "true", CHATGPT_SERVICE_URL: baseUrl, CHATGPT_SERVICE_TOKEN: "synthetic-token" });
   const zen = await dispatch({ provider: { id: "zen", adapter: "opencode-zen", base_url: baseUrl }, model: { id: "fixture" }, upstreamModel: "fixture", protocol: "chat_completions" }, "/v1/chat/completions", request, baseEnv);
 
+  const directZen = await dispatch({ provider: { id: "zen", adapter: "opencode-zen", base_url: baseUrl }, model: { id: "fixture" }, upstreamModel: "fixture", protocol: "chat_completions" }, "/v1/chat/completions", request, baseEnv, "direct");
+  assert.equal(directZen.statusCode, 200);
+  assert.ok(directZen.events.some((item) => item.event === "account_egress" && item.egress === "direct"));
+  assert.equal(directZen.events.some((item) => item.phase === "proxy_connect"), false);
+
   assert.equal(native.statusCode, 200);
   assert.equal(translated.statusCode, 200);
   assert.equal(specialist.statusCode, 200);
@@ -164,7 +172,7 @@ test("Zen alone uses its explicitly configured proxy across native and translate
   assert.match(gatewayRequestIds[0], /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   for (const result of [native, translated, specialist]) assert.equal(result.events.some((item) => item.phase === "proxy_connect"), false);
   assert.ok(zen.events.some((item) => item.phase === "proxy_connect"));
-  assert.equal(upstreamRequests.length, 4);
+  assert.equal(upstreamRequests.length, 5);
   assert.equal(upstreamRequests[1].url, "/chat/completions");
   assert.match(upstreamRequests[1].body, /\"messages\"/);
   assert.equal(upstreamRequests[2].url, "/v1/responses");
@@ -185,4 +193,10 @@ test("OpenCode setup errors are never logged with private subprocess details", a
   const text = await response.text();
   assert.equal(response.status, 502);
   assert.doesNotMatch(logs.join("\n") + text, /SYNTHETIC_SECRET|\/private\/command/);
+});
+
+
+test("an explicitly proxied account cannot silently fall back to direct egress", () => {
+  assert.throws(() => openCodeAccountTransport({ egress: "proxy" }, {}), (error) => error.code === "OPENCODE_PROXY_NOT_CONFIGURED");
+  assert.deepEqual(openCodeAccountTransport({ egress: "direct" }, { OPENCODE_ZEN_PROXY: "http://unavailable.invalid:8888" }), { egress: "direct", proxy: undefined });
 });

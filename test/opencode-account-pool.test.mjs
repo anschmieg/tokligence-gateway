@@ -103,13 +103,15 @@ test("pool configuration rejects duplicate identities, inline secrets and obsole
   invalid((p) => p.opencode_pool.api_keys[0].env = "not a variable");
   invalid((p) => p.opencode_pool.accounts[0].systemone_models = ["unsupported"]);
   invalid((p) => p.systemone = {});
+  invalid((p) => p.opencode_pool.accounts[0].egress = "automatic");
 });
 
-test("shipped Zen OAuth pool routes only through primary", () => {
+test("shipped Zen OAuth pool separates proxied primary and direct secondary", () => {
   const config = parseRoutingConfig(fs.readFileSync(new URL("../gateway.routes.yaml", import.meta.url), "utf8"));
   const provider = config.providers.find((entry) => entry.id === "opencode-zen");
   assert.deepEqual(provider.opencode_pool.accounts.map((account) => account.id), ["primary-oauth", "secondary-oauth"]);
   assert.equal(provider.opencode_pool.accounts[0].credential_file_env, "OPENCODE_ZEN_CREDENTIAL_FILE");
+  assert.deepEqual(provider.opencode_pool.accounts.map((account) => account.egress), ["proxy", "direct"]);
   assert.equal(provider.opencode_pool.accounts[1].credential_file, "/data/zen/secondary-oauth.json");
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "opencode-primary-only-"));

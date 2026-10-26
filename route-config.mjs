@@ -151,9 +151,10 @@ export function parseRoutingConfig(source) {
       const validatePoolEntry = (entry, entryIndex, type) => {
         const entryLabel = `providers[${index}].opencode_pool.${type}[${entryIndex}]`;
         const allowed = type === "accounts"
-          ? ["id", "credential_file", "credential_file_env", "chat_models", "systemone_models", "discover_free_models"]
+          ? ["id", "credential_file", "credential_file_env", "chat_models", "systemone_models", "discover_free_models", "egress"]
           : ["id", "env", "systemone_models"];
         if (!entry || typeof entry !== "object" || Array.isArray(entry) || Object.keys(entry).some((key) => !allowed.includes(key))) throw new Error(`${entryLabel} contains unsupported fields`);
+        if (entry.egress != null && !["direct", "proxy"].includes(entry.egress)) throw new Error(`${entryLabel}.egress must be direct or proxy`);
         if (entry.discover_free_models != null && typeof entry.discover_free_models !== "boolean") throw new Error(`${entryLabel}.discover_free_models must be boolean`);
         const accountId = requireString(entry?.id, `${entryLabel}.id`);
         if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(accountId)) throw new Error(`${entryLabel}.id contains unsupported characters`);

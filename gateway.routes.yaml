@@ -345,10 +345,12 @@ providers:
       max_attempts: 3
       accounts:
         - id: primary-oauth
+          egress: proxy
           credential_file_env: OPENCODE_ZEN_CREDENTIAL_FILE
           discover_free_models: true
           systemone_models: [jev-1.13-free]
         - id: secondary-oauth
+          egress: direct
           credential_file: /data/zen/secondary-oauth.json
           discover_free_models: true
           systemone_models: [jev-1.13-free]
