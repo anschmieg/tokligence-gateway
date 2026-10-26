@@ -2,7 +2,7 @@ import http from "node:http";
 import https from "node:https";
 import tls from "node:tls";
 import { randomUUID } from "node:crypto";
-import { anthropicToOpenAI } from "./anthropic-openai-codec.mjs";
+import { anthropicToOpenAI, validateNativeAnthropicRequest } from "./anthropic-openai-codec.mjs";
 import { shapeZenRequest, zenHeaders } from "./opencode-zen-gate.mjs";
 import { canonicalCredentialFile, createTokenProvider } from "./opencode-zen-credential.mjs";
 import { createSessionPool } from "./opencode-zen-session.mjs";
@@ -556,6 +556,7 @@ export async function startAttempt({ candidate, req, path, body, env = process.e
       throw Object.assign(new Error("The native worker is not enabled or configured"), { statusCode: 503, code: "native_bridge_disabled" });
     }
     const request = JSON.parse(Buffer.isBuffer(body) ? body.toString("utf8") : body);
+    if (candidate.protocol === "messages") validateNativeAnthropicRequest(request);
     const translated = candidate.protocol === "messages" ? anthropicToOpenAI(request, { forceStream: false }) : request;
     if (candidate.protocol === "messages" && request.system !== undefined) {
       const system = typeof request.system === "string" ? request.system : request.system.map((part) => part.text || "").join("");
@@ -603,7 +604,7 @@ export async function startAttempt({ candidate, req, path, body, env = process.e
   const translation = candidate.translate === "anthropic-from-openai" ? translatedRequest(body) : null;
   const attemptBody = translation ? Buffer.from(JSON.stringify(translation.upstreamBody)) : body;
 
-  if (candidate.provider.adapter === "cliproxyapi") {
+  if (candidate.provider.adapter === "cline-oauth") {
     const adapter = adapters[candidate.provider.id];
     if (!adapter) throw new Error("Cline OAuth adapter is not configured");
     const response = await adapter.createChatCompletion(JSON.parse(attemptBody.toString()), { signal, trace });

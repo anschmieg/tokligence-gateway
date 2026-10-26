@@ -34,6 +34,47 @@ function toolChoiceToOpenAI(choice) {
   return undefined;
 }
 
+// Validate the native lane before the general codec can discard unsupported
+// blocks (including blocks nested inside a tool result).
+export function validateNativeAnthropicRequest(request) {
+  const invalid = (message) => { throw Object.assign(new Error(message), { statusCode: 400, code: "unsupported_bridge_request" }); };
+  const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+  const textOnly = (content, label) => {
+    if (typeof content === "string") return;
+    if (!Array.isArray(content)) invalid(`${label} must contain text`);
+    for (const block of content) {
+      if (!object(block) || block.type !== "text" || typeof block.text !== "string" || block.citations?.length) invalid(`${label} supports plain text blocks only`);
+    }
+  };
+  if (request.system !== undefined) textOnly(request.system, "Native system prompt");
+  if (!Array.isArray(request.messages)) invalid("Native messages must be an array");
+  for (const message of request.messages) {
+    if (!object(message) || !["user", "assistant"].includes(message.role)) invalid("Unsupported native Messages role");
+    if (typeof message.content === "string") continue;
+    if (!Array.isArray(message.content)) invalid("Native message content must be text or content blocks");
+    for (const block of message.content) {
+      if (!object(block)) invalid("Invalid native content block");
+      if (block.type === "text") { textOnly([block], "Native message"); continue; }
+      if (block.type === "thinking" && message.role === "assistant") {
+        if (typeof block.thinking !== "string" || (block.signature !== undefined && block.signature !== "")) invalid("Native thinking supports unsigned text only");
+        continue;
+      }
+      if (block.type === "tool_use" && message.role === "assistant") {
+        if (typeof block.id !== "string" || !block.id || typeof block.name !== "string" || !object(block.input)) invalid("Invalid native tool use");
+        continue;
+      }
+      if (block.type === "tool_result" && message.role === "user") {
+        if (typeof block.tool_use_id !== "string" || !block.tool_use_id) invalid("Invalid native tool result ID");
+        if (block.is_error !== undefined && typeof block.is_error !== "boolean") invalid("Native tool error flags must be boolean");
+        if (block.is_error === true) invalid("Native tool error flags are not yet supported");
+        textOnly(block.content, "Native tool result");
+        continue;
+      }
+      invalid("Native Messages supports text, unsigned thinking and function tools only");
+    }
+  }
+}
+
 export function anthropicToOpenAI(request, { forceStream = true } = {}) {
   const out = {};
   for (const key of ["model", "max_tokens", "temperature", "top_p", "user"]) {

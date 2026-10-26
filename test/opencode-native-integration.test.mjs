@@ -37,6 +37,19 @@ test('gateway exposes the native lane explicitly and translates caller-owned too
     assert.equal(requests.at(-1).body.messages.at(-2).reasoning_content, 'preserve this reasoning');
     assert.equal(requests.at(-1).body.messages.at(-1).tool_call_id, 'call_fixture');
     assert.equal(requests[0].headers['x-opencode-bridge-session'], requests[1].headers['x-opencode-bridge-session']);
+    const beforeRejected = requests.length;
+    for (const block of [
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'synthetic' } },
+      { type: 'document', source: { type: 'text', data: 'document' } },
+      { type: 'redacted_thinking', data: 'opaque' },
+    ]) {
+      const rejected = await send({ ...body, messages: [...body.messages, { role: 'assistant', content: result.content }, { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_fixture', content: [block] }] }] });
+      assert.equal(rejected.status, 400);
+      assert.equal(requests.length, beforeRejected, 'unsupported nested data never reaches the worker');
+    }
+    const invalidSystem = await send({ ...body, system: [{ type: 'document', source: {} }] });
+    assert.equal(invalidSystem.status, 400);
+    assert.equal(requests.length, beforeRejected);
     status = 429; response = await send(body);
     assert.equal(response.status, 429); assert.equal(response.headers.get('retry-after'), '60');
     assert.equal((await response.json()).error.upstream_request_id, 'fixture-request');

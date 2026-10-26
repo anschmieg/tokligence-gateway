@@ -51,7 +51,7 @@ import { anthropicMessageToSse, normalizeAnthropicMessage } from "./anthropic-pa
 import {
   ClineAdapterError,
   ClineOAuthAdapter,
-} from "./cliproxyapi.mjs";
+} from "./cline-oauth.mjs";
 import { createSystemOnePool, readBoundedBody, systemOneStickyKey } from "./systemone.mjs";
 import { createOpenCodeAccountPool } from "./opencode-account-pool.mjs";
 
@@ -110,7 +110,7 @@ function loadOAuthAdapterConfig() {
 
 const CODEX = loadOAuthAdapterConfig();
 
-const CLINE_OAUTH_PROVIDER = ROUTING.providers.find(({ adapter }) => adapter === "cliproxyapi") || null;
+const CLINE_OAUTH_PROVIDER = ROUTING.providers.find(({ adapter }) => adapter === "cline-oauth") || null;
 const CLINE_OAUTH = CLINE_OAUTH_PROVIDER && providerEnabled(CLINE_OAUTH_PROVIDER)
   ? new ClineOAuthAdapter({ provider: CLINE_OAUTH_PROVIDER, env: process.env })
   : null;
@@ -169,7 +169,7 @@ function catalogProtocols(model) {
   const provider = providerById(ROUTING, model.provider);
   if (["tokligence", "oauth-proxy", "copilot-sdk"].includes(provider?.adapter)) return ["chat_completions", "messages", "responses"];
   const protocols = [...(provider?.protocols || ["chat_completions"])];
-  if (["middleware", "openai-compatible", "cliproxyapi"].includes(provider?.adapter)
+  if (["middleware", "openai-compatible", "cline-oauth"].includes(provider?.adapter)
     && provider.messages_translation !== false && protocols.includes("chat_completions") && !protocols.includes("messages")) protocols.push("messages");
   return protocols;
 }

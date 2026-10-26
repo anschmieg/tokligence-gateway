@@ -19,12 +19,12 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
     if (mode === 'quota') { res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '60' }); res.end(JSON.stringify({ error: { type: 'FreeUsageLimitError', message: 'PRIVATE_UPSTREAM_BODY' } })); return; }
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     if (mode === 'wait') { res.on('close', () => cancelledUpstream()); res.write(': waiting\n\n'); return; }
-    const delta = mode === 'tools' ? { reasoning_content: 'native reasoning to replay', tool_calls: [
+    const delta = mode.startsWith('tools') ? { reasoning_content: 'native reasoning to replay', tool_calls: [
       { index: 0, id: 'call_one', type: 'function', function: { name: 'read_file', arguments: '{"path":"one"}' } },
       { index: 1, id: 'call_two', type: 'function', function: { name: 'read_file', arguments: '{"path":"two"}' } },
     ] } : { content: 'native response '.repeat(1000) };
     res.write(`data: ${JSON.stringify({ id: 'fixture', choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
-    if (mode !== 'truncated') res.write(`data: ${JSON.stringify({ id: 'fixture', choices: [{ index: 0, delta: {}, finish_reason: mode === 'tools' ? 'tool_calls' : 'stop' }] })}\n\ndata: [DONE]\n\n`);
+    if (mode !== 'truncated') res.write(`data: ${JSON.stringify({ id: 'fixture', choices: [{ index: 0, delta: {}, finish_reason: mode === 'tools-length' ? 'length' : mode === 'tools-filter' ? 'content_filter' : mode === 'tools' ? 'tool_calls' : 'stop' }] })}\n\ndata: [DONE]\n\n`);
     res.end();
   });
   await new Promise(resolve => provider.listen(0, '127.0.0.1', resolve));
@@ -65,6 +65,18 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
     assert.match(stream, /native response/); assert.match(stream, /data: \[DONE\]/);
     assert.equal(captures.at(-1).body.messages.at(-1).content, 'second result');
     assert.equal(captures.at(-1).body.messages.find(message => message.role === 'assistant').reasoning_content, 'native reasoning to replay');
+    for (const [failureMode, finish] of [['tools-length', 'length'], ['tools-filter', 'content_filter']]) {
+      mode = failureMode;
+      response = await call();
+      assert.equal(response.status, 200, await response.clone().text());
+      const rejected = (await response.json()).choices[0];
+      assert.equal(rejected.finish_reason, finish);
+      assert.equal(rejected.message.tool_calls, undefined);
+      response = await call({ stream: true });
+      const rejectedStream = await response.text();
+      assert.doesNotMatch(rejectedStream, /"tool_calls"/);
+      assert.match(rejectedStream, new RegExp(`"finish_reason":"${finish}"`));
+    }
     mode = 'quota'; response = await call();
     assert.equal(response.status, 429, await response.clone().text());
     assert.doesNotMatch(await response.text(), /PRIVATE_UPSTREAM_BODY/);

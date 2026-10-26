@@ -25,6 +25,7 @@ import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { llmClient } from "@opencode/core/effect/app-node-platform"
 import { BridgeInputError, decodeChatRequest, createChatEncoder, safeNativeError } from "./tokligence-bridge-wire.mjs"
 import source from "./tokligence-source.json"
+import { acquireStateLock, createSessionRegistry } from "./tokligence-state-store.mjs"
 
 function errorCode(error: unknown) { return error && typeof error === "object" && "code" in error ? error.code : undefined }
 type BridgeInput = {
@@ -45,18 +46,7 @@ const providerID = fixture ? "fixture" : "opencode"
 const allow = new Set((process.env.OPENCODE_NATIVE_MODELS || "").split(",").map((value) => value.trim()).filter(Boolean))
 if (!allow.size) throw new Error("OPENCODE_NATIVE_MODELS must explicitly allow model IDs")
 await fs.mkdir(state, { recursive: true, mode: 0o700 })
-const lockPath = path.join(state, "worker.lock")
-try {
-  const previous = Number(await fs.readFile(lockPath, "utf8"))
-  if (Number.isSafeInteger(previous) && previous > 0) {
-    try { process.kill(previous, 0); throw new Error("This native state already has a live worker owner") }
-    catch (error) { if (errorCode(error) !== "ESRCH") throw error }
-  }
-  await fs.unlink(lockPath)
-} catch (error) { if (errorCode(error) !== "ENOENT") throw error }
-const lock = await fs.open(lockPath, "wx", 0o600)
-await lock.writeFile(String(process.pid))
-await lock.close()
+const lock = await acquireStateLock(path.join(state, "worker.lock"))
 const metadata = { name: "cli", version: source.version, channel: "latest" }
 const workspace = path.join(state, "workspace")
 await fs.mkdir(workspace, { recursive: true, mode: 0o700 })
@@ -102,23 +92,22 @@ if (!fixture) {
 }
 
 const location = Location.Ref.make({ directory: AbsolutePath.make(workspace) })
-const sessionsPath = path.join(state, "bridge-sessions.json")
-type SessionEntry = { id: string; model: string }
-const sessions = new Map<string, SessionEntry>()
-try {
-  const saved = JSON.parse(await fs.readFile(sessionsPath, "utf8"))
-  for (const [id, value] of Object.entries(saved)) sessions.set(id, value as SessionEntry)
-} catch (error) { if (errorCode(error) !== "ENOENT") throw error }
 const active = new Set<string>()
-let saving = Promise.resolve()
-const save = () => {
-  saving = saving.then(async () => {
-    const temporary = `${sessionsPath}.pending`
-    await fs.writeFile(temporary, JSON.stringify(Object.fromEntries(sessions)), { mode: 0o600 })
-    await fs.rename(temporary, sessionsPath)
-  })
-  return saving
+function positiveSetting(name: string, fallback: number, maximum: number) {
+  const value = Number(process.env[name] ?? fallback)
+  if (!Number.isSafeInteger(value) || value < 1 || value > maximum) throw new Error(`Invalid ${name}`)
+  return value
 }
+const registry = await createSessionRegistry({
+  file: path.join(state, "bridge-sessions.json"),
+  limit: positiveSetting("OPENCODE_NATIVE_SESSION_LIMIT", 4096, 4096),
+  ttlMs: positiveSetting("OPENCODE_NATIVE_SESSION_TTL_MS", 86400000, 2592000000),
+  create: async (model: string) => {
+    const ref = Model.Ref.make({ providerID: Provider.ID.make(providerID), id: Model.ID.make(model) })
+    return (await host.runtime.runPromise(host.sessions.create({ location, model: ref, agent: Agent.ID.make("build") }))).id
+  },
+  remove: async (id: string) => { await host.runtime.runPromise(host.sessions.remove(Session.ID.make(id)).pipe(Effect.catchTag("Session.NotFoundError", () => Effect.void))) },
+})
 const nativeLayers = SessionModelRequest.layer.pipe(
   Layer.provide(SessionModelTransport.layer.pipe(Layer.provide(WebSocketConstructor.layer))),
   Layer.provide(App.layer(metadata)),
@@ -161,17 +150,16 @@ async function inference(request: Request) {
   const cleanup = () => {
     clearTimeout(deadline)
     request.signal.removeEventListener("abort", onAbort)
+    registry.touch(sessionKey)
     active.delete(sessionKey)
   }
   try {
     const ref = Model.Ref.make({ providerID: Provider.ID.make(providerID), id: Model.ID.make(input.model) })
-    let entry = sessions.get(sessionKey)
-    if (!entry) {
-      if (sessions.size >= 4096) throw new BridgeInputError("Native worker session capacity reached", "native_session_capacity")
-      const session = await host.runtime.runPromise(host.sessions.create({ location, model: ref, agent: Agent.ID.make("build") }))
-      entry = { id: session.id, model: input.model }
-      sessions.set(sessionKey, entry)
-      await save()
+    let entry
+    try { entry = await registry.get(sessionKey, input.model, active) }
+    catch (error) {
+      if (errorCode(error) === "native_session_capacity") { cleanup(); return Response.json({ error: { code: "native_session_capacity", message: "All native sessions are active; retry shortly" } }, { status: 503, headers: headers({ "retry-after": "1" }) }) }
+      throw error
     }
     const session = await host.runtime.runPromise(host.sessions.get(Session.ID.make(entry.id)))
     const events = Stream.unwrap(Effect.gen(function* () {
@@ -276,6 +264,6 @@ console.info(JSON.stringify({ event: "native_worker_ready", port: server.port, v
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, async () => {
   server.stop(true)
   await host.close()
-  await fs.unlink(lockPath)
+  await lock.close()
   process.exit(0)
 })

@@ -6,6 +6,7 @@ COPY native/opencode native/opencode
 RUN node scripts/prepare-opencode-native.mjs /opencode
 
 FROM oven/bun:1.4.4
+RUN apt-get update && apt-get install -y --no-install-recommends util-linux && rm -rf /var/lib/apt/lists/*
 WORKDIR /opencode
 COPY --from=source /opencode /opencode
 RUN bun install --frozen-lockfile --ignore-scripts --filter @opencode/sdk --filter @opencode/core --filter @opencode/server

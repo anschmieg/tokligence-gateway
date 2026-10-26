@@ -27,6 +27,15 @@ test('native adapter is opt-in, isolates authorization, preserves session and fa
     assert.equal(received[0].headers['x-opencode-bridge-session'], 'scoped-session');
     assert.equal(received[0].body.model, 'beam-free');
     assert.equal(received[0].path, '/v1/chat/completions');
+    const dispatched = received.length;
+    for (const type of ['image', 'document', 'redacted_thinking']) {
+      const request = { model: 'opencode-native/beam-free', messages: [
+        { role: 'assistant', content: [{ type: 'tool_use', id: 'one', name: 'Read', input: {} }] },
+        { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'one', content: [{ type, source: {}, data: 'synthetic' }] }] },
+      ] };
+      await assert.rejects(startAttempt({ ...args, candidate: { ...candidate, protocol: 'messages' }, body: JSON.stringify(request) }), error => error.statusCode === 400 && /Native tool result supports plain text/.test(error.message));
+      assert.equal(received.length, dispatched);
+    }
     version = 'unexpected';
     await assert.rejects(startAttempt(args), { code: 'native_worker_version_mismatch' });
   } finally { worker.closeAllConnections(); await new Promise(resolve => worker.close(resolve)); }

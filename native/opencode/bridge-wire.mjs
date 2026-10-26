@@ -175,20 +175,22 @@ export function createChatEncoder({ model, id, created = Math.floor(Date.now() /
       if (event.type === "tool-call") {
         if (event.providerExecuted) throw new BridgeStreamError("Provider-executed tools are unsupported", "provider_tools_unsupported");
         const call = { id: event.id, type: "function", function: { name: event.name, arguments: JSON.stringify(event.input) } };
-        const index = tools.size;
+        if (tools.has(event.id)) throw new BridgeStreamError("Duplicate native tool call ID", "native_stream_invalid");
         tools.set(event.id, call);
-        return [chunk({ tool_calls: [{ index, ...call }] })];
+        return []; // Never expose executable calls until the terminal outcome is known.
       }
       if (event.type === "provider-error") throw new BridgeStreamError("Provider emitted an error event", "native_provider_error");
       if (["tool-input-error", "tool-result", "tool-error", "media", "compaction"].includes(event.type)) throw new BridgeStreamError("Native stream contained unsupported or invalid output", "native_stream_invalid");
       if (event.type !== "finish") return [];
       const reason = event.reason?.normalized;
       if (!["stop", "length", "tool-calls", "content-filter"].includes(reason)) throw new BridgeStreamError("Native stream did not finish successfully", "native_stream_incomplete");
-      finishReason = tools.size ? "tool_calls" : reason === "length" ? "length" : reason === "content-filter" ? "content_filter" : "stop";
-      if (!content && !reasoning && !tools.size && finishReason !== "content_filter") throw new BridgeStreamError("Native stream completed without semantic output", "native_stream_empty");
+      if (reason === "length" || reason === "content-filter") tools.clear();
+      if (reason === "tool-calls" && !tools.size) throw new BridgeStreamError("Native tool completion contained no calls", "native_stream_invalid");
+      finishReason = reason === "length" ? "length" : reason === "content-filter" ? "content_filter" : tools.size ? "tool_calls" : "stop";
+      if (!content && !reasoning && !tools.size && finishReason === "stop") throw new BridgeStreamError("Native stream completed without semantic output", "native_stream_empty");
       finished = true;
       usage = event.usage && { prompt_tokens: event.usage.inputTokens || 0, completion_tokens: event.usage.outputTokens || 0, total_tokens: (event.usage.inputTokens || 0) + (event.usage.outputTokens || 0) };
-      return [chunk({}, finishReason, usage ? { usage } : {})];
+      return [...tools.values()].map((call, index) => chunk({ tool_calls: [{ index, ...call }] })).concat(chunk({}, finishReason, usage ? { usage } : {}));
     },
     end() { if (!finished) throw new BridgeStreamError("Native stream ended without a terminal event", "native_stream_incomplete"); },
     completion() {

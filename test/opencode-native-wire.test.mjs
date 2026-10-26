@@ -44,11 +44,11 @@ test("native events preserve parallel calls and normalize reasoning for caller r
   const encoder = createChatEncoder({ model: "beam-free", id: "fixture", created: 1 });
   assert.deepEqual(encoder.push({ type: "step-start", index: 0 }), []);
   assert.equal(encoder.push({ type: "reasoning-delta", text: "Thought" })[0].choices[0].delta.reasoning_content, "Thought");
-  const first = encoder.push({ type: "tool-call", id: "one", name: "lookup", input: { id: 1 } })[0];
-  const second = encoder.push({ type: "tool-call", id: "two", name: "lookup", input: { id: 2 } })[0];
-  assert.equal(first.choices[0].delta.tool_calls[0].index, 0);
-  assert.equal(second.choices[0].delta.tool_calls[0].index, 1);
-  encoder.push({ type: "finish", reason: { normalized: "tool-calls" }, usage: { inputTokens: 3, outputTokens: 2 } });
+  assert.deepEqual(encoder.push({ type: "tool-call", id: "one", name: "lookup", input: { id: 1 } }), []);
+  assert.deepEqual(encoder.push({ type: "tool-call", id: "two", name: "lookup", input: { id: 2 } }), []);
+  const terminal = encoder.push({ type: "finish", reason: { normalized: "tool-calls" }, usage: { inputTokens: 3, outputTokens: 2 } });
+  assert.equal(terminal[0].choices[0].delta.tool_calls[0].index, 0);
+  assert.equal(terminal[1].choices[0].delta.tool_calls[0].index, 1);
   const result = encoder.completion();
   assert.equal(result.choices[0].finish_reason, "tool_calls");
   assert.deepEqual(result.choices[0].message.tool_calls.map((call) => call.id), ["one", "two"]);
@@ -85,4 +85,15 @@ test('native authoritative end text is preserved and revisions cannot silently c
   encoder.push({ type: 'text-delta', id: 'part', text: 'first' });
   assert.equal(encoder.push({ type: 'text-end', id: 'part', text: 'first last' })[0].choices[0].delta.content, ' last');
   assert.throws(() => encoder.push({ type: 'text-end', id: 'part', text: 'rewritten' }), /revised/);
+});
+
+for (const [reason, expected] of [["length", "length"], ["content-filter", "content_filter"]]) test(`native ${reason} withholds pending tool calls`, () => {
+  const encoder = createChatEncoder({ model: "fixture", id: "one" });
+  assert.deepEqual(encoder.push({ type: "tool-call", id: "one", name: "run", input: {} }), []);
+  const chunks = encoder.push({ type: "finish", reason: { normalized: reason } });
+  assert.equal(chunks.at(-1).choices[0].finish_reason, expected);
+  assert.ok(chunks.every(chunk => !chunk.choices[0].delta.tool_calls));
+  const result = encoder.completion().choices[0];
+  assert.equal(result.finish_reason, expected);
+  assert.equal(result.message.tool_calls, undefined);
 });
