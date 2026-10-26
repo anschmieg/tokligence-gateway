@@ -240,30 +240,44 @@ export function classifyClineUpstreamError(statusCode, upstreamText = "") {
     : 502;
   const normalized = String(upstreamText).toLowerCase();
   if (status === 401 || status === 403) {
-    return { status, code: "cline_auth_error", message: "Cline login is missing or expired" };
+    return { status, code: "auth_error", message: "Authentication is missing or expired" };
   }
   if (status === 429 && normalized.includes("free limit reached on model")) {
     return {
       status,
-      code: "cline_daily_free_quota_exhausted",
-      message: "Cline's daily free quota is exhausted for this model",
+      code: "daily_free_quota_exhausted",
+      message: "Daily free quota is exhausted for this model",
     };
   }
   if (status === 404 && normalized.includes("model not found")) {
     return {
       status,
-      code: "cline_model_retired",
-      message: "The requested Cline free model is no longer available",
+      code: "model_retired",
+      message: "The requested model is no longer available",
     };
   }
   if (status === 402) {
     return {
       status,
-      code: "cline_request_rejected",
-      message: "Cline rejected this free-model request",
+      code: "request_rejected",
+      message: "Request was rejected",
     };
   }
-  return { status, code: "cline_upstream_error", message: "Cline upstream request failed" };
+  if (status === 429 && (normalized.includes("antigravity") || normalized.includes("rate limit"))) {
+    return {
+      status,
+      code: "antigravity_rate_limited",
+      message: "Antigravity rate limit exceeded",
+    };
+  }
+  if (status === 400 && normalized.includes("antigravity")) {
+    return {
+      status,
+      code: "antigravity_request_error",
+      message: "Antigravity request validation failed",
+    };
+  }
+  return { status, code: "upstream_error", message: "Upstream request failed" };
 }
 
 async function atomicWriteCredentials(destination, credentials) {
@@ -646,9 +660,10 @@ export class ClineOAuthAdapter {
         if (!Array.isArray(payload?.free)) throw new Error("Cline model feed does not contain a free array");
         this.#modelCache = uniqueModels(payload.free);
         this.#modelCacheExpiresAt = this.#now() + this.#modelCacheTtlMs;
-      } catch {
+      } catch (error) {
         // Keep only the last successfully fetched or explicitly configured free
         // set. A transient feed failure must not introduce any other tier.
+        console.warn(`Antigravity model discovery failed: ${error.message}`);
       }
       return this.#modelCache.map((model) => ({ ...model }));
     })().finally(() => {
@@ -657,13 +672,36 @@ export class ClineOAuthAdapter {
     return this.#modelRefreshInFlight;
   }
 
+  async discoverAntigravityModels() {
+    try {
+      const credentials = await this.#validCredentials();
+      const response = await this.#fetchWithTimeout(endpoint(this.#apiBaseUrl, "/api/v1/ai/antigravity/models"), {
+        method: "GET",
+        headers: {
+          ...requestHeaders(),
+          Authorization: `Bearer ${workosTokenPrefix(credentials.accessToken)}`,
+        },
+      });
+      if (!response.ok) {
+        const errorText = await responseErrorText(response);
+        throw new Error(`Antigravity model discovery failed: HTTP ${response.status} - ${errorText}`);
+      }
+      const payload = await responseJson(response, "Antigravity model feed");
+      if (!Array.isArray(payload?.data)) throw new Error("Antigravity model feed does not contain a data array");
+      return uniqueModels(payload.data);
+    } catch (error) {
+      console.warn(`Antigravity model discovery failed: ${error.message}`);
+      throw requestError(502, "antigravity_model_discovery_failed", `Antigravity model discovery failed: ${error.message}`);
+    }
+  }
+
   async createChatCompletion(body, { signal, trace } = {}) {
     const credentials = await this.#validCredentials();
-    const models = await this.discoverFreeModels();
+    const models = await this.discoverAntigravityModels().catch(() => []);
     const requested = nonEmptyString(body?.model);
     const allowed = requested && models.some(({ id }) => id.toLowerCase() === requested.toLowerCase());
     if (!allowed) {
-      throw requestError(404, "cline_model_retired", "The requested Cline free model is no longer available");
+      throw requestError(404, "model_retired", "The requested model is no longer available");
     }
     const payload = {
       ...body,
@@ -680,15 +718,29 @@ export class ClineOAuthAdapter {
       Authorization: `Bearer ${workosTokenPrefix(credentials.accessToken)}`,
     };
     const inventory = diagnosticRequestInventory(payload, Buffer.byteLength(JSON.stringify(payload)));
-    trace?.emit("cline_request_features", inventory);
+    trace?.emit("antigravity_request_features", inventory);
     try {
-      const response = await nodePostJson(
-        endpoint(this.#apiBaseUrl, "/api/v1/chat/completions"),
-        payload,
-        headers,
-        signal,
-        this.#proxy,
-      );
+      // Try with proxy first, fall back to direct connection if proxy fails
+      let response;
+      try {
+        response = await nodePostJson(
+          endpoint(this.#apiBaseUrl, "/api/v1/chat/completions"),
+          payload,
+          headers,
+          signal,
+          this.#proxy,
+        );
+      } catch (proxyError) {
+        console.warn(`Antigravity proxy failed, falling back to direct connection: ${proxyError.message}`);
+        trace?.emit("antigravity_proxy_fallback", { reason: proxyError.message });
+        response = await nodePostJson(
+          endpoint(this.#apiBaseUrl, "/api/v1/chat/completions"),
+          payload,
+          headers,
+          signal,
+          null, // No proxy
+        );
+      }
       if (response.statusCode && (response.statusCode < 200 || response.statusCode >= 300)) {
         const responseText = await nodeResponseText(response);
         const classified = classifyClineUpstreamError(response.statusCode, responseText);

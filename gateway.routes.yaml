@@ -119,10 +119,8 @@ providers:
     auth_dir: /data/antigravity/auth
     protocols: [chat_completions, messages, responses]
     proxy-url: "socks5://127.0.0.1:9377"
-    models:
-      - id: antigravity/antigravity-free
-        family: antigravity
-        context_window: 128000
+    discover_models: true
+    models: []
     credential_pool:
       strategy: round-robin
       session_affinity: true
