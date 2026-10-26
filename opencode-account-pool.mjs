@@ -6,7 +6,7 @@ import { createSessionPool } from "./opencode-zen-session.mjs";
 
 const MAX_STICKY = 4096;
 const MAX_COOLDOWN_MS = 60 * 60 * 1000;
-const MAX_RETRY_AFTER_MS = 5 * 60 * 1000;
+const MAX_RETRY_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_ACCOUNTS = 32;
 
 export function makeOpenCodeAffinityKey(principal, session) {
