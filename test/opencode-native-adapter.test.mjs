@@ -36,6 +36,20 @@ test('native adapter is opt-in, isolates authorization, preserves session and fa
       await assert.rejects(startAttempt({ ...args, candidate: { ...candidate, protocol: 'messages' }, body: JSON.stringify(request) }), error => error.statusCode === 400 && /Native tool result supports plain text/.test(error.message));
       assert.equal(received.length, dispatched);
     }
+    const messagesCandidate = { ...candidate, protocol: 'messages' };
+    const call = { type: 'tool_use', id: 'empty-result', name: 'Read', input: {} };
+    const emptyResult = { type: 'tool_result', tool_use_id: 'empty-result' };
+    const history = [{ role: 'assistant', content: [call] }, { role: 'user', content: [emptyResult] }];
+    const empty = await startAttempt({ ...args, candidate: messagesCandidate, body: JSON.stringify({ model: 'opencode-native/beam-free', messages: history }) });
+    empty.response.resume();
+    assert.equal(received.at(-1).body.messages[1].content, '');
+    assert.equal(received.at(-1).body.messages[1].tool_call_id, 'empty-result');
+    const beforeAmbiguous = received.length;
+    for (const block of [call, emptyResult, { type: 'thinking', thinking: 'retain reasoning' }]) {
+      const role = block.type === 'tool_result' ? 'user' : 'assistant';
+      await assert.rejects(startAttempt({ ...args, candidate: messagesCandidate, body: JSON.stringify({ model: 'opencode-native/beam-free', messages: [{ role, content: [{ ...block, text: 'would swallow the block' }] }] }) }), error => error.statusCode === 400 && /non-text blocks/.test(error.message));
+      assert.equal(received.length, beforeAmbiguous);
+    }
     version = 'unexpected';
     await assert.rejects(startAttempt(args), { code: 'native_worker_version_mismatch' });
   } finally { worker.closeAllConnections(); await new Promise(resolve => worker.close(resolve)); }

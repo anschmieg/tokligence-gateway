@@ -55,6 +55,9 @@ export function validateNativeAnthropicRequest(request) {
     for (const block of message.content) {
       if (!object(block)) invalid("Invalid native content block");
       if (block.type === "text") { textOnly([block], "Native message"); continue; }
+      // The shared codec accepts legacy text-shaped blocks. Do not let that
+      // compatibility path swallow a native tool call, result, or reasoning.
+      if (typeof block.text === "string") invalid("Native non-text blocks must not contain a text field");
       if (block.type === "thinking" && message.role === "assistant") {
         if (typeof block.thinking !== "string" || (block.signature !== undefined && block.signature !== "")) invalid("Native thinking supports unsigned text only");
         continue;
@@ -66,7 +69,7 @@ export function validateNativeAnthropicRequest(request) {
       if (block.type === "tool_result" && message.role === "user") {
         if (typeof block.tool_use_id !== "string" || !block.tool_use_id) invalid("Invalid native tool result ID");
         if (block.is_error !== undefined && typeof block.is_error !== "boolean") invalid("Native tool error flags must be boolean");
-        textOnly(block.content, "Native tool result");
+        if (block.content !== undefined) textOnly(block.content, "Native tool result");
         continue;
       }
       invalid("Native Messages supports text, unsigned thinking and function tools only");
