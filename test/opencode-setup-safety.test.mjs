@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
 import http from "node:http";
+import https from "node:https";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync, execFile } from "node:child_process";
+import { promisify } from "node:util";
 import net from "node:net";
 import { once } from "node:events";
 import test from "node:test";
@@ -114,11 +120,13 @@ test("Zen alone uses its explicitly configured proxy across native and translate
   upstreamServer.on("connection", (socket) => { upstreamSockets.add(socket); socket.once("close", () => upstreamSockets.delete(socket)); });
   upstreamServer.listen(0, "127.0.0.1"); await once(upstreamServer, "listening");
   const connectRequests = [];
+  let tunneledRequestBytes = 0;
   const gatewayRequestIds = [];
   const tunnelSockets = new Set();
   const proxyServer = http.createServer();
   proxyServer.on("connection", (socket) => { tunnelSockets.add(socket); socket.once("close", () => tunnelSockets.delete(socket)); });
   proxyServer.on("connect", (req, clientSocket, head) => {
+    clientSocket.on("data", (chunk) => { tunneledRequestBytes += chunk.length; });
     tunnelSockets.add(clientSocket);
     clientSocket.once("close", () => tunnelSockets.delete(clientSocket));
     connectRequests.push(req.url);
@@ -169,6 +177,7 @@ test("Zen alone uses its explicitly configured proxy across native and translate
   assert.equal(specialist.statusCode, 200);
   assert.equal(zen.statusCode, 200);
   assert.deepEqual(connectRequests, [`127.0.0.1:${upstreamServer.address().port}`]);
+  assert.ok(tunneledRequestBytes > 0, "the actual inference request must traverse CONNECT, not a separate direct socket");
   assert.match(gatewayRequestIds[0], /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   for (const result of [native, translated, specialist]) assert.equal(result.events.some((item) => item.phase === "proxy_connect"), false);
   assert.ok(zen.events.some((item) => item.phase === "proxy_connect"));
@@ -199,4 +208,50 @@ test("OpenCode setup errors are never logged with private subprocess details", a
 test("an explicitly proxied account cannot silently fall back to direct egress", () => {
   assert.throws(() => openCodeAccountTransport({ egress: "proxy" }, {}), (error) => error.code === "OPENCODE_PROXY_NOT_CONFIGURED");
   assert.deepEqual(openCodeAccountTransport({ egress: "direct" }, { OPENCODE_ZEN_PROXY: "http://unavailable.invalid:8888" }), { egress: "direct", proxy: undefined });
+});
+
+
+test("HTTPS inference uses TLS inside CONNECT and never resolves the destination directly", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zen-tls-tunnel-"));
+  const cert = path.join(dir, "cert.pem"), key = path.join(dir, "key.pem");
+  execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-keyout", key, "-out", cert,
+    "-subj", "/CN=tunnel-only.invalid", "-addext", "subjectAltName=DNS:tunnel-only.invalid"], { stdio: "ignore" });
+  const sockets = new Set();
+  const upstream = https.createServer({ key: fs.readFileSync(key), cert: fs.readFileSync(cert) }, (req, res) => {
+    assert.equal(req.headers["content-type"], "application/json");
+    req.resume();req.once("end", () => res.end("TLS_PROXY_OK"));
+  });
+  upstream.listen(0, "127.0.0.1");await once(upstream, "listening");
+  let tunneledBytes = 0;
+  const proxy = http.createServer();
+  proxy.on("connect", (req, client, head) => {
+    assert.equal(req.url, `tunnel-only.invalid:${upstream.address().port}`);
+    sockets.add(client);client.on("data", (chunk) => { tunneledBytes += chunk.length; });
+    const remote = net.connect(upstream.address().port, "127.0.0.1", () => {
+      client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+      if (head.length) remote.write(head);
+      client.pipe(remote);remote.pipe(client);
+    });
+    sockets.add(remote);client.on("error", () => remote.destroy());remote.on("error", () => client.destroy());
+  });
+  proxy.listen(0, "127.0.0.1");await once(proxy, "listening");
+  t.after(async () => {
+    for (const socket of sockets) socket.destroy();
+    proxy.closeAllConnections();upstream.closeAllConnections();
+    await Promise.all([new Promise((resolve) => proxy.close(resolve)), new Promise((resolve) => upstream.close(resolve))]);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const moduleUrl = new URL("../provider-adapters.mjs", import.meta.url).href;
+  const code = `
+    import { startAttempt } from ${JSON.stringify(moduleUrl)};
+    const account={id:"fixture"};
+    const pool={select:()=>account,state:new Map([["fixture",{generation:0}]]),servicesFor:()=>({tokens:{authorization:async()=>"Bearer synthetic",credential:async()=>({})},sessions:{sessionId:async()=>({id:"fixture"}),clientVersion:async()=>"2.1.4"}})};
+    const result=await startAttempt({candidate:{provider:{adapter:"opencode-zen",base_url:"https://tunnel-only.invalid:${upstream.address().port}"},upstreamModel:"fixture",protocol:"chat_completions"},req:{headers:{}},path:"/v1/chat/completions",body:Buffer.from(JSON.stringify({model:"fixture",stream:true,messages:[{role:"user",content:"synthetic"}]})),env:{OPENCODE_ZEN_PROXY:"http://127.0.0.1:${proxy.address().port}"},accountPool:pool});
+    let text="";for await(const chunk of result.response)text+=chunk;process.stdout.write(text);
+  `;
+  const { stdout } = await promisify(execFile)(process.execPath, ["--input-type=module", "-e", code], {
+    env: { ...process.env, NODE_EXTRA_CA_CERTS: cert, NODE_TLS_REJECT_UNAUTHORIZED: "1" }, timeout: 10000,
+  });
+  assert.equal(stdout, "TLS_PROXY_OK");
+  assert.ok(tunneledBytes > 0);
 });

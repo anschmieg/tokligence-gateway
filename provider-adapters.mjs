@@ -1,5 +1,6 @@
 import http from "node:http";
 import https from "node:https";
+import tls from "node:tls";
 import { anthropicToOpenAI } from "./anthropic-openai-codec.mjs";
 import { shapeZenRequest, zenHeaders } from "./opencode-zen-gate.mjs";
 import { canonicalCredentialFile, createTokenProvider } from "./opencode-zen-credential.mjs";
@@ -478,10 +479,17 @@ function sendThroughProxy({ target, headers, body, signal, proxy, trace }) {
       connectFinished = true;
       trace?.emit("transport_phase_end", { phase: "proxy_connect", outcome: res.statusCode === 200 ? "ok" : "rejected", duration_ms: Math.max(0, Date.now() - connectStarted) });
       if (res.statusCode !== 200) {
+        socket.destroy();
         reject(new Error(`proxy CONNECT failed: ${res.statusCode}`));
         return;
       }
+      if (signal?.aborted) { socket.destroy(); reject(signal.reason); return; }
       const secure = target.protocol === "https:";
+      // `socket` is not an http.request option. A dedicated agent must supply
+      // the established CONNECT socket, with TLS layered over that same socket.
+      // Its factory never opens a separate connection to the destination.
+      const tunnelAgent = new (secure ? https.Agent : http.Agent)({ keepAlive: false, maxSockets: 1 });
+      tunnelAgent.createConnection = () => secure ? tls.connect({ socket, servername: target.hostname }) : socket;
       const connectionStarted = Date.now();
       let headersSettled = false;
       const finishHeadersWait = (outcome) => {
@@ -499,11 +507,12 @@ function sendThroughProxy({ target, headers, body, signal, proxy, trace }) {
           path: `${target.pathname}${target.search}`,
           method: "POST",
           headers,
-          socket,
+          agent: tunnelAgent,
           servername: secure ? target.hostname : undefined,
         },
         (response) => {
           finishHeadersWait("ok");
+          response.once("close", () => tunnelAgent.destroy());
           resolve({ response, upstream });
         },
       );
@@ -522,6 +531,7 @@ function sendThroughProxy({ target, headers, body, signal, proxy, trace }) {
       upstream.once("error", (error) => {
         finishHeadersWait(signal?.aborted ? "cancelled" : "error");
         finishTransport(signal?.aborted ? "cancelled" : "error");
+        tunnelAgent.destroy();
         reject(error);
       });
       signal?.addEventListener("abort", () => upstream.destroy(signal.reason), { once: true });
