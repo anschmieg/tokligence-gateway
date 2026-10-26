@@ -99,9 +99,6 @@ export function anthropicToOpenAI(request, { forceStream = true } = {}) {
     if (plain.length || toolCalls.length) {
       const reasoning = plain.filter((part) => part.type === "reasoning_content").map((part) => part.text).join("");
       const visible = plain.filter((part) => part.type !== "reasoning_content");
-      if (reasoning && !toolCalls.length) {
-        throw Object.assign(new Error("Anthropic thinking can only be replayed on assistant tool-call continuations over the OpenAI-compatible Zen route"), { statusCode: 400 });
-      }
       const reply = { role: message.role || "assistant", content: visible.length ? visible : null };
       if (reasoning) reply.reasoning_content = reasoning;
       if (toolCalls.length) reply.tool_calls = toolCalls;
