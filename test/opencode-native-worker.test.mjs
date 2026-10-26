@@ -13,7 +13,10 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
   const state = await mkdtemp(path.join(tmpdir(), 'native-worker-test-'));
   const captures = [];
   let mode = 'text';
-  let cliFixturePath = '';
+  let cliFixturePath = '', cliForbiddenPath = '';
+  const canaryRoot = await mkdtemp(path.join(tmpdir(), 'native-private-canary-'));
+  cliForbiddenPath = path.join(canaryRoot, 'outside.txt');
+  await writeFile(cliForbiddenPath, 'SYNTHETIC_SECRET_DO_NOT_FORWARD');
   let cliTurns = 0;
   let cancelledUpstream = () => {};
   const provider = http.createServer(async (req, res) => {
@@ -24,7 +27,7 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
       const body = captures.at(-1).body;
       const results = body.messages.filter(message => message.role === 'tool');
       const text = 'CLAUDE_NATIVE_RECOVERY_OK ' + 'Validated native tool continuation. '.repeat(200);
-      const delta = results.length < 2 ? { reasoning_content: 'fixture native thought', tool_calls: [{ index: 0, id: `cli_call_${results.length}`, type: 'function', function: { name: 'Read', arguments: JSON.stringify({ file_path: results.length ? cliFixturePath : `${state}/missing-fixture.txt` }) } }] } : { content: text };
+      const delta = results.length < 2 ? { reasoning_content: 'fixture native thought', tool_calls: [{ index: 0, id: `cli_call_${results.length}`, type: 'function', function: { name: 'Read', arguments: JSON.stringify({ file_path: results.length ? cliFixturePath : cliForbiddenPath }) } }] } : { content: text };
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       const deltas = results.length < 2 ? [delta] : text.match(/.{1,48}/g).map(content => ({ content }));
       res.end(deltas.map(delta => `data: ${JSON.stringify({ id: 'fixture', choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`).join('') + `data: ${JSON.stringify({ id: 'fixture', choices: [{ index: 0, delta: {}, finish_reason: results.length < 2 ? 'tool_calls' : 'stop' }] })}\n\ndata: [DONE]\n\n`);
@@ -60,6 +63,14 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
     const tools = [{ type: 'function', function: { name: 'read_file', description: 'Caller-owned tool', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } }];
     const call = (extra = {}, auth = key, signal) => fetch(endpoint, { method: 'POST', headers: { authorization: `Bearer ${auth}`, 'content-type': 'application/json', 'x-opencode-bridge-session': 'same-caller-session' }, body: JSON.stringify({ model: 'test-model', messages, tools, ...extra }), signal });
     assert.equal((await call({}, 'wrong')).status, 401);
+    const oversized = await new Promise((resolve, reject) => {
+      const req = http.request(endpoint, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-length': String(16 * 1024 * 1024 + 1) } }, response => {
+        let body = ''; response.on('data', value => { body += value; }); response.on('end', () => { req.destroy(); resolve({ status: response.statusCode, body }); });
+      });
+      req.on('error', reject); req.write('{');
+    });
+    assert.equal(oversized.status, 413, oversized.body);
+    assert.equal(captures.length, 0);
     const slow = Array.from({ length: 4 }, (_, index) => new Promise((resolve, reject) => {
       const req = http.request(endpoint, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json', 'x-opencode-bridge-session': `slow-${index}` } }, response => {
         let body = ''; response.on('data', value => { body += value; }); response.on('end', () => { req.end(); resolve({ status: response.statusCode, body }); });
@@ -130,7 +141,7 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
           upstream.on('error', error => { res.destroy(error); }); upstream.end(raw);
         });
         await new Promise(resolve => wireTap.listen(0, '127.0.0.1', resolve));
-        const cli = spawn(process.env.OPENCODE_NATIVE_CLAUDE_BINARY, ['-p', `Use Read to read ${cliFixturePath}, recover from any error, and explain the fixture.`, '--model', 'opencode-native/test-model', '--tools', 'Read', '--allowedTools', 'Read', '--max-turns', '5', '--output-format', 'json', '--setting-sources', '', '--no-session-persistence'], { cwd: state, env: { PATH: process.env.PATH, HOME: state, CLAUDE_CONFIG_DIR: path.join(state, 'claude-config'), ANTHROPIC_BASE_URL: `http://127.0.0.1:${wireTap.address().port}`, ANTHROPIC_AUTH_TOKEN: 'sk-ant-synthetic-cli-client', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_TELEMETRY: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+        const cli = spawn(process.env.OPENCODE_NATIVE_CLAUDE_BINARY, ['-p', `Use Read to read ${cliFixturePath}, recover from any error, and explain the fixture.`, '--model', 'opencode-native/test-model', '--tools', 'Read', '--allowedTools', `Read(/${cliFixturePath})`, '--permission-mode', 'dontAsk', '--permission-prompts', 'none', '--max-turns', '5', '--output-format', 'json', '--setting-sources', '', '--no-session-persistence'], { cwd: state, env: { PATH: process.env.PATH, HOME: state, CLAUDE_CONFIG_DIR: path.join(state, 'claude-config'), ANTHROPIC_BASE_URL: `http://127.0.0.1:${wireTap.address().port}`, ANTHROPIC_AUTH_TOKEN: 'sk-ant-synthetic-cli-client', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_TELEMETRY: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
         let stdout = '', stderr = '';
         cli.stdout.on('data', value => { stdout += value; }); cli.stderr.on('data', value => { stderr += value; });
         const exit = await new Promise((resolve, reject) => {
@@ -144,6 +155,7 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
         const reminder = cliSystems.find(text => text.trim());
         assert.ok(reminder, 'real CLI fixture included an inline system reminder');
         assert.ok(captures.some(capture => JSON.stringify(capture.body.messages).includes(JSON.stringify(reminder).slice(1, -1))), 'native protocol preserves the inline reminder text');
+        assert.doesNotMatch(JSON.stringify(captures), /SYNTHETIC_SECRET_DO_NOT_FORWARD/, 'out-of-workspace reads must be denied before reaching the model');
         assert.ok(cliTurns >= 3, 'real Claude Code must complete failed and successful Read calls');
         assert.ok(captures.at(-1).body.messages.some(message => message.role === 'tool' && /NATIVE_READ_OK/.test(message.content)));
         assert.ok(captures.at(-1).body.messages.some(message => message.role === 'assistant' && message.reasoning_content === 'fixture native thought'));
@@ -189,5 +201,6 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
     await new Promise(resolve => { if (worker.exitCode !== null) resolve(); else { worker.once('exit', resolve); setTimeout(() => { worker.kill('SIGKILL'); resolve(); }, 3000).unref(); } });
     provider.closeAllConnections(); await new Promise(resolve => provider.close(resolve));
     await rm(state, { recursive: true, force: true });
+    await rm(canaryRoot, { recursive: true, force: true });
   }
 });

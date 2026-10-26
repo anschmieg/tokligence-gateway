@@ -88,7 +88,7 @@ def matrix(model, phase):
             fixture.write_text('Marker: CLAUDE_TOOL_OK.\n' + 'Synthetic fixture context.\n' * 1000)
             env = {'PATH': str(root / 'runtime') + ':/usr/bin:/bin', 'HOME': state, 'CLAUDE_CONFIG_DIR': state, 'ANTHROPIC_BASE_URL': args.url, 'ANTHROPIC_AUTH_TOKEN': 'sk-ant-' + config['TOKLIGENCE_AUTH_SECRET'], 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC': '1', 'DISABLE_TELEMETRY': '1'}
             prompt = 'Use Read to read %s. Quote its marker, then write at least 1500 words about validating the fixture. Finish with CLAUDE_LONG_DONE.' % fixture
-            run = subprocess.run([str(root / 'runtime/claude'), '-p', prompt, '--model', 'opencode-native/' + model, '--tools', 'Read', '--allowedTools', 'Read', '--max-turns', '5', '--output-format', 'json', '--setting-sources', ''], env=env, cwd=state, text=True, capture_output=True, timeout=900)
+            run = subprocess.run([str(root / 'runtime/claude'), '-p', prompt, '--model', 'opencode-native/' + model, '--tools', 'Read', '--allowedTools', 'Read(/%s)' % fixture, '--permission-mode', 'dontAsk', '--permission-prompts', 'none', '--max-turns', '5', '--output-format', 'json', '--setting-sources', ''], env=env, cwd=state, text=True, capture_output=True, timeout=900)
             result = json.loads(run.stdout)
             if result.get('api_error_status') == 429:
                 results.append({'model': model, 'test': 'claude-code', 'status': 429}); raise Quota()

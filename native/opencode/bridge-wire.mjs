@@ -30,33 +30,37 @@ const textParts = (content) => {
 // an arbitrarily large chunked upload. Cancellation never starts inference.
 export async function readChatBody(request, { limit = 16 * 1024 * 1024, timeoutMs = 30000 } = {}) {
   const length = request.headers.get("content-length");
-  if (length !== null && !/^\d+$/.test(length)) throw new BridgeInputError("Invalid Content-Length header", "native_request_length_invalid");
-  if (length !== null && Number(length) > limit) throw new BridgeInputError("Request exceeds the native bridge body limit", "native_request_too_large", 413);
+  if (length !== null && (!/^\d+$/.test(length) || Number(length) > limit)) {
+    void request.body?.cancel().catch(() => {});
+    if (!/^\d+$/.test(length)) throw new BridgeInputError("Invalid Content-Length header", "native_request_length_invalid");
+    throw new BridgeInputError("Request exceeds the native bridge body limit", "native_request_too_large", 413);
+  }
   if (!request.body) return "";
   const reader = request.body.getReader();
-  let reject, failure;
-  const interrupted = new Promise((_, fail) => { reject = fail; });
+  let failure;
   const stop = (error) => {
     if (failure) return;
-    failure = error; reject(error);
+    failure = error;
     void reader.cancel().catch(() => {});
   };
   const abort = () => stop(new BridgeInputError("Request body was cancelled", "native_request_cancelled", 408));
   const timer = setTimeout(() => stop(new BridgeInputError("Request body upload deadline exceeded", "native_request_body_timeout", 408)), timeoutMs);
   request.signal.addEventListener("abort", abort, { once: true });
   if (request.signal.aborted) abort();
-  const chunks = [];
+  const buffer = Buffer.allocUnsafe(length === null ? limit : Number(length));
   let size = 0;
   try {
     while (true) {
-      const part = await Promise.race([reader.read(), interrupted]);
+      const part = await reader.read();
       if (failure) throw failure;
       if (part.done) break;
       size += part.value.byteLength;
       if (size > limit) throw new BridgeInputError("Request exceeds the native bridge body limit", "native_request_too_large", 413);
-      chunks.push(part.value);
+      if (size > buffer.byteLength) throw new BridgeInputError("Body does not match Content-Length", "native_request_length_invalid");
+      buffer.set(part.value, size - part.value.byteLength);
     }
-    try { return new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)); }
+    if (length !== null && size !== Number(length)) throw new BridgeInputError("Body does not match Content-Length", "native_request_length_invalid");
+    try { return new TextDecoder("utf-8", { fatal: true }).decode(buffer.subarray(0, size)); }
     catch { throw new BridgeInputError("Request body must be valid UTF-8", "native_request_encoding_invalid"); }
   } catch (error) { void reader.cancel().catch(() => {}); throw error; }
   finally { clearTimeout(timer); request.signal.removeEventListener("abort", abort); reader.releaseLock(); }
