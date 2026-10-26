@@ -9,7 +9,7 @@ import os from 'node:os';
 
 test('live matrix distinguishes actual reasoning replay, absent reasoning and failed continuations', { timeout: 15000 }, async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'native-live-matrix-'));
-  let failContinuation = false, reasoningReplayed = 0;
+  let failContinuation = false, truncateContinuation = false, reasoningReplayed = 0;
   const provider = http.createServer(async (req, res) => {
     let raw = ''; for await (const part of req) raw += part;
     const body = JSON.parse(raw);
@@ -21,6 +21,7 @@ test('live matrix distinguishes actual reasoning replay, absent reasoning and fa
     } else if (body.tool_choice === 'none') {
       if (body.messages.some(message => message.reasoning_content === 'fixture reasoning')) reasoningReplayed++;
       message = { role: 'assistant', content: failContinuation ? 'wrong' : '42' };
+      if (truncateContinuation) finish = 'length';
     } else message = { role: 'assistant', content: body.messages[0].content.includes('token_2999') ? '8997 ' + 'long output '.repeat(600) + ' LONG_DONE' : 'STAGING_OK' };
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ choices: [{ message, finish_reason: finish }] }));
@@ -49,6 +50,9 @@ test('live matrix distinguishes actual reasoning replay, absent reasoning and fa
     assert.equal(result.code, 1, result.errors);
     assert.ok(result.report.results.filter(item => item.test === 'reasoning-replay').every(item => item.passed === null));
     assert.ok(result.report.results.filter(item => item.test === 'parallel-tools').every(item => item.passed === false));
+    failContinuation = false; truncateContinuation = true; result = await run();
+    assert.equal(result.code, 1, result.errors);
+    assert.ok(result.report.results.filter(item => item.test === 'reasoning-replay').every(item => item.passed === null));
   } finally {
     provider.closeAllConnections(); await new Promise(resolve => provider.close(resolve));
     await rm(root, { recursive: true, force: true });

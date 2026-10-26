@@ -70,6 +70,7 @@ def matrix(model):
             messages.append({'role': 'tool', 'tool_call_id': call['id'], 'content': json.dumps({'value': {'alpha': 17, 'beta': 25}[key]})})
         assert keys == {'alpha', 'beta'}, 'both requested tools must be called'
         final = request(model, messages, scope, tools=[tool], tool_choice='none')
+        assert final['choices'][0]['finish_reason'] == 'stop', 'tool result continuation did not finish successfully'
         assert '42' in (final['choices'][0]['message'].get('content') or ''), 'tool result continuation failed'
         reasoning = assistant.get('reasoning_content') or assistant.get('reasoning')
         if isinstance(reasoning, str) and reasoning.strip():
