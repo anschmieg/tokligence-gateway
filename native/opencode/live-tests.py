@@ -34,7 +34,9 @@ def record(model, name, action):
     print(json.dumps({"model": model, "test": name, "phase": "started"}), flush=True)
     try:
         results.append({'model': model, 'test': name, 'passed': True, **(action() or {})})
-    except Quota: raise
+    except Quota:
+        results.append({'model': model, 'test': name, 'passed': None, 'status': 'blocked', 'reason': 'Upstream quota response'})
+        raise
     except Exception as error:
         results.append({'model': model, 'test': name, 'passed': False, 'error_type': type(error).__name__, 'check': str(error)[:200] if isinstance(error, AssertionError) else None})
 
@@ -107,7 +109,14 @@ try:
 except Quota:
     results.append({'status': 'stopped', 'reason': 'Fresh upstream quota response; no further account traffic'})
 finally:
-    report = {'at': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'coverage_incomplete': any(item.get('status') == 'untested' for item in results), 'results': results}
+    # Early quota stops must account for every check that never ran, including
+    # reasoning checks whose phase was never reached.
+    recorded = {(item.get('model'), item.get('test')) for item in results}
+    for model in models:
+        for name in ['basic', 'parallel-tools', 'reasoning-replay', 'long-input-output', 'claude-code-read-and-long-output']:
+            if (model, name) not in recorded:
+                results.append({'model': model, 'test': name, 'passed': None, 'status': 'untested', 'reason': 'Matrix stopped before this check ran'})
+    report = {'at': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'coverage_incomplete': any(item.get('status') in ('untested', 'blocked') for item in results), 'results': results}
     fd = os.open(root / 'live-matrix-results.json', os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, 'w') as output: json.dump(report, output, indent=2)
     print(json.dumps(report))

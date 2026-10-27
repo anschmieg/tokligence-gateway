@@ -9,12 +9,17 @@ import os from 'node:os';
 
 test('live matrix distinguishes actual reasoning replay, absent reasoning and failed continuations', { timeout: 15000 }, async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'native-live-matrix-'));
-  let failContinuation = false, truncateContinuation = false, reasoningReplayed = 0;
+  let failContinuation = false, truncateContinuation = false, quota = false, reasoningReplayed = 0;
   const order = [];
   const provider = http.createServer(async (req, res) => {
     let raw = ''; for await (const part of req) raw += part;
     const body = JSON.parse(raw);
     order.push({ model: body.model, tool: body.tool_choice, long: body.messages[0].content.includes("token_2999") });
+    if (quota) {
+      res.writeHead(429, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: { code: 'FreeUsageLimitError', retry_at: '2026-10-28T00:00:00Z', upstream_request_id: 'synthetic-quota' } }));
+      return;
+    }
     let message, finish = 'stop';
     if (body.tool_choice === 'required') {
       message = { role: 'assistant', content: null, tool_calls: ['alpha', 'beta'].map(key => ({ type: 'function', id: key, function: { name: 'fixture_lookup', arguments: JSON.stringify({ key }) } })) };
@@ -57,6 +62,17 @@ test('live matrix distinguishes actual reasoning replay, absent reasoning and fa
     failContinuation = false; truncateContinuation = true; result = await run();
     assert.equal(result.code, 1, result.errors);
     assert.ok(result.report.results.filter(item => item.test === 'reasoning-replay').every(item => item.passed === null));
+    quota = true;
+    const beforeQuota = order.length;
+    result = await run();
+    assert.equal(result.code, 1, result.errors);
+    assert.equal(order.length, beforeQuota + 1, 'no more traffic after first quota response');
+    assert.equal(result.report.coverage_incomplete, true);
+    const checks = result.report.results.filter(item => item.test);
+    assert.equal(checks.length, 20);
+    assert.equal(checks.filter(item => item.status === 'blocked').length, 1);
+    assert.equal(checks.filter(item => item.status === 'untested').length, 19);
+    assert.ok(checks.every(item => item.passed === null));
   } finally {
     provider.closeAllConnections(); await new Promise(resolve => provider.close(resolve));
     await rm(root, { recursive: true, force: true });

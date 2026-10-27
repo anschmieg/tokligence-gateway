@@ -76,3 +76,9 @@ The native verification script runs the expensive SDK fixture groups sequentiall
 Native Messages accepts an omitted `tool_result.content` as an empty tool result, matching the installed Anthropic SDK contract. Ambiguous non-text blocks with a string `text` field are rejected before the shared codec can reinterpret a tool or thinking block as plain text. Adapter regressions verify both behaviors at dispatch.
 
 Messages `tool_choice.disable_parallel_tool_use` is preserved through OpenAI translation into native `disableParallelToolUse`. Unsupported tool-choice types, invalid flags and conflicting parallel settings return 400 before dispatch.
+
+## Post-reset live result, October 27, 2026
+
+The single-run schedule was disabled before execution. At 00:05 UTC, both staging services were healthy at `7e02c9b`, the worker held its exclusive lock and the production secondary credential path remained absent. The first `beam-free` basic request returned HTTP 429 `FreeUsageLimitError`, request ID `01a17aac-ff49-7ab9-bb6f-219e6b98be10`, with reset `2026-10-28T00:00:00.423Z`. The matrix stopped immediately; no other models, tool continuations, long cases or Claude Code live tests ran. No account or egress changes were made. This establishes a renewed quota rejection, not the quota's account/IP scope or its cause. Live compatibility remains untested.
+
+The original private report retains this evidence, but its old `coverage_incomplete: false` field is incorrect for an early quota stop. The updated harness marks the interrupted check blocked, lists all remaining checks as untested, and reports incomplete coverage. A synthetic quota regression verifies exactly one provider call and all 20 coverage records. Do not rerun live traffic merely to regenerate this historical report.
