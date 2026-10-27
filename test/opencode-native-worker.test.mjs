@@ -211,7 +211,7 @@ with LiveGuard(sys.argv[2],'native-cli-fixture',5,40960) as guard:
       assert.ok(reached(), 'the exact cancellation probe reached upstream');
       abort.abort();
       await assert.rejects(pending);
-      await Promise.race([closed, new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error('Native cancellation did not close the provider connection')), 3000); timer.unref(); })]);
+      await Promise.race([closed, new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error('Native cancellation did not close the provider connection: ' + marker + ' ' + logs)), 3000); timer.unref(); })]);
       mode = 'text';
       // Peer socket close can precede native fiber finalization. A brief conflict
       // is valid; a leaked active lease must not survive the bounded retry window.

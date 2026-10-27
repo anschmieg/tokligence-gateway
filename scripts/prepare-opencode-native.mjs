@@ -43,7 +43,7 @@ if (!requestSource.includes("readonly external:")) {
     '      external: (input) => prepare("primary", input, (draft, tools) => Effect.succeed({ ...draft, agent: input.agent, tools, options: { ...draft.options, ...input.options } })),\n' + implementation);
   await fs.writeFile(requestPath, requestSource);
 }
-for (const [source, target] of [["worker.ts", "tokligence-bridge.ts"], ["bridge-wire.mjs", "tokligence-bridge-wire.mjs"], ["state-store.mjs", "tokligence-state-store.mjs"]]) {
+for (const [source, target] of [["worker.ts", "tokligence-bridge.ts"], ["bridge-wire.mjs", "tokligence-bridge-wire.mjs"], ["state-store.mjs", "tokligence-state-store.mjs"], ["scoped-http.ts", "tokligence-scoped-http.ts"]]) {
   await fs.copyFile(path.join(root, "native/opencode", source), path.join(destination, "packages/sdk/src", target));
 }
 await fs.copyFile(path.join(root, "native/opencode/source.json"), path.join(destination, "packages/sdk/src/tokligence-source.json"));

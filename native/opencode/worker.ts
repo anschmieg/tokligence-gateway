@@ -26,6 +26,7 @@ import { llmClient } from "@opencode/core/effect/app-node-platform"
 import { BridgeInputError, readChatBody, decodeChatRequest, createChatEncoder, safeNativeError, nativeAuthMode, assertNativeCredentialCount } from "./tokligence-bridge-wire.mjs"
 import source from "./tokligence-source.json"
 import { acquireStateLock, createSessionRegistry, claimAuthState } from "./tokligence-state-store.mjs"
+import { scopedHttp } from "./tokligence-scoped-http"
 
 function errorCode(error: unknown) { return error && typeof error === "object" && "code" in error ? error.code : undefined }
 type BridgeInput = {
@@ -201,7 +202,8 @@ async function inference(request: Request) {
           toolChoice: input.toolChoice, options: input.options,
         })
         const client = yield* LLMClient.Service
-        return client.stream(prepared.request, prepared.options)
+        const scope = yield* Effect.scope
+        return client.stream(prepared.request, { ...prepared.options, http: scopedHttp(scope, prepared.options.http) })
       })).pipe(Stream.provide(nativeLayers), Stream.provide(AppNodeBuilder.build(llmClient)), Stream.provide(locations.get(location)))
     }))
     const encoder = createChatEncoder({ model: input.model, includeUsage: input.includeUsage, id: `chatcmpl_${randomUUID()}` })
