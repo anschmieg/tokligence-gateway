@@ -57,6 +57,16 @@ if (fixture) {
   const endpoint = new URL(config.providers?.fixture?.settings?.baseURL)
   if (!["127.0.0.1", "localhost", "[::1]"].includes(endpoint.hostname)) throw new Error("Fixture providers must use a loopback endpoint")
 }
+// The official OpenAI-compatible CLI and Zen's legacy parser use max_tokens.
+// Use the native compatibility API so caller output budgets survive both
+// legacy and newer gateways; do not rewrite serialized requests or headers.
+config.providers = {
+  ...config.providers,
+  [providerID]: {
+    ...config.providers?.[providerID],
+    compatibility: { ...config.providers?.[providerID]?.compatibility, maxTokensField: "max_tokens" },
+  },
+}
 const host = await Effect.runPromise(EmbeddedHost.create({
   app: metadata,
   database: { path: path.join(state, "opencode.db") },

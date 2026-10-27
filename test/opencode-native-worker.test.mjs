@@ -87,12 +87,14 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
       assert.equal(JSON.parse(result.body).error.code, 'native_request_body_timeout');
     }
 
-    let response = await call();
+    let response = await call({ max_tokens: 1000 });
     assert.equal(response.status, 200, await response.clone().text());
     const session = response.headers.get('x-opencode-native-session');
     assert.match(session, /^ses_/);
     assert.equal((await response.json()).choices[0].message.content, 'native response '.repeat(1000));
     assert.equal(captures[0].headers['user-agent'], 'opencode/latest/2.1.4/cli');
+    assert.equal(captures[0].body.max_tokens, 1000, 'native compatibility preserves the output limit field used by official CLI');
+    assert.equal(captures[0].body.max_completion_tokens, undefined);
     assert.deepEqual(captures[0].body.messages, messages);
     assert.equal(captures[0].body.tools[0].function.name, 'read_file');
     mode = 'tools'; response = await call();
