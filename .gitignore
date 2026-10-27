@@ -17,3 +17,4 @@ gateway.preferences.yaml
 
 # Pinned OpenCode source and dependencies are build inputs, never vendored.
 .cache/opencode-native*
+__pycache__/

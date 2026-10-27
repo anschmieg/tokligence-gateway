@@ -1,0 +1,249 @@
+"""Persistent, single-owner budgets for staging probes. No provider credentials are stored."""
+import contextlib
+import datetime
+import fcntl
+import http.server
+import hmac
+import json
+import os
+import pathlib
+import re
+import threading
+import urllib.error
+import urllib.request
+import urllib.parse
+
+
+class ProbeStopped(Exception):
+    pass
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *_):
+        return None
+
+
+open_gateway = urllib.request.build_opener(NoRedirect()).open
+
+
+def gateway_url(value):
+    parsed = urllib.parse.urlsplit(value)
+    if parsed.scheme != 'http' or parsed.hostname not in ('127.0.0.1', '::1', 'localhost') or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in ('', '/'):
+        raise ValueError('Live probes require a loopback HTTP gateway without URL credentials')
+    return value.rstrip('/')
+
+
+def utc_now():
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def parse_time(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.datetime.fromisoformat(value.replace('Z', '+00:00'))
+        return parsed if parsed.tzinfo else None
+    except ValueError:
+        return None
+
+
+class LiveGuard:
+    def __init__(self, root, run_id, requests, output_tokens):
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,79}', run_id):
+            raise ValueError('Invalid run ID')
+        if not 1 <= requests <= 40 or not 1 <= output_tokens <= 220000:
+            raise ValueError('Invalid probe budget')
+        self.root = pathlib.Path(root)
+        self.run_id = run_id
+        self.limit = requests
+        self.output_limit = output_tokens
+        self.mutex = threading.RLock()
+        self.forward_lock = threading.Lock()
+        self.blocked = None
+        self.count = 0
+        self.output_count = 0
+        self.status = None
+        self.lock = None
+
+    def __enter__(self):
+        self.lock = (self.root / 'live-probe.lock').open('a+')
+        os.fchmod(self.lock.fileno(), 0o600)
+        try:
+            fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            path = self.root / 'live-probe-ledger.json'
+            self.ledger = json.loads(path.read_text()) if path.exists() else {'runs': {}}
+            cooldowns = [parse_time(self.ledger.get('cooldown_until'))]
+            # Respect evidence from probes performed before this ledger existed.
+            for name in ['public-native-probe.json', 'live-matrix-results.json']:
+                evidence = self.root / name
+                if not evidence.exists():
+                    continue
+                report = json.loads(evidence.read_text())
+                cooldowns.append(parse_time(report.get('retry_at')))
+                cooldowns.extend(parse_time(item.get('reset')) for item in report.get('results', []))
+            future = [value for value in cooldowns if value and value > utc_now()]
+            if future:
+                self.ledger['cooldown_until'] = max(future).isoformat()
+                self._save()
+                raise ProbeStopped('Recorded provider cooldown is still active')
+            if self.run_id in self.ledger['runs']:
+                raise ProbeStopped('Run ID already reserved; previous probes are never replayed')
+            self.entry = {'started': utc_now().isoformat(), 'status': 'in_progress', 'requests': 0,
+                          'reserved_output_tokens': 0, 'request_budget': self.limit,
+                          'output_budget': self.output_limit}
+            self.ledger['runs'][self.run_id] = self.entry
+            self._save()  # Reserve identity before any network request, including after crashes.
+            return self
+        except BaseException:
+            self.lock.close()
+            raise
+
+    def _save(self):
+        pending = self.root / 'live-probe-ledger.pending'
+        fd = os.open(pending, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w') as output:
+            json.dump(self.ledger, output, indent=2)
+        os.replace(pending, self.root / 'live-probe-ledger.json')
+
+    def reserve(self, max_tokens):
+        with self.mutex:
+            if self.blocked:
+                raise ProbeStopped(self.blocked)
+            if not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or not 1 <= max_tokens <= 8192:
+                self.stop('Invalid output budget')
+            if self.count >= self.limit or self.output_count + max_tokens > self.output_limit:
+                self.stop('Probe request or output budget exhausted')
+            self.count += 1
+            self.output_count += max_tokens
+            self.entry.update(requests=self.count, reserved_output_tokens=self.output_count)
+            self._save()  # Reservations survive transport errors; no automatic retry/refund.
+
+    def stop(self, reason, status=None, failure=None):
+        with self.mutex:
+            if self.blocked:
+                raise ProbeStopped(self.blocked)
+            self.blocked = reason
+            self.status = status
+            self.entry.update(status='blocked', reason=reason)
+            if status is not None:
+                self.entry['upstream_status'] = status
+            code = (failure or {}).get('code')
+            if isinstance(code, str) and re.fullmatch(r'[A-Za-z0-9._-]{1,80}', code):
+                self.entry['upstream_code'] = code
+            if status in (401, 403, 429):
+                reset = parse_time((failure or {}).get('retry_at'))
+                # Unknown limits/auth failures require investigation, not repeated timer probes.
+                if not reset or reset <= utc_now():
+                    reset = utc_now() + datetime.timedelta(days=1)
+                self.ledger['cooldown_until'] = reset.isoformat()
+                self.entry['upstream_status'] = status
+            self._save()
+            raise ProbeStopped(reason)
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            with self.mutex:
+                self.entry.update(finished=utc_now().isoformat(), status='blocked' if self.blocked else 'interrupted' if exc else 'finished')
+                self._save()
+        finally:
+            self.lock.close()
+
+
+@contextlib.contextmanager
+def claude_relay(guard, base_url, model, authorization, timeout):
+    """Observe and budget every actual CLI inference call, including attempted retries."""
+    base_url = gateway_url(base_url)
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def setup(self):
+            super().setup()
+            self.connection.settimeout(30)
+
+        def log_message(self, *_):
+            pass
+
+        def reply(self, status, body):
+            self.send_response(status)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            try:
+                if not hmac.compare_digest(self.headers.get('authorization', '').encode(), authorization.encode()):
+                    self.reply(401, b'{"error":{"type":"authentication_error","message":"Invalid probe authorization"}}')
+                    return
+                route = urllib.parse.urlsplit(self.path)
+                if route.scheme or route.netloc or route.path != '/v1/messages' or route.query not in ('', 'beta=true'):
+                    raise ValueError('Only the Messages probe endpoint is allowed')
+                length = int(self.headers.get('content-length', '0'))
+                if not 0 < length <= 16 * 1024 * 1024:
+                    raise ValueError('Invalid probe body length')
+                body = json.loads(self.rfile.read(length))
+                if not isinstance(body, dict):
+                    raise ValueError('Probe body must be an object')
+                if body.get('model') != 'opencode-native/' + model:
+                    raise ValueError('CLI attempted an unselected model')
+                if 'stream' in body and not isinstance(body['stream'], bool):
+                    raise ValueError('Invalid CLI stream flag')
+                tokens = body.get('max_tokens')
+                if not isinstance(tokens, int) or isinstance(tokens, bool) or tokens < 1:
+                    raise ValueError('Invalid CLI output limit')
+                body['max_tokens'] = min(tokens, 8192)
+                with guard.forward_lock:
+                    status, raw = self.forward(body)
+                self.send_response(status)
+                self.send_header('Content-Type', 'text/event-stream' if body.get('stream') else 'application/json')
+                self.send_header('Content-Length', str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+            except ProbeStopped:
+                self.reply(guard.status or 429, b'{"error":{"type":"rate_limit_error","message":"Probe stopped by persistent safety guard"}}')
+            except (ValueError, TypeError, KeyError) as error:
+                try:
+                    fixed = {'Only the Messages probe endpoint is allowed', 'Invalid probe body length',
+                             'Probe body must be an object', 'CLI attempted an unselected model',
+                             'Invalid CLI stream flag', 'Invalid CLI output limit', 'Probe response exceeded limit'}
+                    guard.stop(str(error) if str(error) in fixed else 'Invalid CLI probe request')
+                except ProbeStopped:
+                    self.reply(400, b'{"error":{"type":"invalid_request_error","message":"Invalid CLI probe request"}}')
+            except (OSError, urllib.error.URLError):
+                try:
+                    guard.stop('CLI probe transport failed')
+                except ProbeStopped:
+                    self.reply(502, b'{"error":{"type":"api_error","message":"CLI probe transport failed"}}')
+
+        def forward(self, body):
+            guard.reserve(body['max_tokens'])
+            request = urllib.request.Request(base_url + '/v1/messages', data=json.dumps(body).encode(),
+                headers={'Authorization': authorization, 'Content-Type': 'application/json',
+                         'x-session-id': 'live-cli-' + guard.run_id + '-' + model})
+            try:
+                response = open_gateway(request, timeout=timeout)
+            except urllib.error.HTTPError as error:
+                response = error
+            with response:
+                status = response.status
+                raw = response.read(32 * 1024 * 1024 + 1)
+                if len(raw) > 32 * 1024 * 1024:
+                    raise ValueError('Probe response exceeded limit')
+            if status >= 300:
+                try:
+                    failure = json.loads(raw).get('error', {})
+                except (ValueError, AttributeError):
+                    failure = {}
+                if not isinstance(failure, dict):
+                    failure = {}
+                guard.stop('Provider rejected the probe; no further traffic', status, failure)
+            return status, raw
+
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    server.daemon_threads = False  # Hold the OS lease until all forwarded requests finish.
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield 'http://127.0.0.1:' + str(server.server_port)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()

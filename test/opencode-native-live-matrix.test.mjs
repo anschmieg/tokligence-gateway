@@ -7,7 +7,7 @@ import http from 'node:http';
 import path from 'node:path';
 import os from 'node:os';
 
-test('live matrix distinguishes actual reasoning replay, absent reasoning and failed continuations', { timeout: 15000 }, async () => {
+test('live matrix distinguishes actual reasoning replay, absent reasoning and failed continuations', { timeout: 30000 }, async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'native-live-matrix-'));
   let failContinuation = false, truncateContinuation = false, quota = false, reasoningReplayed = 0;
   const order = [];
@@ -37,12 +37,21 @@ test('live matrix distinguishes actual reasoning replay, absent reasoning and fa
   try {
     await mkdir(path.join(root, 'runtime'));
     await writeFile(path.join(root, 'gateway-env.json'), JSON.stringify({ TOKLIGENCE_AUTH_SECRET: 'synthetic' }));
-    await writeFile(path.join(root, 'runtime/claude'), '#!/usr/bin/python3\nimport json\nprint(json.dumps({"result":"CLAUDE_TOOL_OK " + "fixture " * 700 + " CLAUDE_LONG_DONE", "num_turns":2}))\n', { mode: 0o700 });
+    await writeFile(path.join(root, 'runtime/claude'), `#!/usr/bin/python3
+import json, os, sys, urllib.request
+model = sys.argv[sys.argv.index('--model') + 1]
+for turn in range(2):
+ req = urllib.request.Request(os.environ['ANTHROPIC_BASE_URL'] + '/v1/messages', data=json.dumps({'model':model,'max_tokens':32000,'messages':[{'role':'user','content':'synthetic CLI continuation'}]}).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+os.environ['ANTHROPIC_AUTH_TOKEN']})
+ with urllib.request.urlopen(req) as response: response.read()
+print(json.dumps({"result":"CLAUDE_TOOL_OK " + "fixture " * 700 + " CLAUDE_LONG_DONE", "num_turns":2}))
+`, { mode: 0o700 });
+    let runNumber = 0;
     const run = async () => {
-      const child = spawn('python3', ['native/opencode/live-tests.py', '--root', root, '--url', `http://127.0.0.1:${provider.address().port}`, '--not-before', '1970-01-01T00:00:00+00:00'], { stdio: ['ignore', 'ignore', 'pipe'] });
+      const runID = 'synthetic-' + ++runNumber;
+      const child = spawn('python3', ['native/opencode/live-tests.py', '--root', root, '--url', `http://127.0.0.1:${provider.address().port}`, '--not-before', '1970-01-01T00:00:00+00:00', '--run-id', runID, '--models', 'beam-free,glm-5.3-flash-free,deepseek-v4.1-flash-free,mimo-v2.6-flash-free', '--phases', 'basic,tools,long,claude', '--request-budget', '40', '--output-budget', '220000'], { stdio: ['ignore', 'ignore', 'pipe'] });
       let errors = ''; child.stderr.on('data', value => { errors += value; });
       const [code] = await once(child, 'exit');
-      const report = JSON.parse(await readFile(path.join(root, 'live-matrix-results.json')));
+      const report = JSON.parse(await readFile(path.join(root, 'live-reports', runID + '.json')));
       return { code, report, errors };
     };
     let result = await run();

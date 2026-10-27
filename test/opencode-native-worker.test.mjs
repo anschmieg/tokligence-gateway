@@ -128,8 +128,9 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
       config.providers.find(provider => provider.id === 'opencode-native').models = ['opencode-native/test-model'];
       const configPath = path.join(state, 'gateway.yaml');
       await writeFile(configPath, stringify(config));
-      let wireTap; const cliRoles = [], cliSystems = [];
+      let wireTap, relay; const cliRoles = [], cliSystems = [], cliErrors = [], cliTransport = [];
       const gateway = spawn(process.execPath, ['tgw-proxy.mjs'], { env: { PATH: process.env.PATH, HOME: state, ROUTING_CONFIG_PATH: configPath, PROXY_HOST: '127.0.0.1', PROXY_PORT: '0', TOKLIGENCE_AUTH_SECRET: 'synthetic-cli-client', TOKLIGENCE_ADMIN_SECRET: 'synthetic-admin', OPENCODE_NATIVE_ENABLED: 'true', OPENCODE_NATIVE_URL: `http://127.0.0.1:${port}/v1`, OPENCODE_NATIVE_KEY: key }, stdio: ['ignore', 'pipe', 'pipe'] });
+      let gatewayDiagnostics = ''; gateway.stderr.on('data', value => { gatewayDiagnostics += value; });
       try {
         const gatewayPort = await new Promise((resolve, reject) => {
           const timer = setTimeout(() => reject(new Error('CLI fixture gateway startup timed out')), 8000);
@@ -138,19 +139,37 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
         });
         wireTap = http.createServer(async (req, res) => {
           let raw = ''; for await (const part of req) raw += part;
+          cliTransport.push({ path: req.url, declared: req.headers['content-length'], bytes: Buffer.byteLength(raw) });
           try { const messages = JSON.parse(raw).messages || []; cliRoles.push(messages.map(message => ({ role: message.role, keys: Object.keys(message) }))); cliSystems.push(...messages.filter(message => message.role === 'system').map(message => typeof message.content === 'string' ? message.content : message.content.map(part => part.text || '').join(''))); } catch {}
-          const upstream = http.request({ hostname: '127.0.0.1', port: gatewayPort, path: req.url, method: req.method, headers: req.headers }, response => { res.writeHead(response.statusCode, response.headers); response.pipe(res); });
+          const upstream = http.request({ hostname: '127.0.0.1', port: gatewayPort, path: req.url, method: req.method, headers: req.headers, agent: false }, response => { Object.assign(cliTransport.at(-1), { status: response.statusCode, contentType: response.headers['content-type'], length: response.headers['content-length'] }); if (response.statusCode >= 400) response.on('data', value => { cliErrors.push(String(value)); }); res.writeHead(response.statusCode, response.headers); response.pipe(res); });
           upstream.on('error', error => { res.destroy(error); }); upstream.end(raw);
         });
         await new Promise(resolve => wireTap.listen(0, '127.0.0.1', resolve));
-        const cli = spawn(process.env.OPENCODE_NATIVE_CLAUDE_BINARY, ['-p', `Use Read to read ${cliFixturePath}, recover from any error, and explain the fixture.`, '--model', 'opencode-native/test-model', '--tools', 'Read', '--allowedTools', `Read(/${cliFixturePath})`, '--permission-mode', 'dontAsk', '--permission-prompts', 'none', '--max-turns', '5', '--output-format', 'json', '--setting-sources', '', '--no-session-persistence'], { cwd: state, env: { PATH: process.env.PATH, HOME: state, CLAUDE_CONFIG_DIR: path.join(state, 'claude-config'), ANTHROPIC_BASE_URL: `http://127.0.0.1:${wireTap.address().port}`, ANTHROPIC_AUTH_TOKEN: 'sk-ant-synthetic-cli-client', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_TELEMETRY: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+        const relayProgram = `import sys,json
+sys.path.insert(0,sys.argv[1])
+from live_safety import LiveGuard,claude_relay
+with LiveGuard(sys.argv[2],'native-cli-fixture',5,40960) as guard:
+ with claude_relay(guard,sys.argv[3],'test-model','Bearer sk-ant-synthetic-cli-client',5) as url:
+  print(json.dumps({'url':url}),flush=True)
+  sys.stdin.read()
+`;
+        relay = spawn('python3', ['-u', '-c', relayProgram, path.resolve('native/opencode'), state, `http://127.0.0.1:${wireTap.address().port}`], { env: { PATH: process.env.PATH, HOME: state }, stdio: ['pipe', 'pipe', 'pipe'] });
+        relay.stdin.on('error', () => {});
+        let relayErrors = ''; relay.stderr.on('data', value => { relayErrors += value; });
+        const relayURL = await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('Guarded CLI relay startup timed out')), 5000);
+          relay.once('exit', code => { clearTimeout(timer); reject(new Error(`Guarded CLI relay exited ${code}: ${relayErrors}`)); });
+          relay.stdout.once('data', value => { clearTimeout(timer); resolve(JSON.parse(String(value)).url); });
+        });
+        const cli = spawn(process.env.OPENCODE_NATIVE_CLAUDE_BINARY, ['-p', `Use Read to read ${cliFixturePath}, recover from any error, and explain the fixture.`, '--model', 'opencode-native/test-model', '--tools', 'Read', '--allowedTools', `Read(/${cliFixturePath})`, '--permission-mode', 'dontAsk', '--permission-prompts', 'none', '--max-turns', '5', '--output-format', 'json', '--setting-sources', '', '--no-session-persistence'], { cwd: state, env: { PATH: process.env.PATH, HOME: state, CLAUDE_CONFIG_DIR: path.join(state, 'claude-config'), ANTHROPIC_BASE_URL: relayURL, ANTHROPIC_AUTH_TOKEN: 'sk-ant-synthetic-cli-client', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_TELEMETRY: '1', CLAUDE_CODE_MAX_OUTPUT_TOKENS: '8192', MAX_THINKING_TOKENS: '2048' }, stdio: ['ignore', 'pipe', 'pipe'] });
         let stdout = '', stderr = '';
         cli.stdout.on('data', value => { stdout += value; }); cli.stderr.on('data', value => { stderr += value; });
         const exit = await new Promise((resolve, reject) => {
           const timer = setTimeout(() => { cli.kill('SIGKILL'); reject(new Error(`Claude fixture timed out: ${stderr}`)); }, 35000);
           cli.once('exit', code => { clearTimeout(timer); resolve(code); });
         });
-        assert.equal(exit, 0, stdout + stderr + JSON.stringify(cliRoles));
+        const guardDiagnostic = await (await import('node:fs/promises')).readFile(path.join(state, 'live-probe-ledger.json'), 'utf8');
+        assert.equal(exit, 0, stdout + stderr + JSON.stringify(cliRoles) + JSON.stringify(cliErrors) + guardDiagnostic + JSON.stringify(cliTransport) + gatewayDiagnostics);
         const result = JSON.parse(stdout);
         assert.match(result.result, /CLAUDE_NATIVE_RECOVERY_OK/);
         assert.ok(result.result.length > 6000, "real CLI consumed the long multi-frame answer");
@@ -161,7 +180,13 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
         assert.ok(cliTurns >= 3, 'real Claude Code must complete failed and successful Read calls');
         assert.ok(captures.at(-1).body.messages.some(message => message.role === 'tool' && /NATIVE_READ_OK/.test(message.content)));
         assert.ok(captures.at(-1).body.messages.some(message => message.role === 'assistant' && message.reasoning_content === 'fixture native thought'));
-      } finally { if (wireTap) { wireTap.closeAllConnections(); await new Promise(resolve => wireTap.close(resolve)); } gateway.kill('SIGKILL'); await new Promise(resolve => { if (gateway.exitCode !== null || gateway.signalCode !== null) resolve(); else gateway.once('exit', resolve); }); }
+        const relayDone = new Promise(resolve => relay.once('exit', resolve));
+        relay.stdin.end();
+        assert.equal(await relayDone, 0, relayErrors);
+        const ledger = JSON.parse(await (await import('node:fs/promises')).readFile(path.join(state, 'live-probe-ledger.json')));
+        assert.equal(ledger.runs['native-cli-fixture'].requests, cliTurns, 'every actual CLI inference is reserved');
+        assert.ok(captures.filter(capture => capture.body.messages.some(message => JSON.stringify(message.content).includes('fixture'))).some(capture => capture.body.max_tokens === 8192));
+      } finally { if (relay && relay.exitCode === null && relay.signalCode === null) { relay.stdin.end(); relay.kill('SIGKILL'); } if (wireTap) { wireTap.closeAllConnections(); await new Promise(resolve => wireTap.close(resolve)); } gateway.kill('SIGKILL'); await new Promise(resolve => { if (gateway.exitCode !== null || gateway.signalCode !== null) resolve(); else gateway.once('exit', resolve); }); }
     });
     mode = 'quota'; response = await call();
     assert.equal(response.status, 429, await response.clone().text());
