@@ -98,6 +98,19 @@ class SafetyTests(unittest.TestCase):
                 self.fail('cooldown ignored')
         self.assertEqual(json.loads((self.root / 'live-probe-ledger.json').read_text())['runs'], {})
 
+    def test_late_provider_quota_is_not_hidden_by_local_stop(self):
+        with LiveGuard(self.root, 'late-quota', 1, 1024) as guard:
+            guard.reserve(1024)
+            with self.assertRaises(ProbeStopped):
+                guard.stop('Local client stopped')
+            with self.assertRaises(ProbeStopped):
+                guard.stop('Provider quota arrived during cleanup', 429,
+                    {'retry_at': (utc_now() + datetime.timedelta(hours=1)).isoformat()})
+            self.assertEqual(guard.status, 429)
+        with self.assertRaises(ProbeStopped):
+            with LiveGuard(self.root, 'after-late-quota', 1, 1024):
+                self.fail('late quota cooldown was lost')
+
     def test_relay_clamps_cli_output_and_stops_at_budget(self):
         self.auth = 'synthetic-authorization-canary'
         with LiveGuard(self.root, 'cli-budget', 2, 16384) as guard:

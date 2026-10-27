@@ -9,10 +9,12 @@ import signal
 import subprocess
 import sys
 
+helpers = pathlib.Path(__file__).resolve().parent
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--binary', required=True, help='Official Linux OpenCode executable')
 parser.add_argument('--output', required=True, help='New or empty directory for private artifacts')
 parser.add_argument('--fixture', default=str(pathlib.Path(__file__).with_name('offline-cli-fixture.py')))
+parser.add_argument('--model', default='glm-5.3-flash-free', choices=list(json.loads((helpers / 'official-models.json').read_text())['opencode']['models']))
 args = parser.parse_args()
 binary = pathlib.Path(args.binary).resolve(strict=True)
 fixture = pathlib.Path(args.fixture).resolve(strict=True)
@@ -33,10 +35,12 @@ command += ['--dir', '/etc']
 for name in ['/etc/passwd', '/etc/group', '/etc/nsswitch.conf']:
     if pathlib.Path(name).exists():
         command += ['--ro-bind', name, name]
+for name in ['official_control.py', 'live_safety.py', 'official-models.json']:
+    command += ['--ro-bind', str(helpers / name), '/' + name]
 command += ['--ro-bind', str(binary), '/cli', '--ro-bind', str(fixture), '/fixture.py',
             '--bind', str(output), '/work', '--proc', '/proc', '--dev', '/dev',
             '--tmpfs', '/tmp', '--chdir', '/work', '--clearenv', '--',
-            '/usr/bin/python3', '/fixture.py', os.readlink('/proc/self/ns/net')]
+            '/usr/bin/python3', '/fixture.py', os.readlink('/proc/self/ns/net'), args.model]
 child = subprocess.Popen(command, start_new_session=True)
 try:
     code = child.wait(timeout=55)

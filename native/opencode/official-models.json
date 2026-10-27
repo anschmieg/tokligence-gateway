@@ -1,0 +1,208 @@
+{
+  "opencode": {
+    "id": "opencode",
+    "name": "OpenCode",
+    "env": [
+      "OPENCODE_API_KEY"
+    ],
+    "npm": "@ai-sdk/openai-compatible",
+    "api": "https://opencode.ai/inference/openai/v1",
+    "models": {
+      "beam-free": {
+        "id": "beam-free",
+        "name": "Beam Free",
+        "description": "Sparse mixture-of-experts reasoning model with 23B active parameters for coding and agentic workflows",
+        "family": "beam",
+        "attachment": false,
+        "reasoning": true,
+        "reasoning_options": [
+          {
+            "type": "effort",
+            "values": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ]
+          }
+        ],
+        "tool_call": true,
+        "interleaved": {
+          "field": "reasoning_content"
+        },
+        "structured_output": true,
+        "temperature": true,
+        "knowledge": "2026-06-30",
+        "release_date": "2026-10-05",
+        "last_updated": "2026-10-16",
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "open_weights": true,
+        "limit": {
+          "context": 1048576,
+          "output": 131072
+        },
+        "provider": {
+          "api": "https://opencode.ai/inference/openai/v1"
+        },
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cache_read": 0
+        },
+        "canonical_model_id": "reflection/beam-1.0-501b-a23b"
+      },
+      "glm-5.3-flash-free": {
+        "id": "glm-5.3-flash-free",
+        "name": "GLM-5.3-Flash Free",
+        "description": "Native multimodal GLM model for efficient coding and long-horizon agent tasks",
+        "family": "glm-flash",
+        "attachment": true,
+        "reasoning": true,
+        "reasoning_options": [
+          {
+            "type": "effort",
+            "values": [
+              "low",
+              "high",
+              "max"
+            ]
+          }
+        ],
+        "tool_call": true,
+        "interleaved": {
+          "field": "reasoning_content"
+        },
+        "structured_output": true,
+        "temperature": true,
+        "release_date": "2026-08-26",
+        "last_updated": "2026-08-26",
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "video"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "open_weights": true,
+        "limit": {
+          "context": 200000,
+          "output": 32000
+        },
+        "provider": {
+          "api": "https://opencode.ai/inference/openai/v1"
+        },
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cache_read": 0
+        },
+        "canonical_model_id": "zhipuai/glm-5.3-flash"
+      },
+      "deepseek-v4.1-flash-free": {
+        "id": "deepseek-v4.1-flash-free",
+        "name": "DeepSeek V4.1 Flash Free",
+        "description": "DeepSeek V4.1 Flash model for reasoning and agentic coding",
+        "family": "deepseek-flash",
+        "attachment": true,
+        "reasoning": true,
+        "reasoning_options": [
+          {
+            "type": "toggle"
+          },
+          {
+            "type": "effort",
+            "values": [
+              "low",
+              "high",
+              "max"
+            ]
+          }
+        ],
+        "tool_call": true,
+        "interleaved": {
+          "field": "reasoning_content"
+        },
+        "structured_output": true,
+        "temperature": true,
+        "knowledge": "2025-05",
+        "release_date": "2026-09-10",
+        "last_updated": "2026-09-10",
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "open_weights": true,
+        "limit": {
+          "context": 200000,
+          "output": 32000
+        },
+        "provider": {
+          "api": "https://opencode.ai/inference/openai/v1"
+        },
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cache_read": 0
+        },
+        "canonical_model_id": "deepseek/deepseek-v4.1-flash"
+      },
+      "mimo-v2.6-flash-free": {
+        "id": "mimo-v2.6-flash-free",
+        "name": "MiMo-V2.6-Flash Free",
+        "description": "MiMo Flash model for multimodal coding agents and long-context automation",
+        "family": "mimo",
+        "attachment": true,
+        "reasoning": true,
+        "reasoning_options": [],
+        "tool_call": true,
+        "interleaved": {
+          "field": "reasoning_content"
+        },
+        "temperature": true,
+        "release_date": "2026-09-22",
+        "last_updated": "2026-09-22",
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "audio",
+            "video"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "open_weights": true,
+        "limit": {
+          "context": 200000,
+          "output": 32000
+        },
+        "provider": {
+          "api": "https://opencode.ai/inference/openai/v1"
+        },
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cache_read": 0
+        },
+        "canonical_model_id": "xiaomi/mimo-v2.6-flash"
+      }
+    }
+  }
+}

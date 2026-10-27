@@ -120,7 +120,7 @@ class LiveGuard:
 
     def stop(self, reason, status=None, failure=None):
         with self.mutex:
-            if self.blocked:
+            if self.blocked and (status not in (401, 403, 429) or self.status in (401, 403, 429)):
                 raise ProbeStopped(self.blocked)
             self.blocked = reason
             self.status = status
@@ -130,6 +130,9 @@ class LiveGuard:
             code = (failure or {}).get('code')
             if isinstance(code, str) and re.fullmatch(r'[A-Za-z0-9._-]{1,80}', code):
                 self.entry['upstream_code'] = code
+            request_id = (failure or {}).get('upstream_request_id')
+            if isinstance(request_id, str) and re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}|[0-9A-HJKMNP-TV-Z]{26}', request_id):
+                self.entry['upstream_request_id'] = request_id
             if status in (401, 403, 429):
                 reset = parse_time((failure or {}).get('retry_at'))
                 # Unknown limits/auth failures require investigation, not repeated timer probes.

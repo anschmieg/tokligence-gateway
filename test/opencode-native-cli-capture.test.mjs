@@ -23,6 +23,7 @@ test('official CLI uses the actual OpenCode provider with public auth in an isol
     const summary = JSON.parse(await readFile(path.join(output, 'summary.json')));
     assert.equal(summary.external_network_blocked, true);
     assert.equal(summary.public_auth_only, true);
+    assert.equal(summary.guard_requests, 1);
     assert.equal(summary.marker_received, true);
     const [request] = JSON.parse(await readFile(path.join(output, 'requests.json')));
     assert.equal(request.path, '/v1/chat/completions');
@@ -30,8 +31,10 @@ test('official CLI uses the actual OpenCode provider with public auth in an isol
     assert.equal(request.headers.authorization, undefined);
     assert.equal(request.headers['x-opencode-client'], 'cli');
     assert.match(request.headers['x-opencode-session'], /^ses_/);
-    assert.equal(request.body.model, 'beam-free');
+    assert.equal(request.body.model, 'glm-5.3-flash-free');
     assert.equal(request.body.stream, true);
+    assert.equal(request.body.max_tokens, 1024);
+    assert.equal(request.body.max_completion_tokens, undefined);
     assert.equal(request.body.messages.at(-1).role, 'user');
     assert.equal(request.body.tools?.length || 0, 0);
     const repeated = await run();
