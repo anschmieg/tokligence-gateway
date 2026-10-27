@@ -1,6 +1,25 @@
 import fs from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 
+// Called while holding worker.lock, before EmbeddedHost can open credentials.
+export async function claimAuthState(directory, mode) {
+  const marker = `${directory}/native-auth-mode`;
+  let existing;
+  try { existing = (await fs.readFile(marker, 'utf8')).trim(); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (existing) {
+    if (existing !== mode) throw new Error('Native authentication modes require separate state directories');
+    return;
+  }
+  if (mode === 'public') {
+    try {
+      await fs.access(`${directory}/opencode.db`);
+      throw new Error('Public native workers require a fresh state directory');
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+  await fs.writeFile(marker, `${mode}\n`, { flag: 'wx', mode: 0o600 });
+}
+
 // flock locks the inherited open-file description. The parent retains that
 // descriptor after the utility exits; the kernel releases it even on SIGKILL.
 // Never unlink this inode: doing so would allow a second independent lock.

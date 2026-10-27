@@ -12,6 +12,22 @@ export class BridgeStreamError extends BridgeInputError {
   constructor(message, code) { super(message, code); this.status = 502; }
 }
 
+// Public is a separate, explicit lane, never an automatic OAuth fallback.
+export function nativeAuthMode(env) {
+  const mode = env.OPENCODE_NATIVE_AUTH_MODE || "oauth";
+  if (!["oauth", "public"].includes(mode)) throw new Error("Invalid OPENCODE_NATIVE_AUTH_MODE");
+  if (mode === "public" && ["OPENCODE_NATIVE_SEED_FILE", "OPENCODE_API_KEY", "OPENCODE_AUTH_CONTENT", "OPENCODE_CONSOLE_TOKEN"].some(key => env[key])) {
+    throw new Error("Public native workers forbid credential seeds and authentication overrides");
+  }
+  return mode;
+}
+
+export function assertNativeCredentialCount(mode, count) {
+  if (count !== (mode === "public" ? 0 : 1)) throw new Error(mode === "public"
+    ? "Public native workers require a separate state with no OpenCode credentials"
+    : "The isolated native worker must own exactly one OpenCode credential");
+}
+
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const fail = (message) => { throw new BridgeInputError(message); };
 const textParts = (content) => {

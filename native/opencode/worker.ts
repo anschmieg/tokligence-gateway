@@ -23,9 +23,9 @@ import { WebSocketConstructor } from "@opencode/core/effect/websocket-constructo
 import { App } from "@opencode/core/app"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { llmClient } from "@opencode/core/effect/app-node-platform"
-import { BridgeInputError, readChatBody, decodeChatRequest, createChatEncoder, safeNativeError } from "./tokligence-bridge-wire.mjs"
+import { BridgeInputError, readChatBody, decodeChatRequest, createChatEncoder, safeNativeError, nativeAuthMode, assertNativeCredentialCount } from "./tokligence-bridge-wire.mjs"
 import source from "./tokligence-source.json"
-import { acquireStateLock, createSessionRegistry } from "./tokligence-state-store.mjs"
+import { acquireStateLock, createSessionRegistry, claimAuthState } from "./tokligence-state-store.mjs"
 
 function errorCode(error: unknown) { return error && typeof error === "object" && "code" in error ? error.code : undefined }
 type BridgeInput = {
@@ -42,11 +42,13 @@ const key = process.env.OPENCODE_NATIVE_KEY
 if (!key || key.length < 32) throw new Error("OPENCODE_NATIVE_KEY must contain at least 32 characters")
 const keyHash = createHash("sha256").update(key).digest()
 const fixture = process.env.OPENCODE_NATIVE_FIXTURE_CONFIG
+const authMode = nativeAuthMode(process.env)
 const providerID = fixture ? "fixture" : "opencode"
 const allow = new Set((process.env.OPENCODE_NATIVE_MODELS || "").split(",").map((value) => value.trim()).filter(Boolean))
 if (!allow.size) throw new Error("OPENCODE_NATIVE_MODELS must explicitly allow model IDs")
 await fs.mkdir(state, { recursive: true, mode: 0o700 })
 const lock = await acquireStateLock(path.join(state, "worker.lock"))
+await claimAuthState(state, authMode)
 const metadata = { name: "cli", version: source.version, channel: "latest" }
 const workspace = path.join(state, "workspace")
 await fs.mkdir(workspace, { recursive: true, mode: 0o700 })
@@ -88,7 +90,7 @@ if (!fixture) {
     const credentials = yield* Credential.Service
     return (yield* credentials.list(Integration.ID.make("opencode"))).length
   }))
-  if (count !== 1) throw new Error("The isolated native worker must own exactly one OpenCode credential")
+  assertNativeCredentialCount(authMode, count)
 }
 
 const location = Location.Ref.make({ directory: AbsolutePath.make(workspace) })
