@@ -116,7 +116,7 @@ def matrix(model, phase):
             with claude_relay(guard, args.url, model, authorization, args.request_timeout) as relay:
                 env['ANTHROPIC_BASE_URL'] = relay
                 argv = [str(root / 'runtime/claude'), '-p', prompt, '--model', 'opencode-native/' + model, '--tools', 'Read', '--allowedTools', 'Read(/%s)' % fixture, '--permission-mode', 'dontAsk', '--permission-prompts', 'none', '--max-turns', '5', '--output-format', 'json', '--setting-sources', '']
-                child = subprocess.Popen(argv, env=env, cwd=state, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+                child = subprocess.Popen(argv, env=env, cwd=state, text=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
                 try:
                     stdout, stderr = child.communicate(timeout=900)
                     run = subprocess.CompletedProcess(argv, child.returncode, stdout, stderr)

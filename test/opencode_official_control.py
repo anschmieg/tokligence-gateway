@@ -145,6 +145,7 @@ class OfficialTests(unittest.TestCase):
         binary = self.root / 'fake-official-cli'
         binary.write_text('''#!/usr/bin/python3
 import os,sys,json,urllib.request
+assert sys.stdin.read() == ''
 if '--version' in sys.argv:
  print('1.18.32');raise SystemExit(0)
 model=sys.argv[sys.argv.index('--model')+1].split('/',1)[1]

@@ -30,7 +30,7 @@ with LiveGuard(root,'offline-official-control',1,1024) as guard, official_relay(
  home=root/'profile';home.mkdir(exist_ok=True)
  env=profile_environment(home,relay,model)
  started=time.monotonic()
- p=subprocess.Popen(['/cli','run','--pure','--model','opencode/'+model,'--title','Offline capture','--format','json','--print-logs','Reply exactly OFFLINE_CAPTURE_OK. Do not use tools.'],cwd=home,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+ p=subprocess.Popen(['/cli','run','--pure','--model','opencode/'+model,'--title','Offline capture','--format','json','--print-logs','Reply exactly OFFLINE_CAPTURE_OK. Do not use tools.'],cwd=home,env=env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
  timedout=False
  try:out,err=p.communicate(timeout=40)
  except subprocess.TimeoutExpired:

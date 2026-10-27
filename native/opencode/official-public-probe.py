@@ -139,14 +139,14 @@ def main():
                         with official_relay(guard, args.model, args.fixture_upstream) as relay:
                             env = profile_environment(folder, relay, args.model)
                             version = subprocess.run([str(binary), '--version'], env=env, cwd=folder,
-                                capture_output=True, text=True, timeout=20)
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20)
                             if version.returncode or version.stdout.strip() != '1.18.32':
                                 raise ControlSetupError('verified_cli_version_required')
                             argv = [str(binary), 'run', '--pure', '--model', 'opencode/' + args.model,
                                     '--title', 'Official public diagnostic control', '--format', 'json', '--print-logs',
                                     'Reply exactly OFFICIAL_CONTROL_OK. Do not use tools.']
                             child = subprocess.Popen(argv, env=env, cwd=folder, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, text=True, start_new_session=True)
+                                stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True, start_new_session=True)
                             try:
                                 try:
                                     stdout, stderr = child.communicate(timeout=90)
