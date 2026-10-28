@@ -1,5 +1,14 @@
 # OpenCode Zen completion checkpoint
 
+## Latest live outcome — October 28, 00:01 UTC
+
+**External quota blocker; recurring task disabled.** Do not re-enable the timer from older queued prompts or repeat the reserved official control. No further authorized useful implementation work is identified; layers 1/2 passed, live acceptance remains incomplete. A future provider-availability change and a new explicit bounded plan are needed before further inference; cooldown expiry alone is not permission to retry on every timer.
+
+On tested staging code `22f41de`, `official-glm-control-20261028` made exactly ONE accounted public GLM request (max_tokens1024). Official CLI1.18.32 generated HTTP; the guarded urllib relay forwarded HTTPS. Response: HTTP429 `FreeUsageLimitError`, request ID `01a17fcf-a2a2-7aa3-b61b-8a7c30126007`, persisted cooldown **2026-10-29T00:00:00.528937+00:00**. This is not an untouched Bun-TLS test. The rejection also occurs with official CLI-generated HTTP/public auth; account-only, IP-specific, malformed-request and punitive-limit causes remain unproven.
+
+Stopped ALL further inference. Native-public `glm-preflight-20261028` was NOT run/reserved; no next model/tool/long/Claude live phase was attempted. Live reasoning replay and live model compatibility remain untested. Private report: staging `live-reports/official-glm-control-20261028.json`; ledger preserves one run and fresh cooldown. No credentials/IP changes. Memory oom_kill remained2; owned staging services restored, health both200, OS lock held, defaultOAuth retained, production secondary path absent. Production untouched.
+
+
 User authorized autonomous completion, staging deployments, bounded free-model tests and recurring continuation on October 27. Antigravity was explicitly corrected to **OpenCode Zen free models**. Do not change unrelated providers or the original root checkout. No subagents.
 
 Recurring T3 task: `scheduled-task:command:mcp:9c2e80ed-cdd2-4b4b-a6e3-26ba3d67cea9:schedule-task:opencode-zen-autonomous-20261027-v1`, every 15 minutes, same thread. Check for active work before starting anything. Disable after completion, or if no useful authorized work remains without an external change; explain the exact blocker.
