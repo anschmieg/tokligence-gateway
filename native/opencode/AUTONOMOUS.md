@@ -1,5 +1,11 @@
 # OpenCode Zen completion checkpoint
 
+## Confirmed Apollo TUI reset — October28 user clarification
+
+User confirms the quota banner came from **Apollo.local (Mac)**, session `ses_e83992e9fffeTSqEe47Tds5oX0`, timezone **CET / winter time (UTC+1)**. Displayed October29 01:31 CET means **2026-10-29 00:31 UTC**. This is user-reported UI evidence, not inspected raw HTTP/reset metadata; it does not prove Apollo and staging share a quota bucket. It also does not invalidate the earlier same-VPS manual successes.
+
+The pending timezone question is resolved. Next bounded staging control is rescheduled to **October29 01:34 UTC / 02:34 CET**, 63 minutes after the reported UI reset and later than the stored staging reset. This supersedes ALL older01:03 times and pending-timezone gates below. On trigger FIRST disable the task; inspect newer cooldowns/processes/ledger before inference. Use the unchanged stable ID `official-glm-control-20261029`, explicit `--not-before 2026-10-29T01:34:00+00:00`, existing one-request/max1024 guarded Bun control and owned staging pause/restore. Newer provider cooldowns take precedence; stop on rejection, no retries/account/IP rotation. No inference was sent to confirm this clarification; no ledger or historical report was rewritten.
+
 ## Latest review / user quota observation — October28 11:27UTC
 
 Second adversarial pass expands differential coverage80 exact bodies / four models. See ADVERSARIAL-REVIEW.md second-pass findings. Fixed system-message merging and role/wrapper conversion, multipart flattening, blank-turn omission, absent-description and empty-tools insertion, JSON comparator container mismatch, and invalid-surrogate normalization. Implemented bridge-only legacyMessageStructure in pinned AI compiler via idempotent verified prepare seams; no request/header identity spoofing. Upstream default paths unchanged and101 upstream protocol tests pass network-isolated. Full349pass/5explicitruntime skips; native6pass/0skip (80cases + actualClaude/officialCLI); SDK1293clean. Manifest guards nine prepared source files before host creation; health/headers include digest. MUST deploy all listed files including AI schema/options + protocols/openai-chat, plus generated SDK overlaymanifest; worker-only deployment now fails closed.
