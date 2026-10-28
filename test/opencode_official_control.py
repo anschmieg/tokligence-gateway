@@ -277,6 +277,22 @@ print(json.dumps({'type':'step_finish','part':{'reason':'stop'}}))
             child.wait()
 
 
+class SocketProbeTests(unittest.TestCase):
+    def test_reset_is_closed_but_timeout_and_data_are_not(self):
+        from socket_probe import observe_peer_close
+        class Peer:
+            def __init__(self, result): self.result = result
+            def recv(self, _):
+                if isinstance(self.result, BaseException): raise self.result
+                return self.result
+        self.assertEqual(observe_peer_close(Peer(b'')), 'eof')
+        for error in [ConnectionResetError(), ConnectionAbortedError(), BrokenPipeError()]:
+            self.assertEqual(observe_peer_close(Peer(error)), 'reset')
+        self.assertEqual(observe_peer_close(Peer(TimeoutError())), 'timeout')
+        self.assertEqual(observe_peer_close(Peer(b'x')), 'unexpected_data')
+        with self.assertRaises(PermissionError): observe_peer_close(Peer(PermissionError()))
+
+
 class AdmissionTests(unittest.TestCase):
     def test_admission_checks_time_run_gates_and_artifact_integrity_without_traffic(self):
         from run_admission import inspect_plan, REQUIRED_ARTIFACTS

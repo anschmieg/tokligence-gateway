@@ -37,7 +37,7 @@ command += ['--dir', '/etc']
 for name in ['/etc/passwd', '/etc/group', '/etc/nsswitch.conf']:
     if pathlib.Path(name).exists():
         command += ['--ro-bind', name, name]
-for name in ['official_control.py', 'live_safety.py', 'official-models.json', 'public-bun-transport.mjs']:
+for name in ['official_control.py', 'live_safety.py', 'socket_probe.py', 'official-models.json', 'public-bun-transport.mjs']:
     command += ['--ro-bind', str(helpers / name), '/' + name]
 if args.bun_transport:
     command += ['--ro-bind', str(pathlib.Path(args.bun_transport).resolve(strict=True)), '/bun']

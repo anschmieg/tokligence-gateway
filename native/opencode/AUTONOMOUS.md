@@ -1,5 +1,15 @@
 # OpenCode Zen completion checkpoint
 
+## Startup/recovery review verification
+
+Final full353pass/7explicitruntime skips; native8pass/0skip including realClaude/compiledCLI,114APIcases,80+5bodycomparison, realstartup public-state and suspendedclaim regressions. SDK1293clean; lintpass. Logs /tmp/zen-startup-review-{full,native,lint}-verified.log and /tmp/zen-startup-sdk-final.log. Source/evidence hashes and overlay refreshed, stable run/window IDs/caps/time unchanged. No live inference/device-login probes; normal restoredOAuthhost may still perform native discovery/refresh. See startup/recovery findings below. Deployment and actual-root admission results follow after completion.
+
+## Startup/recovery review — latest changes
+
+Combined checks exposed a reference-CLI socket fixture false negative: reset was not recognized as closure. socket_probe.py now distinguishes EOF/reset from timeout/data; no cancellation deadline was relaxed and unrelated errors still fail. Positive public startup fixture recognizes supervisor SIGTERM without claiming verified graceful inner shutdown.
+
+Public state now validates credential/account counts read-only BEFORE EmbeddedHost creation, preventing a populated public DB from initiating native credential resolution before rejection. Recognized clean public state still boots/restarts. Worker uses supported SessionRestart override to suppress automatic agent-run replay: external caller owns continuation/tools; suspended claims are preserved, no boot inference. Session-reference journal now file-sync→rename→directory-sync before native create/remove effects. Readiness follows signal-handler installation. See ADVERSARIAL-REVIEW.md startup section. These are deliberate external-loop safeguards, not an assertion of universal native CLI recovery parity or a proven429cause. All fixtures are private/synthetic; no live inference/device-login probes. Complete overlay update and evidence refresh required before staging restart; final checks/deployment recorded below after completion.
+
 ## Same-version audit fixes verified and deployed
 
 Functional **e7e609d** pushed/deployed staging with complete source bundle, overlay **f3bd70b4b8eff2f7c3620a394e55e082b88ad0270cdb39dcf58949307857b0ce**. Full352pass/6explicitruntime skips; native7pass/0skip including114sameversion API/auth/request cases, old80+5bodyregressions and actualClaude/officialCLI fixtures. SDK1293clean after correcting callback typing. Final affected tests also verify model-switch migration/serialization, exact2.1.4CLIappmetadata and above-catalog output rejection before provider I/O. Sourcefixtures isolated; no live inference/device-login probes. Restored normalOAuthhost may perform native discovery/refresh; do not claimzeroallAPItraffic.

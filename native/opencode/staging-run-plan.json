@@ -10,7 +10,7 @@
       "official-glm-control-20261029"
     ]
   },
-  "overlay_sha256": "f3bd70b4b8eff2f7c3620a394e55e082b88ad0270cdb39dcf58949307857b0ce",
+  "overlay_sha256": "17d21ecdef56eb2f5a802ac8c514bbbfecda5fb437d554253f7bea18c359eed3",
   "gates": {
     "native_identity": {
       "status": "passed",
@@ -35,13 +35,13 @@
     "native/opencode/official-models.json": "780e9babc994e489280e6b219e38dcf1f83838b3b17a74d789aa964a099bbe47",
     "native/opencode/official-public-probe.py": "87032383f06fa1f3ec46c99ee7dcced677e452a5cc1216ad69bd83f7c58ec2ec",
     "native/opencode/official_control.py": "52b4f95b1e2f71c7ceb9e790c2668e3627dba6c6865d122735c62c0dcd0e23cc",
-    "native/opencode/offline-session-fixture.py": "c52e6a9ee544c8d3ae8dc80cace2910884263833fa67d78e5e70a8d8d3144805",
-    "native/opencode/prepared-evidence.json": "28083db57e1360bb79cfe58eddb2f6c1e16d8bd0f7d1c2a88141b3a8eed80a42",
+    "native/opencode/offline-session-fixture.py": "d4d8a304c1f551489aff66f4fabffb50a8ea2167acd000d4013f71b422a682a9",
+    "native/opencode/prepared-evidence.json": "d5edcc95d44636fd7f7c906a711930137bc7ca24f8deabadaa7c40eb1f192cae",
     "native/opencode/public-bun-transport.mjs": "a620d0dfa2bdbc638dc925ecf39d1a9d36581e208dbb6a524bc6bfb0adf91419",
     "native/opencode/run_admission.py": "3ee003f20425c8d4246ca6ce6519b88e6121cb08075adee5a20f76418f862687",
     "native/opencode/scoped-http.ts": "868999afa55304d6326e54e954a31bf29d60dd3861861a823715137b932478f7",
     "native/opencode/testing/native-parity.mjs": "b78c556010ef57028d120f91f7dde7101809cf5a6474734d74825ee86fc46791",
-    "native/opencode/worker.ts": "0ade286556a20d477cba84b5ccc76caa7b6161ef9e04377dfd606a92d82bebf9",
+    "native/opencode/worker.ts": "c7a9a0b62da6202b4c02962983f7a6babeac116ff35655a14c0e6ca2363ad242",
     "provider-adapters.mjs": "3367e3b8af0adf71dd42895c36d348ae2750a1b1811648a3c9b2dcc2aed9205c",
     "request-executor.mjs": "cc96ab901d002ec2c0ca6510487659d77e9a98e7755e872c58c579aa7f526196",
     "routing-planner.mjs": "cd345b41a00c9570f0f5605637390fa05e079988df5292b5e1af795b44a43497",
@@ -50,18 +50,21 @@
     "test/opencode-native-parity.test.mjs": "ceb30877d470f3620390fc87f2de86d444a79427eece6ebe8a927f3f1f596690",
     "test/opencode-native-worker.test.mjs": "58d6119d36bacd9f15a19817f78fd3d585968725e468bb6231dc5700104b2166",
     "test/opencode_native_live_safety.py": "4d202853e3dfaf45f947ec5f6f35965c31aaad18836372d0f03ed4762a2df731",
-    "test/opencode_official_control.py": "6261c70abcae1994852887bbe2d2a3a660bca147baea2dc7532da2addc16d039",
+    "test/opencode_official_control.py": "a0df1678bc91ec4e21835ac6673c15bbf254fa0e9f7585c49eada607aabca59f",
     "tgw-proxy.mjs": "eee58631fef1863bbfe7ad36d3b24f297affb4b80040a65d078e6354ddf0cf5b",
     "test/opencode-native-scoped-http.test.mjs": "9e2301ea70101a5f615420402d48459453295f67694cffdc47e5d8873b66e2d2",
     "test/opencode-native-adapter.test.mjs": "c495aa34669b6315f8e272c897de3cd9c4eed16f77bf21f2c128cb3ce37b9aaa",
-    "native/opencode/state-store.mjs": "2cff8535ba3e8302f5726b0d3428cb8d762d3f47d7f46bead82ac9437ca3292a",
+    "native/opencode/state-store.mjs": "ee46d13dd946c53d3e56ff972ae6c9919921c287aa4cbc381cb6e57c67e6ca60",
     "native/opencode/testing/api-boundary.ts": "ff73272f2d680d961d55e71e961c4a355ae6f498edabb4269981db81c4bd2ca4",
     "scripts/verify-opencode-api.mjs": "90dcbc6558b8345061ed3fc2f5a0cb16d8149589b3db2d4932b6f5612521669d",
-    "scripts/verify-opencode-native.mjs": "071cc23582f6c6c556e060952552af3718e4aa4f5a658c138e2cee8643f98abe",
+    "scripts/verify-opencode-native.mjs": "ebb32f199d251b0f5c9a0b91f89cf64e841fbf705dea91053f4aa193dc0dd75a",
     "test/opencode-native-api.test.mjs": "ce0bc8ff50d8b8dbadb6fdc63efba2757df60e5e8d52ad1b10ae78254f3b6dec",
-    "test/opencode-native-lifecycle.test.mjs": "0f0f3a0949a3cada727c280204d0078531e87a68f37b3a7bd575f3a03b5ffa33",
-    "test/opencode-native-state.test.mjs": "23b9807fbf6bef8caad63ca0d70501874f70666b115ba24a23b1ab01f8dd8443",
-    "package.json": "6aab506c9c8a37394a4b23d40190d763750de069cb36a4482e6322557717e4de"
+    "test/opencode-native-lifecycle.test.mjs": "202b43d3d3052768e6c5c7dac6e26f98010b2acef56105e0805c579943afec94",
+    "test/opencode-native-state.test.mjs": "917d3f4575eb0bdaf06009977de3a4ed38cf5789c6d534dcd76686bbee4ee822",
+    "package.json": "6aab506c9c8a37394a4b23d40190d763750de069cb36a4482e6322557717e4de",
+    "test/opencode-native-public-startup.test.mjs": "2e05991e6469995f7bce1315ce1bfc9703077b48b0d452ec27fcb146a1f6ea15",
+    "native/opencode/socket_probe.py": "4d7886cfb497c75ebd36948e5eae26c84c7f5fd56f08c13cc793f5d30fe74dd6",
+    "native/opencode/capture-official-cli.py": "5a28527f346d859fe30bafd9b2ccf28724ca5a4259e7c5bba1981ef1bf384c72"
   },
   "staging_root": "/home/agent/tokligence-staging",
   "runtime": {

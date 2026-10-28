@@ -109,5 +109,27 @@
       "zen-api-boundary-output-limit.log": "142c49a93c7d9e9ebbb1bc81fc0d9a5a075a1cde3e778abfb3010bed600c9901",
       "zen-api-boundary-metadata.log": "46ce8857dc14b11badd8bd19807a52b15ad2ba9868cc4a005c645a5059c2b2d9"
     }
+  },
+  "startup_review_verification": {
+    "created_at": "2026-10-28T18:25:54.102849+00:00",
+    "unit_pass": 353,
+    "unit_runtime_skips": 7,
+    "native_pass": 8,
+    "sdk_files": 1293,
+    "lint": "passed",
+    "fixes": [
+      "public_credential_validation_before_host",
+      "external_loop_no_automatic_native_agent_replay",
+      "session_journal_sync_before_native_effects",
+      "readiness_after_signal_handlers",
+      "reference_socket_eof_reset_classification"
+    ],
+    "tests": "private/synthetic; new startup fixture has OS-blocked external networking; no live inference/login probes",
+    "log_sha256": {
+      "zen-startup-review-full-verified.log": "45763b0ba19ca4bfeb7ae93e8310fce73e4b5542c524bf1f2acdd5e127221ec8",
+      "zen-startup-review-native-verified.log": "e8f8525c745c911786a1fdf4bf6c9890309a8f33302d50152b7ac6f63784c2d8",
+      "zen-startup-review-lint-verified.log": "443507d5f6920626d9f180866cf396a11e09a15ae1d35a934a3028ec0afd36c2",
+      "zen-startup-sdk-final.log": "f3d9aeea6125a7ae465537e1804e22e7b3c74747dbfbb67b71a3b8873c14a49f"
+    }
   }
 }

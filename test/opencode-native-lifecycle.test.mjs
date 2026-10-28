@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
 import http from 'node:http';
@@ -13,9 +13,10 @@ test('native worker excludes concurrent owners, survives SIGKILL and removes evi
   const state = await mkdtemp(path.join(os.tmpdir(), 'native-lifecycle-'));
   let signalHeld;
   const held = new Promise(resolve => { signalHeld = resolve; });
-  let heldCalls = 0;
+  let heldCalls = 0, providerCalls = 0;
   const provider = http.createServer(async (req, res) => {
     let raw = ''; for await (const part of req) raw += part;
+    providerCalls++;
     if (JSON.parse(raw).messages.some(message => message.content === 'hold-model-switch')) { heldCalls++; signalHeld(); return; }
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     res.end('data: {"choices":[{"index":0,"delta":{"content":"OK"},"finish_reason":null}]}\n\ndata: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
@@ -67,8 +68,15 @@ test('native worker excludes concurrent owners, survives SIGKILL and removes evi
     owner.kill('SIGKILL'); await once(owner, 'exit');
     const bKey = createHash('sha256').update('conversation\0b').digest('hex');
     saved[bKey].creating = true; // Crash after native create but before clearing journal.
+    execFileSync(bun, ['-e', `import { Database } from 'bun:sqlite'; const db = new Database(process.argv[1]); db.query('UPDATE session_v2 SET time_suspended = 1 WHERE id = ?').run(process.argv[2]); db.close();`, path.join(state, 'opencode.db'), bReplacement]);
+    const callsBeforeRestart = providerCalls;
+
     await writeFile(savedPath, JSON.stringify(saved));
     owner = launch(); port = await ready(owner);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    assert.equal(providerCalls, callsBeforeRestart, 'boot must not resume caller-owned/mixed native work');
+    const claim = execFileSync(bun, ['-e', `import { Database } from 'bun:sqlite'; const db = new Database(process.argv[1], {readonly:true}); console.log(db.query('SELECT time_suspended FROM session_v2 WHERE id = ?').get(process.argv[2]).time_suspended); db.close();`, path.join(state, 'opencode.db'), bReplacement], { encoding: 'utf8' });
+    assert.equal(claim.trim(), '1', 'bridge must preserve rather than consume suspended work');
     assert.equal(await call('b'), bReplacement, 'native creation retry must reuse the journaled identity');
     assert.equal(JSON.parse(await readFile(savedPath))[bKey].creating, undefined);
     owner.kill('SIGKILL'); await once(owner, 'exit');

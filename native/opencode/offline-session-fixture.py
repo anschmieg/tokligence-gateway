@@ -1,6 +1,7 @@
 """Actual persisted official CLI lifecycle; only within the capture network namespace."""
 import http.server, json, os, pathlib, signal, socket, subprocess, sys, threading, time
 from official_control import profile_environment
+from socket_probe import observe_peer_close
 if len(sys.argv) != 3 or os.readlink('/proc/self/ns/net') == sys.argv[1]:
     raise SystemExit('Separate network namespace required')
 root = pathlib.Path('/work')
@@ -9,6 +10,7 @@ model = sys.argv[2]
 hits = []
 held = threading.Event()
 closed = threading.Event()
+close_outcome = {}
 class Server(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_): pass
     def do_POST(self):
@@ -18,9 +20,8 @@ class Server(http.server.BaseHTTPRequestHandler):
         if len(hits) == 4:
             self.wfile.write(b': waiting\n\n'); self.wfile.flush(); held.set()
             self.connection.settimeout(8)
-            try:
-                if self.connection.recv(1) == b'': closed.set()
-            except OSError: pass
+            close_outcome['kind'] = observe_peer_close(self.connection)
+            if close_outcome['kind'] in ('eof', 'reset'): closed.set()
             return
         delta = {'content': 'OFFLINE_SESSION_OK'}
         finish = 'stop'
@@ -73,7 +74,7 @@ try:
         try: child.communicate(timeout=5)
         except subprocess.TimeoutExpired:
             child.kill(); child.communicate(); raise AssertionError('CLI required forced kill during cancellation')
-        assert closed.wait(3), 'cancel did not close provider socket'
+        assert closed.wait(3), 'cancel did not close provider socket: ' + close_outcome.get('kind', 'no observation')
     finally:
         if child.poll() is None: child.kill(); child.communicate()
     run(['--session', session, 'Resume after cancellation; reply OFFLINE_SESSION_OK.'], 'after-cancel')
@@ -81,7 +82,7 @@ try:
     keys = ['x-opencode-session', 'x-opencode-project']
     for key in keys:
         assert hits[0]['headers'].get(key) and len({h['headers'].get(key) for h in hits}) == 1, 'unstable ' + key
-    summary = {'external_network_blocked': True, 'exit_code': 0, 'requests': len(hits), 'marker_received': True, 'public_auth_only': all(h['public'] for h in hits), 'parallel_tool_results': True, 'reasoning_replayed': True, 'persisted_resume': True, 'cancellation_closed': True, 'cancellation_graceful': True, 'resume_after_cancel': True, 'stable_session_headers': True, 'scope': 'actual_official_cli_synthetic_lifecycle'}
+    summary = {'external_network_blocked': True, 'exit_code': 0, 'requests': len(hits), 'marker_received': True, 'public_auth_only': all(h['public'] for h in hits), 'parallel_tool_results': True, 'reasoning_replayed': True, 'persisted_resume': True, 'cancellation_closed': True, 'cancellation_socket_outcome': close_outcome['kind'], 'cancellation_graceful': True, 'resume_after_cancel': True, 'stable_session_headers': True, 'scope': 'actual_official_cli_synthetic_lifecycle'}
     (root / 'requests.json').write_text(json.dumps(hits, indent=2))
     (root / 'summary.json').write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary), flush=True)

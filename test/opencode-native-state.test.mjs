@@ -149,3 +149,30 @@ test('native registry migrates model-scoped identities and switches models witho
     assert.deepEqual(switches, [['ses_existing', 'model-b'], ['ses_existing', 'model-b'], ['ses_existing', 'model-a']]);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test('registry sync failure blocks native creation until reference persistence succeeds', async () => {
+  const fs = (await import('node:fs/promises')).default;
+  const root = await mkdtemp(path.join(os.tmpdir(), 'native-reference-sync-'));
+  const file = path.join(root, 'sessions.json');
+  const originalOpen = fs.open;
+  let created = 0;
+  const options = { file, limit: 2, ttlMs: 60000, allocateID: () => 'ses_sync', create: async () => { created++; }, remove: async () => {} };
+  try {
+    fs.open = async (...args) => {
+      const handle = await originalOpen(...args);
+      if (args[0] !== file + '.pending') return handle;
+      return new Proxy(handle, { get(target, key) {
+        if (key === 'sync') return async () => { throw new Error('Synthetic disk sync failure'); };
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      } });
+    };
+    const registry = await createSessionRegistry(options);
+    await assert.rejects(registry.get('scope', 'model', new Set()), /disk sync failure/);
+    assert.equal(created, 0, 'native creation requires a synced reference');
+    fs.open = originalOpen;
+    await registry.get('scope', 'model', new Set());
+    assert.equal(created, 1);
+    assert.equal(JSON.parse(await readFile(file)).scope.id, 'ses_sync');
+  } finally { fs.open = originalOpen; await rm(root, { recursive: true, force: true }); }
+});

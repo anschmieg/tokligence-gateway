@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 // Called while holding worker.lock, before EmbeddedHost can open credentials.
@@ -18,6 +19,31 @@ export async function claimAuthState(directory, mode) {
     } catch (error) { if (error.code !== 'ENOENT') throw error; }
   }
   await fs.writeFile(marker, `${mode}\n`, { flag: 'wx', mode: 0o600 });
+}
+
+// Public mode must reject imported credentials BEFORE EmbeddedHost activates
+// provider plugins, credential refresh, or Console discovery.
+export async function assertPublicDatabaseEmpty(directory, openDatabase) {
+  const file = `${directory}/opencode.db`;
+  try { await fs.access(file); }
+  catch (error) { if (error.code === 'ENOENT') return; throw error; }
+  let database;
+  try {
+    database = openDatabase(file);
+    let recognized = false;
+    for (const table of ['credential', 'account', 'control_account']) {
+      if (!database.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) continue;
+      if (table === 'credential') recognized = true;
+      // Only fixed table names and counts; never load credential/token values.
+      if (database.query(`SELECT count(*) AS count FROM "${table}"`).get().count > 0) {
+        throw new Error('Public native state contains credentials; use separate state');
+      }
+    }
+    if (!recognized) throw new Error('Public native state has an unrecognized credential schema');
+  } catch (error) {
+    if (error.message === 'Public native state contains credentials; use separate state' || error.message === 'Public native state has an unrecognized credential schema') throw error;
+    throw new Error('Public native credential state could not be verified before startup');
+  } finally { database?.close(); }
 }
 
 // flock locks the inherited open-file description. The parent retains that
@@ -53,8 +79,14 @@ export async function createSessionRegistry({ file, limit, ttlMs, allocateID, cr
     return result;
   };
   const save = async () => {
-    await fs.writeFile(`${file}.pending`, JSON.stringify(Object.fromEntries(sessions)), { mode: 0o600 });
+    const pending = await fs.open(`${file}.pending`, 'w', 0o600);
+    try {
+      await pending.writeFile(JSON.stringify(Object.fromEntries(sessions)));
+      await pending.sync();
+    } finally { await pending.close(); }
     await fs.rename(`${file}.pending`, file);
+    const directory = await fs.open(path.dirname(file), 'r');
+    try { await directory.sync(); } finally { await directory.close(); }
   };
   const discard = async (key) => {
     const entry = sessions.get(key);

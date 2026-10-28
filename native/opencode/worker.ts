@@ -1,6 +1,7 @@
 // Copied into the pinned OpenCode SDK source tree by prepare-opencode-native.mjs.
 // There is no agent runner or tool executor on the completion request path.
 import fs from "node:fs/promises"
+import { Database as SqliteDatabase } from "bun:sqlite"
 import path from "node:path"
 import { createHash, timingSafeEqual, randomUUID } from "node:crypto"
 import { Effect, Stream, Layer, Schema, Cause, Exit } from "effect"
@@ -17,6 +18,7 @@ import { Plugin } from "@opencode/core/plugin"
 import { Credential } from "@opencode/core/credential"
 import { Integration } from "@opencode/schema/integration"
 import { Session } from "@opencode/core/session"
+import { SessionRestart } from "@opencode/core/session/execution/restart"
 import { SessionModelRequest } from "@opencode/core/session/model-request"
 import { SessionModelTransport } from "@opencode/core/session/model-transport"
 import { WebSocketConstructor } from "@opencode/core/effect/websocket-constructor"
@@ -25,7 +27,7 @@ import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { llmClient } from "@opencode/core/effect/app-node-platform"
 import { BridgeInputError, readChatBody, decodeChatRequest, createChatEncoder, safeNativeError, nativeAuthMode, assertNativeCredentialCount } from "./tokligence-bridge-wire.mjs"
 import source from "./tokligence-source.json"
-import { acquireStateLock, createSessionRegistry, claimAuthState } from "./tokligence-state-store.mjs"
+import { acquireStateLock, createSessionRegistry, claimAuthState, assertPublicDatabaseEmpty } from "./tokligence-state-store.mjs"
 import { scopedHttp } from "./tokligence-scoped-http"
 import overlay from "./tokligence-overlay.json"
 import { verifySourceOverlay } from "./tokligence-source-overlay.mjs"
@@ -54,6 +56,7 @@ await verifySourceOverlay(path.resolve(import.meta.dir, "../../.."), overlay)
 await fs.mkdir(state, { recursive: true, mode: 0o700 })
 const lock = await acquireStateLock(path.join(state, "worker.lock"))
 await claimAuthState(state, authMode)
+if (authMode === "public") await assertPublicDatabaseEmpty(state, (file: string) => new SqliteDatabase(file, { readonly: true }))
 const metadata = { name: "cli", version: source.version, channel: "latest" }
 const workspace = path.join(state, "workspace")
 await fs.mkdir(workspace, { recursive: true, mode: 0o700 })
@@ -78,6 +81,10 @@ const host = await Effect.runPromise(EmbeddedHost.create({
   config: { directory: path.join(state, "config"), project: false, claude: false, content: JSON.stringify(config) },
   models: { fetch: !fixture }, fs: { filewatcher: false, fff: false },
   log: { level: "error", emit: () => {} },
+}, {
+  // The caller owns continuation and tool execution. Never sweep a mixed or
+  // imported native execution claim into an unbudgeted agent run at boot.
+  overrides: [SessionRestart.node.replace(Layer.succeed(SessionRestart.Service, SessionRestart.Service.of({ resumeSuspendedSessions: Effect.void })))],
 }))
 const seed = process.env.OPENCODE_NATIVE_SEED_FILE
 if (seed) {
@@ -328,10 +335,10 @@ const server = Bun.serve({
     try { return await inference(request) } catch (error) { return errorResponse(error) }
   },
 })
-console.info(JSON.stringify({ event: "native_worker_ready", port: server.port, version: source.version, commit: source.commit, fixture: Boolean(fixture) }))
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, async () => {
   server.stop(true)
   await host.close()
   await lock.close()
   process.exit(0)
 })
+console.info(JSON.stringify({ event: "native_worker_ready", port: server.port, version: source.version, commit: source.commit, fixture: Boolean(fixture) }))
