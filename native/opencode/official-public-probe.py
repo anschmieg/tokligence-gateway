@@ -110,6 +110,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', default='/home/agent/tokligence-staging')
     parser.add_argument('--binary')
+    parser.add_argument('--bun-transport', help='Use this Bun executable for guarded onward HTTPS; no Python TLS')
     parser.add_argument('--run-id', required=True)
     parser.add_argument('--model', default='glm-5.3-flash-free', choices=list(json.loads(CATALOG.read_text())['opencode']['models']))
     parser.add_argument('--not-before', default='2026-10-28T00:01:00+00:00')
@@ -126,7 +127,7 @@ def main():
     guard = LiveGuard(root, args.run_id, 1, 1024)
     report = {'at': utc_now().isoformat(), 'run_id': args.run_id, 'model': args.model,
               'authentication': 'public', 'scope': 'synthetic' if args.fixture_upstream else 'live',
-              'transport': 'official_cli_http_via_guarded_urllib',
+              'transport': 'official_cli_http_via_guarded_bun' if args.bun_transport else 'official_cli_http_via_guarded_urllib',
               'passed': False, 'coverage_incomplete': True, 'memory_before': memory_snapshot()}
     try:
         with guard:
@@ -136,7 +137,7 @@ def main():
                 with pause_staging(root, args.pause_staging):
                     print(json.dumps({'run_id': args.run_id, 'phase': 'official-control-started'}), flush=True)
                     with tempfile.TemporaryDirectory(prefix='official-control-', dir=root) as folder:
-                        with official_relay(guard, args.model, args.fixture_upstream) as relay:
+                        with official_relay(guard, args.model, args.fixture_upstream, bun_binary=args.bun_transport) as relay:
                             env = profile_environment(folder, relay, args.model)
                             version = subprocess.run([str(binary), '--version'], env=env, cwd=folder,
                                 stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20)

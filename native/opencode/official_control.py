@@ -1,5 +1,6 @@
 """Public-only official CLI control. No OAuth credentials or live model discovery."""
 import contextlib
+import base64
 import datetime
 import email.utils
 import http.server
@@ -7,6 +8,7 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import threading
 import urllib.error
 import urllib.parse
@@ -88,7 +90,7 @@ def control_endpoint(fixture_upstream=None):
 
 
 @contextlib.contextmanager
-def official_relay(guard, model, fixture_upstream=None, timeout=60):
+def official_relay(guard, model, fixture_upstream=None, timeout=60, bun_binary=None):
     target = control_endpoint(fixture_upstream)
     if model not in json.loads(CATALOG.read_text())['opencode']['models']:
         raise ValueError('Unknown free control model')
@@ -135,15 +137,28 @@ def official_relay(guard, model, fixture_upstream=None, timeout=60):
                             'user_agent': headers.get('user-agent'), 'model': model,
                             'max_tokens': tokens, 'stream': True}
                         guard._save()
-                    request = urllib.request.Request(target + '/chat/completions', data=raw, headers=headers)
-                    try:
-                        response = open_public(request, timeout=timeout)
-                    except urllib.error.HTTPError as error:
-                        response = error
-                    with response:
-                        status = response.status
-                        data = response.read(2 * 1024 * 1024 + 1)
-                        failure = public_failure(data, response.headers) if status >= 300 else None
+                    if bun_binary:
+                        payload = {'url': target + '/chat/completions', 'headers': headers,
+                                   'body': base64.b64encode(raw).decode(), 'timeout': timeout,
+                                   'fixture': fixture_upstream is not None}
+                        child = subprocess.run([str(bun_binary), str(pathlib.Path(__file__).with_name('public-bun-transport.mjs'))],
+                            input=json.dumps(payload), capture_output=True, text=True, timeout=timeout + 5,
+                            env={'PATH': '/usr/bin:/bin'})
+                        if child.returncode:
+                            raise ValueError('Bun transport failed; private child diagnostics withheld')
+                        reply = json.loads(child.stdout)
+                        status, data = reply['status'], base64.b64decode(reply['body'], validate=True)
+                        failure = public_failure(data, reply['headers']) if status >= 300 else None
+                    else:
+                        request = urllib.request.Request(target + '/chat/completions', data=raw, headers=headers)
+                        try:
+                            response = open_public(request, timeout=timeout)
+                        except urllib.error.HTTPError as error:
+                            response = error
+                        with response:
+                            status = response.status
+                            data = response.read(2 * 1024 * 1024 + 1)
+                            failure = public_failure(data, response.headers) if status >= 300 else None
                     if len(data) > 2 * 1024 * 1024:
                         raise ValueError('Control response exceeded limit')
                     if failure:
@@ -153,7 +168,7 @@ def official_relay(guard, model, fixture_upstream=None, timeout=60):
                 status = guard.status if guard.status in (401, 403, 429) else 400
                 code = 'FreeUsageLimitError' if status == 429 else 'ProbeStopped'
                 self.reply(status, json.dumps({'error': {'type': code, 'message': 'Control stopped by safety guard'}}).encode())
-            except (ValueError, TypeError, KeyError, OSError, urllib.error.URLError):
+            except (ValueError, TypeError, KeyError, OSError, urllib.error.URLError, subprocess.TimeoutExpired):
                 try:
                     guard.stop('Official public control validation or transport failed')
                 except ProbeStopped:

@@ -2,7 +2,7 @@
 import os, pathlib, json, socket, threading, http.server, subprocess, signal, time, sys
 from official_control import profile_environment, official_relay
 from live_safety import LiveGuard
-if len(sys.argv) != 3 or os.readlink('/proc/self/ns/net') == sys.argv[1]:
+if len(sys.argv) not in (3, 4) or os.readlink('/proc/self/ns/net') == sys.argv[1]:
  raise SystemExit('Refusing capture without a separate network namespace')
 root=pathlib.Path('/work')
 model=sys.argv[2]
@@ -26,7 +26,7 @@ try:
  with socket.create_connection(('1.1.1.1',443),timeout=.2):pass
 except OSError:blocked=True
 if not blocked:raise RuntimeError('External network unexpectedly available')
-with LiveGuard(root,'offline-official-control',1,1024) as guard, official_relay(guard,model,f'http://127.0.0.1:{server.server_port}/v1',5) as relay:
+with LiveGuard(root,'offline-official-control',1,1024) as guard, official_relay(guard,model,f'http://127.0.0.1:{server.server_port}/v1',5,bun_binary=sys.argv[3] if len(sys.argv)==4 else None) as relay:
  home=root/'profile';home.mkdir(exist_ok=True)
  env=profile_environment(home,relay,model)
  started=time.monotonic()

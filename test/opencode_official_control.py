@@ -115,6 +115,31 @@ class OfficialTests(unittest.TestCase):
             self.assertEqual(guard.count, 0)
             self.assertEqual(self.calls, [])
 
+    @unittest.skipUnless(os.environ.get('OPENCODE_NATIVE_BUN'), 'Bun runtime not configured')
+    def test_bun_transport_preserves_public_wire_and_stops_quota_retry_and_redirect(self):
+        for status in [200, 429, 307]:
+            with self.subTest(status=status):
+                self.status = status
+                self.calls.clear()
+                root = self.root / str(status)
+                root.mkdir()
+                with LiveGuard(root, 'bun-control', 1, 1024) as guard:
+                    with official_relay(guard, 'glm-5.3-flash-free', self.url + '/v1', 5,
+                                        bun_binary=os.environ['OPENCODE_NATIVE_BUN']) as relay:
+                        result, raw = self.send(relay)
+                        self.assertEqual(result, status if status in [200, 429] else 400)
+                        self.assertEqual(self.calls[0]['raw'], raw)
+                        headers = {key.lower(): value for key, value in self.calls[0]['headers'].items()}
+                        self.assertEqual(headers['authorization'], 'Bearer public')
+                        self.assertEqual(headers['user-agent'], 'opencode/1.18.32')
+                        self.assertNotIn('cookie', headers)
+                        self.send(relay)
+                    self.assertEqual(len(self.calls), 1)
+                    self.assertEqual(guard.count, 1)
+                    if status == 429:
+                        self.assertEqual(guard.entry['upstream_code'], 'FreeUsageLimitError')
+                        self.assertIn('cooldown_until', guard.ledger)
+
     def test_quota_retains_safe_reset_and_stops_sdk_retry(self):
         self.status = 429
         with LiveGuard(self.root, 'quota', 1, 1024) as guard:

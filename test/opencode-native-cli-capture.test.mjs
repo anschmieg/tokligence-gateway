@@ -10,7 +10,8 @@ const binary = process.env.OPENCODE_OFFICIAL_CLI_BINARY;
 test('official CLI uses the actual OpenCode provider with public auth in an isolated network namespace', { skip: !binary, timeout: 65000 }, async () => {
   const output = await mkdtemp(path.join(os.tmpdir(), 'zen-official-cli-'));
   const run = async () => {
-    const child = spawn('python3', ['native/opencode/capture-official-cli.py', '--binary', binary, '--output', output], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const transport = process.env.OPENCODE_NATIVE_BUN ? ['--bun-transport', process.env.OPENCODE_NATIVE_BUN] : [];
+    const child = spawn('python3', ['native/opencode/capture-official-cli.py', '--binary', binary, '--output', output, ...transport], { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '';
     child.stdout.on('data', value => { stdout += value; });
     child.stderr.on('data', value => { stderr += value; });
