@@ -1,5 +1,9 @@
 # OpenCode Zen completion checkpoint
 
+## Review fixes deployed and smoke-checked
+
+Functional20c16c7 pushed/deployed staging, ownedworker/gateway restarted healthy. Worker overlay unchanged7e123663ec7d56b300918a1cd4fb4962eec8b3e86fa956e2acbff902a503258c. Actual-root checkonly verifies newlypinnedruntimehashes/root and refuses ONLY comparison_time_not_reached/provider_cooldown_active. Ledger bytehash unchanged, official-glm-control-20261029 stillunreserved, productionsecondarypathabsent/defaultOAuth/flock checks pass. VPS6targetedgroups pass including all12Python safety and16official/admission cases with Bun supplied. No inference, production orcredentialchanges. Scheduler handoff refreshed, cadence stillfixed01:34UTC/next2026-10-29T01:34:00Z; FIRSTdisable ontrigger, ONErequest maximum, allpriorguards apply.
+
 ## Adversarial review of run preparation — latest
 
 Fixed4findings: native adapter now enforces principal/conversation identity independently of direct-route matching (aliases cannot bypass via stickykey); plan binds exact stagedCLI/Bun hashes and state/code root plus mandatory ownedpause for live; checkonly shares historicalcooldowns and detects exhausted/changed aggregatewindows/laternotbefore; ledger reservations now filefsync→rename→directoryfsync before I/O. Middleware double-call fault proves one physicaldispatch. Fixed synthetic owned-child readiness race without weakening actual ownership checks. See ADVERSARIAL-REVIEW.md for scope/evidence.
