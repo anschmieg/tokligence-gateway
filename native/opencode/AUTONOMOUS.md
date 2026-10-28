@@ -6,7 +6,7 @@ Second adversarial pass expands differential coverage80 exact bodies / four mode
 
 User reports first manualTUI free-message limit: reset1:31AM Oct29. Exactwording matches newer2.x TUI source; freeLimitReset formats base+retryAfterMs in LOCAL timezone. Neither inspected standard profile has a new persisted failure (checked legacy and v2 tables). Machine/profile/timezone/session pending async question. This is a manual quota observation, not confirmed rawHTTP429 or sharedbucket/UTC reset. Keep all providertraffic stopped. Scheduled01:03 command now GATED: firstresolve reply and use >=1hour margin after LATER of confirmedUIreset and storedproviderreset. If UTC1:31, use02:34UTC, not01:03; do not assume timezone or invent/resetledger headers. Ordinary quota more plausible now, but originalmissingreasoning400 and historical429 causes remain distinct/unproven.
 
-Offline review continued through interruption; restarted interrupted suites and obtained complete passing results. No new live calls; preserve secondary staging-only ownership and production. Deploy and verify exact tested manifest bundle plus health/lock/ownership, record evidence after completion.
+Offline review continued through interruption; restarted interrupted suites and obtained complete passing results. No new live calls; preserve secondary staging-only ownership and production. Deployed code649df97 and the complete ten-file artifact bundle (nine hashed sources + manifest). Both services healthy; worker startup verified overlay d7965c9a38fb544691d1f1b6728ff2bd6aefc25625fa3cd8adbc2ccb8cbd6052. VPS28 wire/adapter/diff/overlay checks pass. OSlockheld, productionsecondarypathabsent, ledgerstillone historicalrun; zero new inference.
 
 ## Adversarial review — October28 request compatibility
 
