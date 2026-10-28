@@ -1,5 +1,9 @@
 # OpenCode Zen completion checkpoint
 
+## User scheduling update — October 28, 08:23 UTC
+
+User explicitly authorized rescheduling the next bounded check to **October29 01:03UTC**, over one hour after the recorded midnight reset. Fixed-time task is enabled for that time; FIRST action on trigger must disable itself so it acts once. Do NOT restore15-minute cadence. Honor newer cooldowns, never replay old IDs. Use official-glm-control-20261029, explicit --not-before2026-10-29T01:03:00+00:00, one accounted public GLM request/max1024 via existing official-public-probe.py --pause-staging. On rejection stop all inference and leave timer disabled. This update supersedes the previous no-new-plan status; it does not change ownership or allow retries/account/IP rotation. Midnight reset timestamps are provider estimates, not demonstrated availability guarantees; no proven reason for the new429.
+
 ## Latest live outcome — October 28, 00:01 UTC
 
 **External quota blocker; recurring task disabled.** Do not re-enable the timer from older queued prompts or repeat the reserved official control. No further authorized useful implementation work is identified; layers 1/2 passed, live acceptance remains incomplete. A future provider-availability change and a new explicit bounded plan are needed before further inference; cooldown expiry alone is not permission to retry on every timer.
