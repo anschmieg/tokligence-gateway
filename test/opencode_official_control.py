@@ -1,4 +1,5 @@
 import datetime
+import hashlib
 import http.server
 import importlib.util
 import json
@@ -270,6 +271,42 @@ print(json.dumps({'type':'step_finish','part':{'reason':'stop'}}))
         finally:
             child.kill()
             child.wait()
+
+
+class AdmissionTests(unittest.TestCase):
+    def test_admission_checks_time_run_gates_and_artifact_integrity_without_traffic(self):
+        from run_admission import inspect_plan, REQUIRED_ARTIFACTS
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            artifact = root / 'evidence.json'
+            artifact.write_text(json.dumps({'gates': {name: {'passed': True} for name in ['native_identity', 'official_lifecycle', 'outbound_attempts', 'session_comparison']}}))
+            plan = {'run_id': 'single', 'model': 'glm-5.3-flash-free', 'not_before': '1970-01-01T00:00:00+00:00',
+                    'window': {'id': 'window', 'request_budget': 1, 'output_budget': 1024, 'allowed_runs': ['single']},
+                    'gates': {name: {'status': 'passed', 'evidence': 'evidence.json'} for name in ['native_identity', 'official_lifecycle', 'outbound_attempts', 'session_comparison']},
+                    'sha256': {'evidence.json': hashlib.sha256(artifact.read_bytes()).hexdigest()}}
+            for relative in REQUIRED_ARTIFACTS:
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text('synthetic artifact')
+                plan['sha256'][relative] = hashlib.sha256(target.read_bytes()).hexdigest()
+            path = root / 'plan.json'
+            path.write_text(json.dumps(plan))
+            self.assertEqual(inspect_plan(path, root, 'single', plan['model'], plan['not_before'])[1], [])
+            self.assertIn('unselected_run_or_model', inspect_plan(path, root, 'new-id', plan['model'], plan['not_before'])[1])
+            plan['gates']['session_comparison']['status'] = 'pending'
+            path.write_text(json.dumps(plan))
+            self.assertIn('gate_incomplete:session_comparison', inspect_plan(path, root, 'single', plan['model'], plan['not_before'])[1])
+            artifact.write_text('tampered')
+            self.assertIn('artifact_mismatch:evidence.json', inspect_plan(path, root, 'single', plan['model'], plan['not_before'])[1])
+            plan['not_before'] = '2999-01-01T00:00:00+00:00'
+            path.write_text(json.dumps(plan))
+            self.assertIn('comparison_time_not_reached', inspect_plan(path, root, 'single', plan['model'], plan['not_before'])[1])
+
+    def test_live_entrypoint_without_plan_refuses_before_loading_private_state(self):
+        result = subprocess.run([sys.executable, str(HARNESS / 'official-public-probe.py'), '--root', '/nonexistent/private/state',
+            '--run-id', 'not-reserved', '--not-before', '1970-01-01T00:00:00+00:00', '--check-only'], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('requires a reviewed --plan', result.stderr)
 
 
 if __name__ == '__main__':

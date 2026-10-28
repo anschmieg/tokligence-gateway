@@ -48,11 +48,12 @@ def parse_time(value):
 
 
 class LiveGuard:
-    def __init__(self, root, run_id, requests, output_tokens):
+    def __init__(self, root, run_id, requests, output_tokens, window=None):
         if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,79}', run_id):
             raise ValueError('Invalid run ID')
         if not 1 <= requests <= 40 or not 1 <= output_tokens <= 220000:
             raise ValueError('Invalid probe budget')
+        self.window = window
         self.root = pathlib.Path(root)
         self.run_id = run_id
         self.limit = requests
@@ -86,11 +87,28 @@ class LiveGuard:
                 self.ledger['cooldown_until'] = max(future).isoformat()
                 self._save()
                 raise ProbeStopped('Recorded provider cooldown is still active')
+            if self.window:
+                window = self.window
+                if (not isinstance(window, dict) or set(window) != {'id', 'request_budget', 'output_budget', 'allowed_runs'}
+                        or not isinstance(window['id'], str) or not re.fullmatch(r'[A-Za-z0-9._-]{1,80}', window['id'])
+                        or type(window['request_budget']) is not int or not 1 <= window['request_budget'] <= 40
+                        or type(window['output_budget']) is not int or not 1 <= window['output_budget'] <= 220000
+                        or not isinstance(window['allowed_runs'], list) or not window['allowed_runs']
+                        or any(not isinstance(run, str) for run in window['allowed_runs'])
+                        or self.run_id not in window['allowed_runs']):
+                    raise ProbeStopped('Invalid or unselected live window')
+                windows = self.ledger.setdefault('windows', {})
+                previous = windows.get(window['id'])
+                if previous is not None and previous != window:
+                    raise ProbeStopped('Existing live window limits cannot be changed')
+                windows[window['id']] = window
             if self.run_id in self.ledger['runs']:
                 raise ProbeStopped('Run ID already reserved; previous probes are never replayed')
             self.entry = {'started': utc_now().isoformat(), 'status': 'in_progress', 'requests': 0,
                           'reserved_output_tokens': 0, 'request_budget': self.limit,
                           'output_budget': self.output_limit}
+            if self.window:
+                self.entry['window_id'] = self.window['id']
             self.ledger['runs'][self.run_id] = self.entry
             self._save()  # Reserve identity before any network request, including after crashes.
             return self
@@ -113,6 +131,11 @@ class LiveGuard:
                 self.stop('Invalid output budget')
             if self.count >= self.limit or self.output_count + max_tokens > self.output_limit:
                 self.stop('Probe request or output budget exhausted')
+            if self.window:
+                entries = [entry for entry in self.ledger['runs'].values() if entry.get('window_id') == self.window['id']]
+                if (sum(entry.get('requests', 0) for entry in entries) >= self.window['request_budget']
+                        or sum(entry.get('reserved_output_tokens', 0) for entry in entries) + max_tokens > self.window['output_budget']):
+                    self.stop('Aggregate live window budget exhausted')
             self.count += 1
             self.output_count += max_tokens
             self.entry.update(requests=self.count, reserved_output_tokens=self.output_count)
@@ -218,9 +241,16 @@ def claude_relay(guard, base_url, model, authorization, timeout):
 
         def forward(self, body):
             guard.reserve(body['max_tokens'])
-            request = urllib.request.Request(base_url + '/v1/messages', data=json.dumps(body).encode(),
+            user = body.get('metadata', {}).get('user_id') if isinstance(body.get('metadata'), dict) else None
+            if isinstance(user, str):
+                try: user = json.loads(user)
+                except ValueError: user = None
+            session = user.get('session_id') if isinstance(user, dict) else None
+            if not isinstance(session, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:-]{0,255}', session):
+                session = 'live-cli-' + guard.run_id + '-' + model
+            request = urllib.request.Request(base_url + '/v1/messages' , data=json.dumps(body).encode(),
                 headers={'Authorization': authorization, 'Content-Type': 'application/json',
-                         'x-session-id': 'live-cli-' + guard.run_id + '-' + model})
+                         'x-session-id': session})
             try:
                 response = open_gateway(request, timeout=timeout)
             except urllib.error.HTTPError as error:

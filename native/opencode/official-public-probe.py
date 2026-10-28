@@ -13,6 +13,7 @@ import urllib.request
 
 from live_safety import LiveGuard, ProbeStopped, parse_time, utc_now
 from official_control import CATALOG, official_relay, profile_environment
+from run_admission import inspect_plan, inspect_ledger, inspect_worker
 
 
 class ControlSetupError(RuntimeError):
@@ -112,6 +113,8 @@ def main():
     parser.add_argument('--binary')
     parser.add_argument('--bun-transport', help='Use this Bun executable for guarded onward HTTPS; no Python TLS')
     parser.add_argument('--run-id', required=True)
+    parser.add_argument('--plan', help='Reviewed, hash-bound single-request live window plan')
+    parser.add_argument('--check-only', action='store_true', help='No inference, identity reservation, or service mutation')
     parser.add_argument('--model', default='glm-5.3-flash-free', choices=list(json.loads(CATALOG.read_text())['opencode']['models']))
     parser.add_argument('--not-before', required=True, help='Explicit earliest authorized comparison time, including timezone')
     parser.add_argument('--pause-staging', action='store_true')
@@ -119,12 +122,37 @@ def main():
     args = parser.parse_args()
     if not args.fixture_upstream and any(value for key, value in os.environ.items() if key.lower() in ('http_proxy', 'https_proxy', 'all_proxy')):
         parser.exit(2, 'Official control not started: inherited proxy configuration requires review\n')
+    plan = None
+    if not args.fixture_upstream:
+        if not args.plan:
+            parser.exit(2, 'Live control requires a reviewed --plan; no inference started\n')
+        code_root = pathlib.Path(__file__).resolve().parents[2]
+        plan, blockers = inspect_plan(args.plan, code_root, args.run_id, args.model, args.not_before)
+        blockers.extend(inspect_ledger(pathlib.Path(args.root), args.run_id))
+        blockers.extend(inspect_worker(pathlib.Path(args.root), plan.get('overlay_sha256')))
+        if not args.bun_transport:
+            blockers.append('reviewed_bun_transport_required')
+        try:
+            verify_staging(pathlib.Path(args.root))
+        except StagingRestoreError:
+            blockers.append('staging_health_or_ownership_failed')
+        try:
+            os.lstat('/data/tokligence/zen/secondary-oauth.json')
+            blockers.append('production_secondary_path_present')
+        except FileNotFoundError: pass
+        except OSError: blockers.append('production_secondary_absence_unverified')
+        if args.check_only or blockers:
+            print(json.dumps({'status': 'ready' if not blockers else 'not_ready', 'inference_performed': False, 'blockers': blockers}))
+            return 2 if blockers else 0
+    elif args.check_only:
+        print(json.dumps({'status': 'synthetic_check_only', 'inference_performed': False}))
+        return 0
     threshold = parse_time(args.not_before)
     if not threshold or utc_now() < threshold:
         parser.exit(2, 'Official control not started before the configured comparison time\n')
     root = pathlib.Path(args.root).resolve()
     binary = pathlib.Path(args.binary or root / 'runtime/opencode-public-cli-1.18.32').resolve(strict=True)
-    guard = LiveGuard(root, args.run_id, 1, 1024)
+    guard = LiveGuard(root, args.run_id, 1, 1024, window=plan['window'] if plan else None)
     report = {'at': utc_now().isoformat(), 'run_id': args.run_id, 'model': args.model,
               'authentication': 'public', 'scope': 'synthetic' if args.fixture_upstream else 'live',
               'transport': 'official_cli_http_via_guarded_bun' if args.bun_transport else 'official_cli_http_via_guarded_urllib',

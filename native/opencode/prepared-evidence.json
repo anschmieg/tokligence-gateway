@@ -1,0 +1,71 @@
+{
+  "created_at": "2026-10-28T14:04:02.032015+00:00",
+  "scope": "offline synthetic evidence only; not proof of live quota availability or full auth/TLS parity",
+  "gates": {
+    "native_identity": {
+      "passed": true,
+      "evidence": "native-session-identity and gateway integration tests; actual Claude metadata assertion"
+    },
+    "official_lifecycle": {
+      "passed": true,
+      "external_network_blocked": true,
+      "exit_code": 0,
+      "requests": 5,
+      "marker_received": true,
+      "public_auth_only": true,
+      "parallel_tool_results": true,
+      "reasoning_replayed": true,
+      "persisted_resume": true,
+      "cancellation_closed": true,
+      "cancellation_graceful": true,
+      "resume_after_cancel": true,
+      "stable_session_headers": true,
+      "scope": "actual_official_cli_synthetic_lifecycle"
+    },
+    "outbound_attempts": {
+      "passed": true,
+      "cases": [
+        "401",
+        "403",
+        "429",
+        "500",
+        "redirect",
+        "disconnect-before-headers",
+        "malformed-sse",
+        "truncated-sse",
+        "cancellation"
+      ],
+      "physical_requests_per_completion": 1,
+      "redirects": "manual"
+    },
+    "session_comparison": {
+      "passed": true,
+      "exact_compiler_vectors": 80,
+      "actual_official_turns_compared": 5,
+      "native_replay_session_stable": true,
+      "official_only_headers": [
+        "x-opencode-request"
+      ],
+      "native_only_headers": [
+        "b3",
+        "traceparent",
+        "x-opencode-session-id",
+        "x-session-affinity",
+        "x-session-id"
+      ]
+    }
+  },
+  "verification": {
+    "unit_pass": 350,
+    "unit_explicit_runtime_skips": 5,
+    "native_pass": 6,
+    "sdk_files": 1293,
+    "lint": "passed"
+  },
+  "log_sha256": {
+    "zen-prepared-all-final.log": "3dfb2978beb057e29413df48a5f1bfd932cdfbf8027b683b52e6764cd3202689",
+    "zen-prepared-native-final.log": "1a630dbaba407a1d00e496b7916df420238cd2cda521ed27b973a416fc4ac877",
+    "zen-prepared-sdk.log": "079a1728ff22b4412bd4da4f356b11504b37c5c2c76af804bfdc2a5d042524c3",
+    "zen-prepared-lint-final.log": "443507d5f6920626d9f180866cf396a11e09a15ae1d35a934a3028ec0afd36c2"
+  }
+}

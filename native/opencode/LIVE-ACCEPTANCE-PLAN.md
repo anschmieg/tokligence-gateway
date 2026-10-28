@@ -25,3 +25,13 @@ Status: the earlier plan is not cleared for automatic matrix expansion. No provi
 ## Completion evidence
 
 Keep three independent layers separate: offline wire/fault/lifecycle; real Claude synthetic; successful bounded live per-model acceptance. Preserve results per model/phase as passed, failed, unsupported, untested or blocked. Existing349 unit tests,6 native groups,80 body comparisons,101 upstream protocol tests and SDK1293-file check remain prior evidence, not proof these new gates passed. Do not claim full CLI parity or a numerical reliability guarantee.
+
+## Executable preparation update
+
+The native conversation-identity gap is fixed: missing/conflicting identities fail before worker dispatch, stable recognized Claude metadata is supported and independently observed from actual Claude Code. Distinct explicit conversations isolate; header and metadata continuations agree. Legacy routes retain their prior behavior.
+
+Added actual compiled-CLI persisted-session capture under OS network isolation: scoped parallel Reads, returned reasoning replay, restart/resume, graceful cancellation and post-cancellation resume. Five outgoing bodies match native compilation exactly, and the same native session is retained for all five replayed turns. Classified header-name differences: reference-only `x-opencode-request`; native-only `b3`, `traceparent`, `x-opencode-session-id`, `x-session-affinity`, `x-session-id`. Client/content-type match; generated version/project/session/tracing values legitimately differ. This does not establish live auth/TLS equivalence.
+
+Fault preparation found a real native redirect loop: one synthetic call caused127 outbound requests before failing. Fixed through the supported FetchHttpClient.Fetch service in the existing scoped middleware: preserve native fetch/TLS and all request fields, force manual redirects, cap one physical HTTP dispatch. Tests now require one request for401/403/429/500, redirect, pre-header disconnect, malformed/truncated SSE, alongside cancellation and real Claude tool recovery. No real provider was contacted by these tests.
+
+The official live entrypoint now requires hash-bound staging-run-plan.json and checks time, prior cooldown/run identity, active lease, health/owned PIDs, default OAuth marker, live worker flock, overlay digest and production secondary-path absence. Persistent LiveGuard windows share request/output budgets across run IDs and refuse changing previously recorded limits. Current window admits exactly the one existing official GLM ID, total1request/1024 output. The zero-inference --check-only mode refuses safely before admission. It does not certify free quota is available.

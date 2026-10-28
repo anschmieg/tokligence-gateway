@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { parse, stringify } from 'yaml';
+import { nativeConversationIdentity } from '../native-session-identity.mjs';
 
 const source = process.env.OPENCODE_NATIVE_SOURCE;
 const bun = process.env.OPENCODE_NATIVE_BUN;
@@ -33,6 +34,10 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
       res.end(deltas.map(delta => `data: ${JSON.stringify({ id: 'fixture', choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`).join('') + `data: ${JSON.stringify({ id: 'fixture', choices: [{ index: 0, delta: {}, finish_reason: results.length < 2 ? 'tool_calls' : 'stop' }] })}\n\ndata: [DONE]\n\n`);
       return;
     }
+    if (mode === 'disconnect-before-headers') { req.socket.destroy(); return; }
+    if (mode === 'redirect') { res.writeHead(307, { location: '/v1/redirected' }); res.end(); return; }
+    if (mode === 'malformed-sse') { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.end('data: {invalid\n\n'); return; }
+    if (mode.startsWith('reject-')) { res.writeHead(Number(mode.slice(7)), { 'content-type': 'application/json' }); res.end('{"error":{"type":"fixture_rejection"}}'); return; }
     if (mode === 'quota') { res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '60' }); res.end(JSON.stringify({ error: { type: 'FreeUsageLimitError', message: 'PRIVATE_UPSTREAM_BODY' } })); return; }
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     if (mode === 'wait' || mode === 'wait-after-text') { const onClosed = captures.at(-1).body.messages.map(message => closureObservers.get(message.content)).find(Boolean) || (() => {}); res.on('close', onClosed); res.write(mode === 'wait' ? ': waiting\n\n' : 'data: {"choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]}\n\n'); return; }
@@ -150,6 +155,7 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
         });
         wireTap = http.createServer(async (req, res) => {
           let raw = ''; for await (const part of req) raw += part;
+          assert.ok(nativeConversationIdentity({}, JSON.parse(raw)), 'actual Claude metadata provides a usable conversation identity');
           cliTransport.push({ path: req.url, declared: req.headers['content-length'], bytes: Buffer.byteLength(raw) });
           try { const messages = JSON.parse(raw).messages || []; cliRoles.push(messages.map(message => ({ role: message.role, keys: Object.keys(message) }))); cliSystems.push(...messages.filter(message => message.role === 'system').map(message => typeof message.content === 'string' ? message.content : message.content.map(part => part.text || '').join(''))); } catch {}
           const upstream = http.request({ hostname: '127.0.0.1', port: gatewayPort, path: req.url, method: req.method, headers: req.headers, agent: false }, response => { Object.assign(cliTransport.at(-1), { status: response.statusCode, contentType: response.headers['content-type'], length: response.headers['content-length'] }); if (response.statusCode >= 400) response.on('data', value => { cliErrors.push(String(value)); }); res.writeHead(response.statusCode, response.headers); response.pipe(res); });
@@ -199,11 +205,29 @@ with LiveGuard(sys.argv[2],'native-cli-fixture',5,40960) as guard:
         assert.ok(captures.filter(capture => capture.body.messages.some(message => JSON.stringify(message.content).includes('fixture'))).some(capture => capture.body.max_tokens === 8192));
       } finally { if (relay && relay.exitCode === null && relay.signalCode === null) { relay.stdin.end(); relay.kill('SIGKILL'); } if (wireTap) { wireTap.closeAllConnections(); await new Promise(resolve => wireTap.close(resolve)); } gateway.kill('SIGKILL'); await new Promise(resolve => { if (gateway.exitCode !== null || gateway.signalCode !== null) resolve(); else gateway.once('exit', resolve); }); }
     });
-    mode = 'quota'; response = await call();
+    for (const rejection of [401, 403, 429, 500]) {
+      mode = 'reject-' + rejection;
+      const before = captures.length;
+      const rejected = await call();
+      assert.equal(rejected.status, rejection);
+      await rejected.text();
+      assert.equal(captures.length, before + 1, 'native raw stream sends exactly one provider attempt on ' + rejection);
+    }
+    for (const failed of ['disconnect-before-headers', 'redirect', 'malformed-sse']) {
+      mode = failed;
+      const before = captures.length;
+      const rejected = await call();
+      assert.ok(rejected.status >= 300, failed + ' is not a successful turn');
+      await rejected.text();
+      assert.equal(captures.length, before + 1, failed + ' must not retry or follow redirect');
+    }
+    mode = 'quota'; const quotaBefore = captures.length; response = await call();
     assert.equal(response.status, 429, await response.clone().text());
     assert.doesNotMatch(await response.text(), /PRIVATE_UPSTREAM_BODY/);
-    mode = 'truncated'; response = await call({ stream: true });
+    assert.equal(captures.length, quotaBefore + 1);
+    mode = 'truncated'; const truncatedBefore = captures.length; response = await call({ stream: true });
     const truncated = await response.text();
+    assert.equal(captures.length, truncatedBefore + 1, 'truncated SSE is not replayed');
     assert.match(truncated, /native_stream_incomplete|native_stream_invalid|native_/);
     assert.doesNotMatch(truncated, /data: \[DONE\]/);
     mode = 'wait';

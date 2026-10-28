@@ -134,3 +134,23 @@ The official control optionally accepts `--bun-transport /absolute/path/to/bun` 
 See [ADVERSARIAL-REVIEW.md](ADVERSARIAL-REVIEW.md) for the measured compatibility scope and remaining live gaps. Independent multi-turn compiler comparison is included in `test:native` when `OPENCODE_REFERENCE_SOURCE` (frozen installed1.18.32 source) and `OPENCODE_REFERENCE_BUN` (1.3.14) are supplied; hashes/version are checked against `reference-source.json`. The32 cases cover all four free models and require exact structural body equality. They do not establish full CLI/session/header/TLS parity. Live scripts now require an explicit `--not-before`; no implicit00:01 schedule remains.
 
 The second review expands the independent differential test to **80 cases**, including system chronology, multipart messages and empty turns. The prepared AI compiler has a bridge-only `legacyMessageStructure` option; normal upstream defaults remain unchanged (101 upstream protocol tests pass). Preparation also generates `packages/sdk/src/tokligence-overlay.json`: copy all nine listed source files and that manifest as a bundle. The worker verifies them before creating its host and exposes the digest in health/headers, preventing partial deployments from silently changing requests.
+
+## Reviewed single-request admission
+
+Native requests now require an explicit stable conversation identity: `x-session-id`, `session-id`, `session_id`, `x-claude-code-session-id`, or Claude `metadata.user_id.session_id` (object or JSON string). Supplied identities must agree. Missing/conflicting identities fail locally; request IDs, task IDs, prompt cache keys and the legacy principal-wide default are not native conversation identities. The gateway hashes identity with the authenticated principal; the worker additionally scopes by model. Use a new conversation ID for a fork. Same-ID continuations replay caller-owned complete history; cancellation does not roll back caller-executed tools. Idle TTL/LRU eviction removes the real local native session, not an invented remote close handshake.
+
+The final model HTTP middleware preserves native fetch, headers, bodies, hooks and timeout settings while explicitly refusing redirects and allowing at most one physical fetch dispatch per completion. This intentionally differs from automatic redirect behavior in the default runtime. It prevents hidden redirect traffic, not provider-side quotas.
+
+Live official controls require `--plan`. The prepared plan pins evidence and code hashes, the worker overlay, one stable run ID and an aggregate one-request/1024-output window. Replayed IDs, changed window limits, stale evidence, active probe owners, unhealthy/wrong service owners, missing worker flock, wrong auth mode, active cooldowns or early time refuse dispatch. A check-only command does not reserve the ID, stop services, or send inference:
+
+```sh
+python3 /home/agent/tokligence-staging/gateway/native/opencode/official-public-probe.py \
+  --run-id official-glm-control-20261029 \
+  --not-before 2026-10-29T01:34:00+00:00 \
+  --plan /home/agent/tokligence-staging/gateway/native/opencode/staging-run-plan.json \
+  --bun-transport /home/agent/tokligence-staging/runtime/bun --check-only
+```
+
+For the eligible scheduled control, replace `--check-only` with `--pause-staging`. The timer disables itself first. Success does not authorize another request in this window. Stop on rejection or uncertain delivery; no fallback/retry/account/IP rotation. The aggregate cap applies to controls admitted with this plan, not arbitrary gateway traffic; multi-run native matrix automation remains prohibited until it uses an equivalent shared admission budget.
+
+`capture-official-cli.py --lifecycle` runs the actual compiled CLI with scoped Read permission in an OS network namespace. It captures parallel results, actual reasoning replay, process restart/resume, graceful cancellation/socket closure and resume afterward. Five actual CLI request bodies are replayed through the native compiler and compared exactly, in addition to the80 existing compiler vectors. It verifies stable session headers and classifies the current version-specific header names. Native additionally has tracing/session-affinity headers;1.18 has its own per-message request header. These legitimate differences remain visible, not spoofed. This is strong coverage of the declared synthetic lifecycle, not full live auth/TLS/process equivalence.

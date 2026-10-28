@@ -3,7 +3,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { writeFile, readlink } from 'node:fs/promises';
+import { writeFile, readlink, readFile } from 'node:fs/promises';
 import { diffRequestJSON } from '/request-diff.mjs';
 assert.equal(process.env.OPENCODE_PARITY_FIXTURE, '1', 'launch only through the isolated parity supervisor');
 assert.notEqual(await readlink('/proc/self/ns/net'), process.env.OPENCODE_PARITY_PARENT_NS, 'network namespace must differ from parent');
@@ -14,9 +14,11 @@ const blocked = await new Promise(resolve => {
 });
 assert.equal(blocked, true, 'external networking must be blocked');
 const captures = [];
+const captureHeaders = [];
 const server = http.createServer(async (req, res) => {
   let raw = ''; for await (const chunk of req) raw += chunk;
   captures.push(JSON.parse(raw));
+  captureHeaders.push(Object.fromEntries(Object.entries(req.headers).filter(([name]) => !["authorization", "cookie"].includes(name))));
   res.writeHead(200, { 'content-type': 'text/event-stream' });
   res.end('data: {"id":"fixture","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":null}]}\n\ndata: {"id":"fixture","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
 });
@@ -74,7 +76,27 @@ try {
     const diff = diffRequestJSON(reference, native);
     differences.push({ model, vector: name, differences: diff });
   }
-  await writeFile('/work/parity.json', JSON.stringify({ external_network_blocked: blocked, scope: 'reference1.18 provider transform and SDK compiler versus native2.1 bridge compiler; not full CLI/TLS/auth parity', cases: differences }, null, 2));
+  const officialCases = [];
+  let officialSessionStable = false;
+  let officialRequests;
+  try { officialRequests = JSON.parse(await readFile('/official-requests.json', 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (officialRequests) {
+    const sessionIDs = [];
+    for (const [index, official] of officialRequests.entries()) {
+      const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${env.OPENCODE_NATIVE_KEY}`, 'x-opencode-bridge-session': 'official-persisted-conversation', 'content-type': 'application/json' }, body: JSON.stringify(official.body) });
+      assert.equal(response.status, 200, await response.clone().text()); await response.text();
+      sessionIDs.push(response.headers.get('x-opencode-native-session'));
+      const nativeHeaders = captureHeaders.at(-1);
+      assert.equal(nativeHeaders['x-opencode-client'], official.headers['x-opencode-client']);
+      assert.equal(nativeHeaders['content-type'], official.headers['content-type']);
+      assert.deepEqual(Object.keys(official.headers).filter(name => !(name in nativeHeaders)).sort(), ['x-opencode-request']);
+      assert.deepEqual(Object.keys(nativeHeaders).filter(name => !(name in official.headers)).sort(), ['b3', 'traceparent', 'x-opencode-session-id', 'x-session-affinity', 'x-session-id']);
+
+      officialCases.push({ turn: index, differences: diffRequestJSON(official.body, captures.at(-1)), official_header_names: Object.keys(official.headers).sort(), native_header_names: Object.keys(captureHeaders.at(-1)).sort() });
+    }
+    officialSessionStable = Boolean(sessionIDs[0]) && new Set(sessionIDs).size === 1;
+  }
+  await writeFile('/work/parity.json', JSON.stringify({ external_network_blocked: blocked, scope: 'reference1.18 provider transform and SDK compiler versus native2.1 bridge compiler; not full CLI/TLS/auth parity', cases: differences, official_cases: officialCases, official_session_stable: officialSessionStable }, null, 2));
   console.log(JSON.stringify({ cases: differences.length, differences: differences.filter(item => item.differences.length).map(item => ({ model: item.model, vector: item.vector, paths: item.differences.map(diff => diff.path) })) }));
 } finally {
   worker.kill('SIGTERM'); await workerExit;

@@ -14,11 +14,12 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--binary', required=True, help='Official Linux OpenCode executable')
 parser.add_argument('--bun-transport', help='Exercise guarded Bun onward transport in the blocked network namespace')
 parser.add_argument('--output', required=True, help='New or empty directory for private artifacts')
+parser.add_argument('--lifecycle', action='store_true', help='Capture actual persisted tool/reasoning/resume/cancellation lifecycle')
 parser.add_argument('--fixture', default=str(pathlib.Path(__file__).with_name('offline-cli-fixture.py')))
 parser.add_argument('--model', default='glm-5.3-flash-free', choices=list(json.loads((helpers / 'official-models.json').read_text())['opencode']['models']))
 args = parser.parse_args()
 binary = pathlib.Path(args.binary).resolve(strict=True)
-fixture = pathlib.Path(args.fixture).resolve(strict=True)
+fixture = pathlib.Path(helpers / 'offline-session-fixture.py' if args.lifecycle else args.fixture).resolve(strict=True)
 output = pathlib.Path(args.output).resolve()
 if not binary.is_file() or not os.access(binary, os.X_OK):
     parser.error('binary must be an executable file')
@@ -63,5 +64,5 @@ if code:
     raise SystemExit(code)
 summary = json.loads((output / 'summary.json').read_text())
 if not (summary['external_network_blocked'] and summary['marker_received'] and summary['public_auth_only']
-        and summary['exit_code'] == 0 and summary['requests'] == 1):
+        and summary['exit_code'] == 0 and summary['requests'] == (5 if args.lifecycle else 1)):
     raise SystemExit(1)

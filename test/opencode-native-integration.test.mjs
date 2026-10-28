@@ -30,9 +30,21 @@ test('gateway exposes the native lane explicitly and translates caller-owned too
       gateway.once('exit', code => { clearTimeout(timer); reject(new Error(`Gateway exited ${code}: ${logs}`)); });
       gateway.stdout.on('data', value => { const match = String(value).match(/tgw-proxy :(\d+)/); if (match) { clearTimeout(timer); resolve(match[1]); } });
     });
-    const send = (body) => fetch(`http://127.0.0.1:${port}/v1/messages`, { method: 'POST', headers: { authorization: 'Bearer sk-ant-fixture-public', 'content-type': 'application/json', 'x-session-id': 'caller-session' }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
+    const send = (body, identity = { 'x-session-id': 'caller-session' }) => fetch(`http://127.0.0.1:${port}/v1/messages`, { method: 'POST', headers: { authorization: 'Bearer sk-ant-fixture-public', 'content-type': 'application/json', ...identity }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
     const body = { model: 'opencode-native/beam-free', max_tokens: 1000, system: '  Exact caller system\n', messages: [{ role: 'user', content: 'read the file' }], tools: [{ name: 'read_file', description: 'Owned by caller', input_schema: { type: 'object', properties: { path: { type: 'string' } } } }] };
     body.tool_choice = { type: 'any', disable_parallel_tool_use: true };
+    for (const identity of [{}, { 'x-client-request-id': 'not-a-session' }, { 'x-session-id': 'one', 'session-id': 'two' }]) {
+      const rejected = await send(body, identity);
+      assert.equal(rejected.status, 400);
+      assert.equal(requests.length, 0, 'invalid identity never reaches worker');
+    }
+    await (await send(body, { 'x-session-id': 'independent-one' })).text();
+    await (await send(body, { 'x-session-id': 'independent-two' })).text();
+    assert.notEqual(requests[0].headers['x-opencode-bridge-session'], requests[1].headers['x-opencode-bridge-session']);
+    await (await send({ ...body, metadata: { user_id: JSON.stringify({ session_id: 'independent-one' }) } }, {})).text();
+    assert.equal(requests[0].headers['x-opencode-bridge-session'], requests[2].headers['x-opencode-bridge-session']);
+    requests.length = 0;
+
     let response = await send(body);
     assert.equal(response.status, 200, await response.clone().text());
     assert.equal(response.headers.get('x-opencode-native-session'), 'ses_fixture');
@@ -64,9 +76,18 @@ test('gateway exposes the native lane explicitly and translates caller-owned too
     const invalidSystem = await send({ ...body, system: [{ type: 'document', source: {} }] });
     assert.equal(invalidSystem.status, 400);
     assert.equal(requests.length, beforeRejected);
+    for (const rejection of [401, 403, 500]) {
+      status = rejection;
+      const before = requests.length;
+      const rejected = await send(body);
+      await rejected.text();
+      assert.equal(requests.length, before + 1, 'gateway does not retry or fallback on ' + rejection);
+    }
+    const beforeQuota = requests.length;
     status = 429; response = await send(body);
     assert.equal(response.status, 429); assert.equal(response.headers.get('retry-after'), '60');
     assert.equal((await response.json()).error.upstream_request_id, 'fixture-request');
+    assert.equal(requests.length, beforeQuota + 1, 'gateway does not retry or fallback on quota');
     status = 200; emptyLength = true;
     response = await send(body);
     assert.equal(response.status, 200, await response.clone().text());

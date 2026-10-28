@@ -62,6 +62,20 @@ class SafetyTests(unittest.TestCase):
             response.read()
             return response.status
 
+    def test_window_budget_survives_new_run_ids_and_cannot_be_increased(self):
+        window = {'id': 'synthetic-window', 'request_budget': 1, 'output_budget': 1024, 'allowed_runs': ['first', 'second']}
+        with LiveGuard(self.root, 'first', 1, 1024, window=window) as guard:
+            guard.reserve(1024)
+        with LiveGuard(self.root, 'second', 1, 1024, window=window) as guard:
+            with self.assertRaisesRegex(ProbeStopped, 'Aggregate'):
+                guard.reserve(1)
+        with self.assertRaisesRegex(ProbeStopped, 'cannot be changed'):
+            with LiveGuard(self.root, 'third', 2, 2048, window={**window, 'request_budget': 2, 'allowed_runs': ['first', 'second', 'third']}):
+                pass
+        with self.assertRaisesRegex(ProbeStopped, 'unselected'):
+            with LiveGuard(self.root, 'unlisted', 1, 1, window=window):
+                pass
+
     def test_loopback_gateway_ignores_proxy_environment(self):
         hits = []
 
