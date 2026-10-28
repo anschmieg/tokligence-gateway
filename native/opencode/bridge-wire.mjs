@@ -30,15 +30,18 @@ export function assertNativeCredentialCount(mode, count) {
 
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const fail = (message) => { throw new BridgeInputError(message); };
+// Match invalid-surrogate normalization observed in the working Bun1.3 JSON
+// input path. Valid Unicode, including surrogate pairs, is unchanged.
+const cleanText = value => value.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
 const textParts = (content) => {
   if (content == null) return [];
-  if (typeof content === "string") return [{ type: "text", text: content }];
+  if (typeof content === "string") return [{ type: "text", text: cleanText(content) }];
   if (!Array.isArray(content)) return fail("Message content must be text or an array of text parts");
   return content.map((part) => {
     if (!object(part) || part.type !== "text" || typeof part.text !== "string") {
       return fail("The experimental native bridge currently supports text and function tools only");
     }
-    return { type: "text", text: part.text };
+    return { type: "text", text: cleanText(part.text) };
   });
 };
 
@@ -96,6 +99,7 @@ export function decodeChatRequest(body) {
   const results = new Set();
   const pending = new Set();
   const system = [];
+  const leadingSystem = [];
   let conversationStarted = false;
   const messages = body.messages.map((message) => {
     if (!object(message) || !["system", "user", "assistant", "tool"].includes(message.role)) return fail("Unsupported message role");
@@ -113,13 +117,14 @@ export function decodeChatRequest(body) {
     if (message.role === "system") {
       if (conversationStarted) return { role: "system", content };
       system.push(...content);
+      leadingSystem.push({ role: "system", content });
       return null;
     }
     conversationStarted = true;
     const reasoning = message.reasoning_content ?? message.reasoning ?? undefined;
     if (reasoning !== undefined) {
       if (message.role !== "assistant" || typeof reasoning !== "string") return fail("reasoning_content is supported only as assistant text");
-      content.unshift({ type: "reasoning", text: reasoning });
+      content.unshift({ type: "reasoning", text: cleanText(reasoning) });
     }
     if (message.tool_calls !== undefined) {
       if (message.role !== "assistant" || !Array.isArray(message.tool_calls)) return fail("tool_calls must belong to an assistant message");
@@ -160,7 +165,8 @@ export function decodeChatRequest(body) {
     if (fn.strict === true) return fail("Strict tool schemas are not supported by the pinned native chat compiler");
     if (!object(fn.parameters)) return fail("Function tools require a JSON schema object");
     names.add(fn.name);
-    return { type: "function", name: fn.name, description: fn.description || "", inputSchema: fn.parameters };
+    return { type: "function", name: fn.name, description: fn.description || "", inputSchema: fn.parameters,
+      ...(fn.description === undefined ? { metadata: { tokligenceOmitDescription: true } } : {}) };
   });
   let toolChoice;
   if (body.tool_choice !== undefined) {
@@ -194,7 +200,7 @@ export function decodeChatRequest(body) {
     if (!["none", "minimal", "low", "medium", "high", "xhigh"].includes(body.reasoning_effort)) return fail("Unsupported reasoning_effort");
     options.reasoningEffort = body.reasoning_effort;
   }
-  return { model: body.model, stream: body.stream === true, includeUsage: body.stream_options?.include_usage === true, system, messages, tools, toolChoice, options };
+  return { model: body.model, stream: body.stream === true, includeUsage: body.stream_options?.include_usage === true, system, leadingSystem, messages, tools, toolChoice, options };
 }
 
 export function safeNativeError(error) {

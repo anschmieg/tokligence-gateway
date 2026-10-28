@@ -35,3 +35,20 @@ No inference was sent during this review. The next live comparison remains the a
 ## Final verification and staging
 
 Full suite347 passed/5explicit runtime skips. Native6 passed/0skipped, including the32-case comparison and actualClaudeCode/compiledOpenCode fixtures. SDK typecheck1292 files clean; lint, Python compilation and helper syntax clean. Staging28 targeted synthetic/auth/wire/control checks passed after exact3a291f8 code+preparedworker/wire deployment. Both health endpoints200, exclusive state flock held, defaultOAuth preserved, production secondary path absent. Actualcatalog reasoning_field is reasoning_content for allfour models, matching the tested metadata. Durable live ledger still contains only the prior official-glm-control-20261028; no inference during review.
+
+## Second pass — message structure and deployment integrity
+
+Expanded the same pinned differential suite from32 to80 exact structural cases. New coverage: consecutive initial system messages, inline system roles, multipart user/assistant text, blank/null/whitespace assistant turns, omitted tool descriptions, completed tool history with no active tools, required/none tool selection, and invalid Unicode surrogates.
+
+New findings fixed:
+
+- The 2.1 compiler merged initial system messages and wrapped chronological system instructions into user content. The bridge now retains leading system-message boundaries and opts into a small prepared-source compatibility extension that emits the original system roles without wrappers.
+- Multipart user content was flattened, and blank assistant turns were dropped. The same bridge-only extension preserves these structures. Default compiler behavior is unchanged when the option is absent;101 upstream OpenAI/OpenAI-compatible tests pass in an OS network namespace.
+- Omitted tool descriptions became empty strings, and inactive tools became an extra empty array on history replay. Preserve omission through a boolean tool metadata marker and the opt-in compiler option. Explicit descriptions remain intact.
+- The original structural comparator could consider an empty array and empty object equivalent. A separately tested JSON comparator now checks container type, field presence, array length and escaped JSON paths.
+- Bun1.3.14's JSON/input path normalized invalid surrogate escapes differently from the newer worker. Text normalization now matches the observed replacement-character behavior; valid Unicode is unchanged.
+- Copying a new worker without its prepared compiler could silently lose these fixes. A fixed nine-file SHA256 manifest is generated at preparation and verified before host creation. A stale/partial bundle fails startup; health and response headers expose its nonsecret digest. Tests reject both stale compiler files and arbitrary manifest paths. Preparation is idempotent and verifies every patch seam.
+
+Verification: full349pass/5explicitruntime skips, native6pass/0skip including80 differential cases and actualClaude/compiledCLI fixtures, SDK1293files clean, and101 upstream protocol tests pass. No provider inference during this pass. Runtime deployment must include the complete generated manifest bundle, particularly packages/ai/src/schema/options.ts and packages/ai/src/protocols/openai-chat.ts, not just SDK worker files.
+
+User additionally reported a manual-TUI free-message limit resetting1:31AM October29. The inspected 1.18 profiles have no new persisted failure. The exact text is present in the newer2.x TUI, which formats reset using local machine time. Machine/profile/timezone are pending clarification; do not assume1:31UTC or a shared quota bucket. The01:03 live command is gated until the later reset is confirmed, then must retain at least an hour of margin. This banner is quota evidence on the manual path, separate from the original missing-reasoning400, not a proven explanation of earlier gateway429s.

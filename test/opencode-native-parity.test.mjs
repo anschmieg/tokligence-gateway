@@ -30,6 +30,7 @@ test('independent pinned reference and native compilers compare multi-turn reque
     '--ro-bind', process.execPath, '/node',
     '--ro-bind', path.resolve('native/opencode/testing/native-parity.mjs'), '/fixture.mjs',
     '--ro-bind', path.resolve('native/opencode/testing/reference-request.ts'), '/reference-runner.ts',
+    '--ro-bind', path.resolve('native/opencode/request-diff.mjs'), '/request-diff.mjs',
     '--bind', output, '/work', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--chdir', '/work', '--clearenv',
     '--setenv', 'OPENCODE_PARITY_FIXTURE', '1', '--setenv', 'OPENCODE_PARITY_PARENT_NS', await readlink('/proc/self/ns/net'), '--', '/node', '/fixture.mjs');
   const child = spawn('bwrap', args, { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
@@ -40,7 +41,7 @@ test('independent pinned reference and native compilers compare multi-turn reque
     assert.equal(code, 0, stderr + stdout);
     const report = JSON.parse(await readFile(path.join(output, 'parity.json')));
     assert.equal(report.external_network_blocked, true);
-    assert.equal(report.cases.length, 32);
+    assert.equal(report.cases.length, 80);
     // Keep evidence for review rather than treating serialization differences as success.
     const unexpected = report.cases.filter(item => item.differences.length);
     assert.deepEqual(unexpected, [], 'unapproved reference/native request differences; report at ' + output);

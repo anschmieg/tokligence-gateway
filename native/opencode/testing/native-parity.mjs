@@ -4,6 +4,7 @@ import net from 'node:net';
 import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { writeFile, readlink } from 'node:fs/promises';
+import { diffRequestJSON } from '/request-diff.mjs';
 assert.equal(process.env.OPENCODE_PARITY_FIXTURE, '1', 'launch only through the isolated parity supervisor');
 assert.notEqual(await readlink('/proc/self/ns/net'), process.env.OPENCODE_PARITY_PARENT_NS, 'network namespace must differ from parent');
 const blocked = await new Promise(resolve => {
@@ -51,6 +52,18 @@ try {
     { name: 'tool-error', tools, messages: [{ role: 'user', content: 'read' }, { role: 'assistant', content: null, reasoning_content: 'use tool', tool_calls: [call] }, { role: 'tool', tool_call_id: call.id, content: 'Not found', is_error: true }] },
     { name: 'parallel-history', tools, messages: [{ role: 'user', content: 'read both' }, { role: 'assistant', content: null, reasoning_content: '', tool_calls: [call, { ...call, id: 'call_other' }] }, { role: 'tool', tool_call_id: 'call_other', content: 'second' }, { role: 'tool', tool_call_id: call.id, content: 'first' }] },
     { name: 'named-tool', tools, tool_choice: { type: 'function', function: { name: 'Read' } }, messages: [{ role: 'user', content: 'read' }] },
+    { name: 'system-sequence', messages: [{ role: 'system', content: 'first ' }, { role: 'system', content: ' second' }, { role: 'user', content: 'hello' }] },
+    { name: 'inline-system', messages: [{ role: 'user', content: 'hello' }, { role: 'system', content: 'inline instructions' }, { role: 'assistant', content: 'answer' }, { role: 'user', content: 'continue' }] },
+    { name: 'multipart-user', messages: [{ role: 'user', content: [{ type: 'text', text: 'first ' }, { type: 'text', text: 'second' }] }] },
+    { name: 'multipart-assistant', messages: [{ role: 'user', content: 'hello' }, { role: 'assistant', content: [{ type: 'text', text: 'first ' }, { type: 'text', text: 'second' }] }, { role: 'user', content: 'continue' }] },
+    { name: 'blank-assistant', messages: [{ role: 'user', content: 'hello' }, { role: 'assistant', content: '' }, { role: 'user', content: 'continue' }] },
+    { name: 'null-assistant', messages: [{ role: 'user', content: 'hello' }, { role: 'assistant', content: null }, { role: 'user', content: 'continue' }] },
+    { name: 'whitespace-assistant', messages: [{ role: 'user', content: 'hello' }, { role: 'assistant', content: ' \n ' }, { role: 'user', content: 'continue' }] },
+    { name: 'unnamed-description', tools: tools.map(t => ({ type: t.type, function: { name: t.function.name, parameters: t.function.parameters } })), messages: [{ role: 'user', content: 'read' }] },
+    { name: 'tools-disabled-history', messages: [{ role: 'user', content: 'read' }, { role: 'assistant', content: null, reasoning_content: 'use tool', tool_calls: [call] }, { role: 'tool', tool_call_id: call.id, content: 'result' }] },
+    { name: 'required-tool', tools, tool_choice: 'required', messages: [{ role: 'user', content: 'read' }] },
+    { name: 'no-tool-choice', tools, tool_choice: 'none', messages: [{ role: 'user', content: 'hello' }] },
+    { name: 'unicode-surrogates', messages: [{ role: 'system', content: 'system\ud800' }, { role: 'user', content: 'hello\udfff 🌍' }, { role: 'assistant', content: 'answer\ud800', reasoning_content: 'thought\udfff' }, { role: 'user', content: 'continue' }] },
   ];
   for (const model of models) for (const { name, ...vector } of vectors) {
     const body = { model, max_tokens: 1024, ...vector };
@@ -58,14 +71,7 @@ try {
     const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${env.OPENCODE_NATIVE_KEY}`, 'x-opencode-bridge-session': 'parity-' + model + '-' + name, 'content-type': 'application/json' }, body: JSON.stringify(body) });
     assert.equal(response.status, 200, await response.clone().text()); await response.text();
     const native = captures.at(-1);
-    const diff = [];
-    const compare = (a, b, path = '') => {
-      if (JSON.stringify(a) === JSON.stringify(b)) return;
-      if (a && b && typeof a === 'object' && typeof b === 'object') {
-        for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) compare(a[key], b[key], path + '/' + key);
-      } else diff.push({ path, reference: a, native: b });
-    };
-    compare(reference, native);
+    const diff = diffRequestJSON(reference, native);
     differences.push({ model, vector: name, differences: diff });
   }
   await writeFile('/work/parity.json', JSON.stringify({ external_network_blocked: blocked, scope: 'reference1.18 provider transform and SDK compiler versus native2.1 bridge compiler; not full CLI/TLS/auth parity', cases: differences }, null, 2));

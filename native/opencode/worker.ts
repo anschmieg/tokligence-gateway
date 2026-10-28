@@ -4,7 +4,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { createHash, timingSafeEqual, randomUUID } from "node:crypto"
 import { Effect, Stream, Layer, Schema, Cause, Exit } from "effect"
-import { LLMClient, LanguageModel, Message, SystemPart, ToolDefinition, type ToolChoice } from "@opencode/ai"
+import { LLMClient, LanguageModel, Message, ToolDefinition, type ToolChoice } from "@opencode/ai"
 import { EmbeddedHost } from "./internal/host"
 import { LocationServiceMap } from "@opencode/core/location-services"
 import { Location } from "@opencode/core/location"
@@ -27,10 +27,13 @@ import { BridgeInputError, readChatBody, decodeChatRequest, createChatEncoder, s
 import source from "./tokligence-source.json"
 import { acquireStateLock, createSessionRegistry, claimAuthState } from "./tokligence-state-store.mjs"
 import { scopedHttp } from "./tokligence-scoped-http"
+import overlay from "./tokligence-overlay.json"
+import { verifySourceOverlay } from "./tokligence-source-overlay.mjs"
 
 function errorCode(error: unknown) { return error && typeof error === "object" && "code" in error ? error.code : undefined }
 type BridgeInput = {
   model: string; stream: boolean; includeUsage: boolean; system: Array<{ text: string }>
+  leadingSystem: Array<ConstructorParameters<typeof Message>[0]>
   messages: Array<ConstructorParameters<typeof Message>[0]>
   tools: Array<ToolDefinition.Input>; toolChoice?: ToolChoice.Input; options: Readonly<Record<string, unknown>>
 }
@@ -47,6 +50,7 @@ const authMode = nativeAuthMode(process.env)
 const providerID = fixture ? "fixture" : "opencode"
 const allow = new Set((process.env.OPENCODE_NATIVE_MODELS || "").split(",").map((value) => value.trim()).filter(Boolean))
 if (!allow.size) throw new Error("OPENCODE_NATIVE_MODELS must explicitly allow model IDs")
+await verifySourceOverlay(path.resolve(import.meta.dir, "../../.."), overlay)
 await fs.mkdir(state, { recursive: true, mode: 0o700 })
 const lock = await acquireStateLock(path.join(state, "worker.lock"))
 await claimAuthState(state, authMode)
@@ -134,6 +138,7 @@ function authorized(request: Request) {
 }
 const headers = (extra: Record<string, string> = {}) => ({
   "x-opencode-native-version": source.version, "x-opencode-native-commit": source.commit, ...extra,
+  "x-opencode-native-overlay": overlay.digest,
 })
 function errorResponse(error: unknown) {
   const result = safeNativeError(error)
@@ -198,9 +203,9 @@ async function inference(request: Request) {
           session, agent: Agent.ID.make("build"),
           // Match the working 1.18 OpenAI-compatible tool encoding through
           // native model compatibility, without rewriting serialized HTTP.
-          model: { ...model, model: LanguageModel.update(model.model, { compatibility: { ...model.model.compatibility, supportsStrictMode: false } }) },
-          system: input.system.map((part) => SystemPart.make(part.text)),
-          messages: input.messages.map((message) => Message.make(message)),
+          model: { ...model, model: LanguageModel.update(model.model, { compatibility: { ...model.model.compatibility, supportsStrictMode: false, legacyMessageStructure: true } }) },
+          system: [],
+          messages: [...input.leadingSystem, ...input.messages].map((message) => Message.make(message)),
           tools: { definitions: input.tools.map((tool) => ToolDefinition.make(tool)), execute: () => Effect.die("External tools must never execute in the native worker") },
           toolChoice: input.toolChoice, options: input.options,
         })
@@ -281,7 +286,7 @@ const server = Bun.serve({
   idleTimeout: 0,
   async fetch(request) {
     const url = new URL(request.url)
-    if (url.pathname === "/health") { discardBody(request); return Response.json({ status: "ok", worker: "opencode-native", version: source.version, commit: source.commit, fixture: Boolean(fixture) }) }
+    if (url.pathname === "/health") { discardBody(request); return Response.json({ status: "ok", worker: "opencode-native", version: source.version, commit: source.commit, overlay: overlay.digest, fixture: Boolean(fixture) }) }
     if (!authorized(request)) { discardBody(request); return Response.json({ error: { code: "unauthorized", message: "Invalid native worker authorization" } }, { status: 401 }) }
     if (url.pathname === "/v1/diagnostics/models" && request.method === "GET") {
       discardBody(request)

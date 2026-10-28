@@ -1,5 +1,13 @@
 # OpenCode Zen completion checkpoint
 
+## Latest review / user quota observation — October28 11:27UTC
+
+Second adversarial pass expands differential coverage80 exact bodies / four models. See ADVERSARIAL-REVIEW.md second-pass findings. Fixed system-message merging and role/wrapper conversion, multipart flattening, blank-turn omission, absent-description and empty-tools insertion, JSON comparator container mismatch, and invalid-surrogate normalization. Implemented bridge-only legacyMessageStructure in pinned AI compiler via idempotent verified prepare seams; no request/header identity spoofing. Upstream default paths unchanged and101 upstream protocol tests pass network-isolated. Full349pass/5explicitruntime skips; native6pass/0skip (80cases + actualClaude/officialCLI); SDK1293clean. Manifest guards nine prepared source files before host creation; health/headers include digest. MUST deploy all listed files including AI schema/options + protocols/openai-chat, plus generated SDK overlaymanifest; worker-only deployment now fails closed.
+
+User reports first manualTUI free-message limit: reset1:31AM Oct29. Exactwording matches newer2.x TUI source; freeLimitReset formats base+retryAfterMs in LOCAL timezone. Neither inspected standard profile has a new persisted failure (checked legacy and v2 tables). Machine/profile/timezone/session pending async question. This is a manual quota observation, not confirmed rawHTTP429 or sharedbucket/UTC reset. Keep all providertraffic stopped. Scheduled01:03 command now GATED: firstresolve reply and use >=1hour margin after LATER of confirmedUIreset and storedproviderreset. If UTC1:31, use02:34UTC, not01:03; do not assume timezone or invent/resetledger headers. Ordinary quota more plausible now, but originalmissingreasoning400 and historical429 causes remain distinct/unproven.
+
+Offline review continued through interruption; restarted interrupted suites and obtained complete passing results. No new live calls; preserve secondary staging-only ownership and production. Deploy and verify exact tested manifest bundle plus health/lock/ownership, record evidence after completion.
+
 ## Adversarial review — October28 request compatibility
 
 See ADVERSARIAL-REVIEW.md for findings, fixes, limits and reproduction. User explicitly permits sparse officialCLI data collection; preserve the already agreed01:03UTC comparison and durable cooldown, not repeated probes now. No live inference made in this review.
