@@ -1,5 +1,9 @@
 # OpenCode Zen completion checkpoint
 
+## Plan adversarial review — latest safety gates
+
+Read **LIVE-ACCEPTANCE-PLAN.md** before any live continuation. Earlier automatic control→native→matrix expansion is superseded. Next scheduled window allows at most ONE official GLM request/max1024, and ONLY after the explicit offline session/header/actual-outbound-attempt gates pass. The01:34UTC time is earliest eligibility, not unconditional dispatch. Native gateway anonymous/default affinity can merge unrelated conversations; native-specific conversation identity handling and regressions are required before native live acceptance. Existing80 compiler cases do not prove full official persisted-session lifecycle. Per-run budgets are NOT aggregate cross-run limits; do not expand using fresh IDs. No inference during this plan review; prior passing tests are not new gate evidence. First disable the timer on trigger, then close useful offline gaps; if gates remain unresolved send no provider request. Preserve production/auth ownership and all cooldowns.
+
 ## Confirmed Apollo TUI reset — October28 user clarification
 
 User confirms the quota banner came from **Apollo.local (Mac)**, session `ses_e83992e9fffeTSqEe47Tds5oX0`, timezone **CET / winter time (UTC+1)**. Displayed October29 01:31 CET means **2026-10-29 00:31 UTC**. This is user-reported UI evidence, not inspected raw HTTP/reset metadata; it does not prove Apollo and staging share a quota bucket. It also does not invalidate the earlier same-VPS manual successes.

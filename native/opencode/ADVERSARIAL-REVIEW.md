@@ -54,3 +54,7 @@ Verification: full349pass/5explicitruntime skips, native6pass/0skip including80 
 User additionally reported a manual-TUI free-message limit resetting1:31AM October29. The inspected 1.18 profiles have no new persisted failure. The exact text is present in the newer2.x TUI, which formats reset using local machine time. Machine/profile/timezone are pending clarification; do not assume1:31UTC or a shared quota bucket. The01:03 live command is gated until the later reset is confirmed, then must retain at least an hour of margin. This banner is quota evidence on the manual path, separate from the original missing-reasoning400, not a proven explanation of earlier gateway429s.
 
 Second-pass deployment:649df97 staged with all nine hashed sources and generatedmanifest, startupdigest d7965c9a38fb544691d1f1b6728ff2bd6aefc25625fa3cd8adbc2ccb8cbd6052 verified. VPS28 targeted checks passed, both services healthy, OSlockheld, productionsecondarypathabsent, and live ledger stillone historicalrun.
+
+## Plan-level follow-up
+
+See LIVE-ACCEPTANCE-PLAN.md for the later adversarial review of rate-limit exposure, full-harness parity and session/tool lifecycle. It supersedes automatic live expansion and stale reset/timezone instructions above. Apollo reset is confirmed00:31UTC; earliest next window01:34UTC, conditional on documented gates. No new runtime fixes or test passes are claimed by this plan review.
