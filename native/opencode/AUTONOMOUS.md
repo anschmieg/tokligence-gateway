@@ -1,5 +1,13 @@
 # OpenCode Zen completion checkpoint
 
+## Same-VPS manual success — October28 09:23:59UTC
+
+User manually ran newly exposed officialCLI1.18.32 as agent uid30033 on fra-agent VPS. Read-only standard-profile DB confirms session ses_e7e2d3017ffeMNL4rtoVtpHCYC: provider opencode, model **big-pickle**, finish stop, no error, input6748/output9/reasoning20 tokens. No message content exposed. Current normal profile: no auth.json, account/control_account both0 rows, no global provider override; catalog API https://opencode.ai/inference/openai/v1. Big Pickle catalog costs input/output/cache0, interleaved reasoning_content. No inference sent during inspection.
+
+This is a materially different model from the rejected official GLM control. Do NOT call this a same-model success/failure comparison, account-wide or blanket VPS-wide block. Model-specific eligibility/quota/routing now deserves priority alongside relay/native-TLS differences. Big Pickle was absent from the four-model test allowlist; do not silently substitute its result for their acceptance. Reported reasoning token count is NOT evidence reasoning_content replay was tested. Session records do not establish remote rate-limit bucket or exact resolvedIP.
+
+Next offline work: add bounded Big Pickle official capture/control support with pinned zero-cost catalog and regressions, preserving no fallback and no traffic while shared cooldown active. Next eligible diagnostic should match successful model/profile/endpoint before drawing transport conclusions; do not repeat unrelated GLM control without a specific justified hypothesis. Preserve01:03 timer as a gated continuation, not permission for current-cooldown inference. No account/IP rotation.
+
 ## Investigation update — manual success versus staging rejection
 
 User requests determining why manual OpenCode succeeds during staging429 periods. Do not treat another later retry as a root-cause investigation. Read-only local SQLite metadata confirms successful manual session ses_e809e5282ffe0QZUd5xwf20Pxi on Hermes, CLI1.18.32, opencode/glm-5.3-flash-free, Oct27 22:01:10UTC, finish stop,12 output tokens. No message text was exposed. Cached catalog API matches the diagnostic catalog https://opencode.ai/inference/openai/v1; global config contains schema only. Earlier inspected account/org/auth sources were empty. These observations do not prove historical DNS/IP/transport equivalence.
