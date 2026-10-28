@@ -1,5 +1,13 @@
 # OpenCode Zen completion checkpoint
 
+## Final prepared-run verification and staging
+
+Functional commit **eb1c7be** pushed and deployed staging with the COMPLETE generated source bundle. New worker overlay **7e123663ec7d56b300918a1cd4fb4962eec8b3e86fa956e2acbff902a503258c**. Final full350pass/5explicitruntime skips; native6pass/0skip, including80compiler vectors plus5actualofficial persisted lifecycle body comparisons, realClaude recovery/reasoning, lifecycle/crash and HTTPscope tests. SDK1293files clean; lint passed. Logs local /tmp/zen-prepared-all-final.log, /tmp/zen-prepared-native-final.log, /tmp/zen-prepared-sdk.log; evidence summary and code hashes in prepared-evidence.json/staging-run-plan.json. No inference sent during preparation.
+
+Owned staging services restarted and healthy. Actual-root --check-only returned ONLY comparison_time_not_reached and provider_cooldown_active: all code/evidence/overlay/ownership/lock checks passed, ledger bytehash unchanged, stable next ID unreserved. VPS4lightweight testgroups passed (identity/integration/guard/officialcontrol, including11Python safety cases and admission regressions). Existingledger stillonehistoricalrun; defaultOAuth restored, productionsecondarypathabsent. No productiondeployment/credentialchanges.
+
+Scheduler remains fixed01:34UTC next **2026-10-29T01:34:00Z**, FIRSTdisable itself. Prompt now uses exact --plan/--check-only invocation before eligible --pause-staging; no automatic secondrequest/matrix, no fifteenminute retries. Only one total1024-output publicGLM control admitted in immutable window. This is a prepared bounded diagnostic, NOT completed liveacceptance or guarantee against429. Multi-run native matrix sharedadmission remains future work after assessing this control.
+
 ## Executable run preparation — supersedes unresolved-gate notes below
 
 Preparation now fixes native conversation identity isolation and adds hash-bound admission plus persistent aggregate window budgets. Actual compiled CLI lifecycle covers scoped parallel Reads, reasoning replay, process resume, graceful cancellation/socket closure and post-cancel resume; five captured bodies compare exactly to native compilation in network-isolated fixtures, alongside80 existing vectors. Known version/tracing/session header differences are classified in README/LIVE-ACCEPTANCE-PLAN, not spoofed. Actual Claude metadata is regression-tested; conflicting/missing identity now fails before worker dispatch.
