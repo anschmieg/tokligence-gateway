@@ -228,6 +228,7 @@ class SafetyTests(unittest.TestCase):
             (b'data: {"type":"message_start"}\n\n', 502),
             (b'data: not-json\n\n', 502),
             (b'data: {"type":"message_stop"}\n\ndata: {"type":"content_block_delta"}\n\n', 502),
+            (b'data: {"type":"error","error":{"type":"rate_limit_error","upstream_status":429,"code":"FreeUsageLimitError"}}\n\n', 429),
         ]
         for index, (payload, expected) in enumerate(variants):
             calls = []
@@ -260,6 +261,9 @@ class SafetyTests(unittest.TestCase):
                             self.assertTrue(guard.blocked)
                             self.assertEqual(self.send(relay), expected)
                     self.assertEqual(calls, [1])
+                    if expected == 429:
+                        self.assertEqual(guard.status, 429)
+                        self.assertIn('cooldown_until', json.loads((self.root / 'live-probe-ledger.json').read_text()))
             finally:
                 server.shutdown(); server.server_close(); thread.join()
 

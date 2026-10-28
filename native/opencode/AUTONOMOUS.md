@@ -1,5 +1,12 @@
 # OpenCode Zen completion checkpoint
 
+## Terminal review staging / embedded quota follow-up
+
+Functional9961178 pushed/deployed with complete overlay e731d845ebb25e2fce15edb3a7b15df73cbd1733bff1b45b21c9152856623ee8; ownedserviceshealthy and40lightweightVPSchecks pass. Actual-root admission refuses ONLY comparison_time_not_reached/provider_cooldown_active; ledger bytehash unchanged, nextIDunreserved, defaultOAuth/flock/prodsecondaryabsence verified. Scheduler keepsfixed01:34UTC Oct29/FIRSTdisable, sameONErequest/1024window.
+
+Final follow-up preserves structured401/403/429 embedded in successful-HTTP SSE/JSON responses, including durable quota cooldown. Added an HTTP200/SSEquota regression; all14Pythoncases (including six stream variants) pass. Full357pass8runtime skips and affected nativeworker+actualClaude2pass; lintpass. Native9pass/SDK1293 evidence still applies to unchanged worker overlay. Logs /tmp/zen-stream-{full-final,claude-final,relay-quota,lint-final}.log. No diagnostic inference/login or production/auth/IP changes. This diagnostic-helper-only follow-up needs no worker restart; final staged archive/admission recorded after deployment.
+
+
 ## Terminal-stream review — latest verified snapshot
 
 Fixed late native stream/finalizer failure releasing terminal tool calls: terminal output now commits only after successful native exit; events after finish fail explicitly. Chat Completions first semantic chunk includes assistant role and opt-in usage has a separate empty-choices final frame. The diagnostic Claude relay now closes its upstream socket on client disconnect and blocks further run traffic; SSE embedded errors, malformed/truncated output and output after completion fail. Relay remains intentionally buffered; local socket closure does not prove immediate remote cancellation. No provider request-body/header identity changed by these caller-facing fixes.

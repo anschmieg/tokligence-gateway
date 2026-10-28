@@ -177,6 +177,21 @@
       "zen-stream-lint.log": "443507d5f6920626d9f180866cf396a11e09a15ae1d35a934a3028ec0afd36c2",
       "zen-stream-relay-final.log": "ae8530fff131ca0442ae8386d02f5753c8d7544f6db2763bd4a67774a3a3cbf8",
       "zen-stream-sdk-final.log": "1f337980019d5554b90894610ca023a6e5c63654a5bc1e815dbb82e16d2d796e"
+    },
+    "embedded_quota_followup": {
+      "created_at": "2026-10-28T19:34:24.513958+00:00",
+      "unit_pass": 357,
+      "unit_runtime_skips": 8,
+      "affected_native_pass": 2,
+      "python_cases": 14,
+      "stream_variants": 6,
+      "lint": "passed",
+      "log_sha256": {
+        "zen-stream-full-final.log": "91334414865496ae3bf23b54cf39992d983a8143428bde58a2dde18a484bf2d2",
+        "zen-stream-claude-final.log": "de0406e98d0ac818dfd3638c4e14cef32cb2a7c4510f85a1cc27cf115ff6e645",
+        "zen-stream-relay-quota.log": "be71e7a7cf78953a402d229f2c3eca747d5577ee652c9f9de958b0ea8b08d352",
+        "zen-stream-lint-final.log": "443507d5f6920626d9f180866cf396a11e09a15ae1d35a934a3028ec0afd36c2"
+      }
     }
   }
 }

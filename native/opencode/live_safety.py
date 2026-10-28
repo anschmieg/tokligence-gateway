@@ -258,6 +258,14 @@ def claude_relay(guard, base_url, model, authorization, timeout):
                 except ProbeStopped:
                     self.reply(502, b'{"error":{"type":"api_error","message":"CLI probe transport failed"}}')
 
+        def reject_embedded_error(self, document):
+            failure = document.get('error', {}) if isinstance(document, dict) else {}
+            if not isinstance(failure, dict): failure = {}
+            status = failure.get('upstream_status')
+            if type(status) is not int or not 400 <= status <= 599:
+                status = 429 if failure.get('type') == 'rate_limit_error' else 401 if failure.get('type') == 'authentication_error' else 502
+            guard.stop('CLI probe contained an embedded response error', status, failure)
+
         def forward(self, body):
             def peer_gone():
                 try:
@@ -329,7 +337,7 @@ def claude_relay(guard, base_url, model, authorization, timeout):
                         try: event = json.loads(data)
                         except ValueError: guard.stop('CLI probe contained malformed stream data', 502)
                         if not isinstance(event, dict) or event.get('type') == 'error' or 'error' in event:
-                            guard.stop('CLI probe contained an embedded stream error', 502)
+                            self.reject_embedded_error(event)
                         if terminal:
                             guard.stop('CLI probe contained output after stream completion', 502)
                         terminal = event.get('type') == 'message_stop'
@@ -338,7 +346,7 @@ def claude_relay(guard, base_url, model, authorization, timeout):
                     try: document = json.loads(raw)
                     except ValueError: guard.stop('CLI probe contained malformed response data', 502)
                     if not isinstance(document, dict) or 'error' in document:
-                        guard.stop('CLI probe contained an embedded response error', 502)
+                        self.reject_embedded_error(document)
                 return status, raw
             except (OSError, http.client.HTTPException):
                 if cancelled.is_set(): guard.stop('CLI client disconnected; no further traffic')
