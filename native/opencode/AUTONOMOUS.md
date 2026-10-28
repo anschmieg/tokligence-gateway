@@ -1,5 +1,9 @@
 # OpenCode Zen completion checkpoint
 
+## Model-admission fixes deployed
+
+Functionalbe629fe pushed/deployed staging with complete overlay **9c551ee37fe2619183d41e4751bc665bfcd6faaeb6bb4d25566faf2be84b1665**. Owned worker/gateway restarted healthy;37targetedVPS wire/state/adapter/safety/control checks pass. Actual-root checkonly refuses ONLY comparison_time_not_reached/provider_cooldown_active; ledger bytehash unchanged and nextstableIDunreserved. Overlay/defaultOAuth/flock/productionsecondaryabsence checked by admission. Scheduler updated for new model-admission behavior and digest; same next01:34UTC Oct29, FIRSTdisable, one scoped publictransport request/max1024 only. No diagnostic inference/device-login probes or production/account/IP changes. Normal native config/catalog/refresh traffic remains outside the inference cap.
+
 ## Model-admission verification complete
 
 Final full354pass/7explicitruntime skips; native8pass/0skip including114APIcases,80+5bodycomparisons, actualClaude/compiledCLI, startup/recovery/lifecycle/cancel regressions. SDK1293clean; lintpass. New real-runtime negatives disabled/cache-priced/non-text/tool-incompatible/invalidtoolchoice/overlimit requests make zero inference calls and leave registry unchanged, including existing model/identity/idleTTL. Plain-text no-tools positive preserves same conversation ID. Evidence/overlay refreshed, stableone-request window/ID/time unchanged. Logs /tmp/zen-model-policy-{full,native,sdk,lint,runtime}.log. No diagnostic inference or login probes; normalstaging backgrounddiscovery/refresh remains possible. Deployment/admission result follows after completion.
