@@ -154,5 +154,29 @@
       "zen-model-policy-lint.log": "443507d5f6920626d9f180866cf396a11e09a15ae1d35a934a3028ec0afd36c2",
       "zen-model-policy-runtime.log": "9c5e2d5456201305f108c81996af9526dbb1f82f870cc2bf9fb6392768527a3c"
     }
+  },
+  "terminal_stream_review": {
+    "created_at": "2026-10-28T19:31:33.862854+00:00",
+    "unit_pass": 357,
+    "unit_runtime_skips": 8,
+    "native_pass": 9,
+    "python_safety_cases": 14,
+    "sdk_files": 1293,
+    "lint": "passed",
+    "fixes": [
+      "terminal_output_committed_after_scope_success",
+      "post_finish_events_rejected",
+      "assistant_role_and_separate_usage_frame",
+      "diagnostic_client_cancellation_closes_upstream",
+      "diagnostic_embedded_error_and_terminal_validation"
+    ],
+    "scope": "Synthetic only; actual Effect finalizer fault and real loopback socket cancellation; actual Claude/native/compiler fixtures. Not a429cause or full native parity proof. Diagnostic relay remains buffered.",
+    "log_sha256": {
+      "zen-stream-full.log": "f25b7931169978ff5937b46c3c5b6154c9c05cc8541f16eea000de740e0cb9c2",
+      "zen-stream-native.log": "eed492e54316cc702b05a0e5612f2c6d3d1fd6feb77295ab803403f3c60956e2",
+      "zen-stream-lint.log": "443507d5f6920626d9f180866cf396a11e09a15ae1d35a934a3028ec0afd36c2",
+      "zen-stream-relay-final.log": "ae8530fff131ca0442ae8386d02f5753c8d7544f6db2763bd4a67774a3a3cbf8",
+      "zen-stream-sdk-final.log": "1f337980019d5554b90894610ca023a6e5c63654a5bc1e815dbb82e16d2d796e"
+    }
   }
 }

@@ -1,5 +1,16 @@
 # OpenCode request compatibility review — October 28, 2026
 
+## Terminal-stream and diagnostic cancellation review — latest
+
+Three concrete gaps were found and fixed:
+
+- A native finish event could expose executable tool calls before the enclosing Effect stream/finalizers succeeded. Terminal chunks now remain pending until successful stream exit; late failure discards them. Any event after finish is an explicit protocol error. Text/reasoning can still stream before final success, so a partial answer remains possible on failure, as with native streaming.
+- Chat Completions output omitted the initial assistant role and attached usage to a choice-bearing finish chunk. The first semantic chunk now carries the role; opt-in usage is a separate final empty-choices frame. Buffered completions retain accounting.
+- The diagnostic Claude relay buffered responses without noticing client cancellation. It now observes client socket closure, shuts down the corresponding loopback upstream socket, and blocks subsequent requests in that run. It validates SSE completion and refuses embedded errors, malformed/truncated output and output after completion. It remains an intentionally buffered, budgeted diagnostic relay, not a transparent native transport capture.
+
+Regressions include actual Effect scope finalizer failure, positive terminal commit, wire framing, real socket cancellation, positive SSE and four broken/embedded-error streams. All use synthetic providers; no diagnostic inference or login was sent. A closed socket does not prove a remote provider stopped billing/generation immediately. These fixes do not establish any historical429 cause or universal CLI parity.
+
+
 Status: fixes verified offline; provider 429 cause and live bridge acceptance remain unresolved. No statistically defensible 99.99% reliability claim follows from these tests.
 
 | Finding | Resolution / evidence |

@@ -235,14 +235,43 @@ export function safeNativeError(error) {
   } };
 }
 
+// Terminal output is not committed until the enclosing native stream (including
+// finalizers) succeeds. Text may already be visible; executable calls may not.
+export function createTerminalGate() {
+  let terminal = null;
+  let settled = false;
+  return {
+    push(type, chunks) {
+      if (settled) throw new BridgeStreamError("Native stream received output after settlement", "native_stream_invalid");
+      if (type !== "finish") return chunks;
+      if (terminal !== null) throw new BridgeStreamError("Native stream finished more than once", "native_stream_invalid");
+      terminal = chunks;
+      return [];
+    },
+    settle(success) {
+      if (settled) throw new BridgeStreamError("Native stream was settled more than once", "native_stream_invalid");
+      settled = true;
+      const pending = terminal;
+      terminal = null;
+      if (!success) return [];
+      if (pending === null) throw new BridgeStreamError("Native stream ended without terminal output", "native_stream_incomplete");
+      return pending;
+    },
+  };
+}
+
 export function createChatEncoder({ model, id, created = Math.floor(Date.now() / 1000), includeUsage = true }) {
   const tools = new Map();
   const blocks = new Map();
-  let content = "", reasoning = "", finished = false, finishReason = "stop", usage;
-  const chunk = (delta, finish = null, extra = {}) => ({ id, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta, finish_reason: finish }], ...extra });
+  let content = "", reasoning = "", finished = false, started = false, finishReason = "stop", usage;
+  const chunk = (delta, finish = null) => {
+    const output = { id, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta: started ? delta : { role: "assistant", ...delta }, finish_reason: finish }] };
+    started = true;
+    return output;
+  };
   return {
     push(event) {
-      if (finished) return [];
+      if (finished) throw new BridgeStreamError("Native stream emitted output after finish", "native_stream_invalid");
       if (event.type.startsWith("reasoning-") && event.providerMetadata && /"(?:signature|encrypted[^" ]*|reasoningId)"/i.test(JSON.stringify(event.providerMetadata))) throw new BridgeStreamError("Opaque reasoning replay is unsupported", "native_reasoning_metadata_unsupported");
       if (["text-delta", "reasoning-delta", "text-end", "reasoning-end"].includes(event.type)) {
         const isReasoning = event.type.startsWith("reasoning-");
@@ -277,7 +306,8 @@ export function createChatEncoder({ model, id, created = Math.floor(Date.now() /
       if (!content && !reasoning && !tools.size && finishReason === "stop") throw new BridgeStreamError("Native stream completed without semantic output", "native_stream_empty");
       finished = true;
       usage = event.usage && { prompt_tokens: event.usage.inputTokens || 0, completion_tokens: event.usage.outputTokens || 0, total_tokens: (event.usage.inputTokens || 0) + (event.usage.outputTokens || 0) };
-      return [...tools.values()].map((call, index) => chunk({ tool_calls: [{ index, ...call }] })).concat(chunk({}, finishReason, usage && includeUsage ? { usage } : {}));
+      return [...tools.values()].map((call, index) => chunk({ tool_calls: [{ index, ...call }] }))
+        .concat(chunk({}, finishReason), usage && includeUsage ? [{ id, object: "chat.completion.chunk", created, model, choices: [], usage }] : []);
     },
     end() { if (!finished) throw new BridgeStreamError("Native stream ended without a terminal event", "native_stream_incomplete"); },
     completion() {

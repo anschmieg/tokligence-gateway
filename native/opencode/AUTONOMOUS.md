@@ -1,5 +1,12 @@
 # OpenCode Zen completion checkpoint
 
+## Terminal-stream review — latest verified snapshot
+
+Fixed late native stream/finalizer failure releasing terminal tool calls: terminal output now commits only after successful native exit; events after finish fail explicitly. Chat Completions first semantic chunk includes assistant role and opt-in usage has a separate empty-choices final frame. The diagnostic Claude relay now closes its upstream socket on client disconnect and blocks further run traffic; SSE embedded errors, malformed/truncated output and output after completion fail. Relay remains intentionally buffered; local socket closure does not prove immediate remote cancellation. No provider request-body/header identity changed by these caller-facing fixes.
+
+Final full357pass/8explicitruntime skips, native9pass/0skip (actualClaude/compiledCLI/API/body/lifecycle plus new actual Effect finalizer fault), Python safety14cases, SDK1293clean and lintpass. Logs /tmp/zen-stream-{full,native,lint,relay-final,sdk-final}.log. Source/evidence hashes and complete overlay refreshed: **e731d845ebb25e2fce15edb3a7b15df73cbd1733bff1b45b21c9152856623ee8**. No diagnostic inference/login, production/account/IP changes. Default native OAuth discovery/refresh remains outside inference cap. Same stable next ID/window and ONErequest/max1024 at01:34UTC Oct29; no automatic second request. Actual staging deployment/admission result follows after completion; do not infer live acceptance or429cause from these fixtures.
+
+
 ## Model-admission fixes deployed
 
 Functionalbe629fe pushed/deployed staging with complete overlay **9c551ee37fe2619183d41e4751bc665bfcd6faaeb6bb4d25566faf2be84b1665**. Owned worker/gateway restarted healthy;37targetedVPS wire/state/adapter/safety/control checks pass. Actual-root checkonly refuses ONLY comparison_time_not_reached/provider_cooldown_active; ledger bytehash unchanged and nextstableIDunreserved. Overlay/defaultOAuth/flock/productionsecondaryabsence checked by admission. Scheduler updated for new model-admission behavior and digest; same next01:34UTC Oct29, FIRSTdisable, one scoped publictransport request/max1024 only. No diagnostic inference/device-login probes or production/account/IP changes. Normal native config/catalog/refresh traffic remains outside the inference cap.

@@ -45,3 +45,10 @@ The prior worker keyed sessions by conversation+model, unlike native switchModel
 ## Remaining acceptance boundary
 
 The current scheduled standalone1.18/public/Bun control is a transport diagnostic, NOT evidence of normal OAuth2.1 harness parity. No result from it should be described as a matched normal-OAuth control. A same-version authenticated live comparison still requires its own bounded preparation and exclusive credential-owner handoff. Preserve the existing one-request budget/cooldowns; do not launch an extra OAuth request to compensate for this scope correction. Live gateway/tools/reasoning/long acceptance remains incomplete.
+
+
+## Terminal and diagnostic transport review
+
+The bridge now commits executable tool calls and success/usage frames only after successful native stream exit, including finalizers. Late native failure cannot leave a successful tool-call finish visible. Text/reasoning before that point remains progressive. Chat Completions role and separate opt-in usage frames follow the declared compatibility protocol; these are caller-facing frames, not changes to provider request headers/body.
+
+The budgeted Claude diagnostic relay remains buffered. Client disconnect now shuts down its corresponding loopback upstream socket and stops the run; malformed, embedded-error or incomplete SSE cannot count as a successful CLI result. Socket closure is verified locally, not a guarantee of remote inference termination. The relay is not evidence of untouched CLI HTTP/TLS behavior.

@@ -25,7 +25,7 @@ import { WebSocketConstructor } from "@opencode/core/effect/websocket-constructo
 import { App } from "@opencode/core/app"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { llmClient } from "@opencode/core/effect/app-node-platform"
-import { BridgeInputError, readChatBody, decodeChatRequest, createChatEncoder, safeNativeError, nativeAuthMode, assertNativeCredentialCount } from "./tokligence-bridge-wire.mjs"
+import { BridgeInputError, readChatBody, decodeChatRequest, createChatEncoder, createTerminalGate, safeNativeError, nativeAuthMode, assertNativeCredentialCount } from "./tokligence-bridge-wire.mjs"
 import source from "./tokligence-source.json"
 import { acquireStateLock, createSessionRegistry, claimAuthState, assertPublicDatabaseEmpty } from "./tokligence-state-store.mjs"
 import { scopedHttp } from "./tokligence-scoped-http"
@@ -259,13 +259,14 @@ async function inference(request: Request) {
       })).pipe(Stream.provide(nativeLayers), Stream.provide(AppNodeBuilder.build(llmClient)), Stream.provide(locations.get(location)))
     }))
     const encoder = createChatEncoder({ model: input.model, includeUsage: input.includeUsage, id: `chatcmpl_${randomUUID()}` })
+    const terminal = createTerminalGate()
     const chunks: Array<Record<string, unknown>> = []
     let notify = () => {}
     let drain = () => {}
     let done = false
     let failure: unknown
     const running = host.runtime.runPromiseExit(Stream.runForEach(events, (event) => Effect.gen(function* () {
-      yield* Effect.sync(() => { chunks.push(...encoder.push(event)); notify() })
+      yield* Effect.sync(() => { chunks.push(...terminal.push(event.type, encoder.push(event))); notify() })
       if (chunks.length >= 64) yield* Effect.promise((signal) => new Promise<void>((resolve) => {
         const ready = () => { signal.removeEventListener("abort", ready); resolve() }
         drain = ready
@@ -273,11 +274,16 @@ async function inference(request: Request) {
         if (signal.aborted || chunks.length < 64) ready()
       }))
     })), { signal: cancel.signal }).then((exit) => {
-      if (Exit.isFailure(exit)) {
-        failure = nativeCauseError(exit.cause, cancel.signal)
-      }
-      done = true
-      notify()
+      try {
+        if (Exit.isFailure(exit)) {
+          terminal.settle(false)
+          failure = nativeCauseError(exit.cause, cancel.signal)
+        } else {
+          encoder.end()
+          chunks.push(...terminal.settle(true))
+        }
+      } catch (error) { failure = error }
+      finally { done = true; notify() }
     })
     const next = async () => {
       while (!chunks.length && !done) await new Promise<void>((resolve) => { notify = resolve })

@@ -3,6 +3,9 @@ import contextlib
 import datetime
 import fcntl
 import http.server
+import http.client
+import socket
+import select
 import hmac
 import json
 import os
@@ -200,11 +203,16 @@ def claude_relay(guard, base_url, model, authorization, timeout):
             pass
 
         def reply(self, status, body):
-            self.send_response(status)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Content-Length', str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.send_response(status)
+                self.send_header('Content-Type', getattr(self, '_reply_type', 'application/json'))
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return True
+            except OSError:
+                self.close_connection = True
+                return False
 
         def do_POST(self):
             try:
@@ -230,12 +238,11 @@ def claude_relay(guard, base_url, model, authorization, timeout):
                 body['max_tokens'] = min(tokens, 8192)
                 with guard.forward_lock:
                     status, raw = self.forward(body)
-                self.send_response(status)
-                self.send_header('Content-Type', 'text/event-stream' if body.get('stream') else 'application/json')
-                self.send_header('Content-Length', str(len(raw)))
-                self.end_headers()
-                self.wfile.write(raw)
+                self._reply_type = 'text/event-stream' if body.get('stream') else 'application/json'
+                if not self.reply(status, raw):
+                    guard.stop('CLI response delivery failed; no further traffic')
             except ProbeStopped:
+                self._reply_type = 'application/json'
                 self.reply(guard.status or 429, b'{"error":{"type":"rate_limit_error","message":"Probe stopped by persistent safety guard"}}')
             except (ValueError, TypeError, KeyError) as error:
                 try:
@@ -245,13 +252,20 @@ def claude_relay(guard, base_url, model, authorization, timeout):
                     guard.stop(str(error) if str(error) in fixed else 'Invalid CLI probe request')
                 except ProbeStopped:
                     self.reply(400, b'{"error":{"type":"invalid_request_error","message":"Invalid CLI probe request"}}')
-            except (OSError, urllib.error.URLError):
+            except (OSError, urllib.error.URLError, http.client.HTTPException):
                 try:
                     guard.stop('CLI probe transport failed')
                 except ProbeStopped:
                     self.reply(502, b'{"error":{"type":"api_error","message":"CLI probe transport failed"}}')
 
         def forward(self, body):
+            def peer_gone():
+                try:
+                    return bool(select.select([self.connection], [], [], 0)[0]) and self.connection.recv(1, socket.MSG_PEEK) == b''
+                except OSError:
+                    return True
+            if peer_gone():
+                guard.stop('CLI client disconnected; no further traffic')
             guard.reserve(body['max_tokens'])
             user = body.get('metadata', {}).get('user_id') if isinstance(body.get('metadata'), dict) else None
             if isinstance(user, str):
@@ -260,27 +274,79 @@ def claude_relay(guard, base_url, model, authorization, timeout):
             session = user.get('session_id') if isinstance(user, dict) else None
             if not isinstance(session, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:-]{0,255}', session):
                 session = 'live-cli-' + guard.run_id + '-' + model
-            request = urllib.request.Request(base_url + '/v1/messages' , data=json.dumps(body).encode(),
-                headers={'Authorization': authorization, 'Content-Type': 'application/json',
-                         'x-session-id': session})
+            parsed = urllib.parse.urlsplit(base_url)
+            connection = http.client.HTTPConnection(parsed.hostname, parsed.port or 80, timeout=timeout)
+            done = threading.Event()
+            cancelled = threading.Event()
+            transport = {}
+            def watch_client():
+                while not done.wait(.025):
+                    if not peer_gone(): continue
+                    cancelled.set()
+                    upstream = transport.get('socket')
+                    if upstream:
+                        try: upstream.shutdown(socket.SHUT_RDWR)
+                        except OSError: pass
+                    return
+            watcher = threading.Thread(target=watch_client, daemon=True)
+            watcher.start()
+            status = None
             try:
-                response = open_gateway(request, timeout=timeout)
-            except urllib.error.HTTPError as error:
-                response = error
-            with response:
+                connection.connect()
+                transport['socket'] = connection.sock
+                if cancelled.is_set():
+                    guard.stop('CLI client disconnected; no further traffic')
+                connection.request('POST', '/v1/messages', body=json.dumps(body).encode(), headers={
+                    'Authorization': authorization, 'Content-Type': 'application/json', 'x-session-id': session})
+                response = connection.getresponse()
                 status = response.status
-                raw = response.read(32 * 1024 * 1024 + 1)
+                try:
+                    raw = response.read(32 * 1024 * 1024 + 1)
+                except (OSError, http.client.HTTPException):
+                    # Do not lose an observed rejection if the client disconnects
+                    # or its error body fails while the socket is being closed.
+                    if status >= 300: raw = b''
+                    else: raise
                 if len(raw) > 32 * 1024 * 1024:
                     raise ValueError('Probe response exceeded limit')
-            if status >= 300:
-                try:
-                    failure = json.loads(raw).get('error', {})
-                except (ValueError, AttributeError):
-                    failure = {}
-                if not isinstance(failure, dict):
-                    failure = {}
-                guard.stop('Provider rejected the probe; no further traffic', status, failure)
-            return status, raw
+                if status >= 300:
+                    try: failure = json.loads(raw).get('error', {})
+                    except (ValueError, AttributeError): failure = {}
+                    if not isinstance(failure, dict): failure = {}
+                    guard.stop('Provider rejected the probe; no further traffic', status, failure)
+                if cancelled.is_set():
+                    guard.stop('CLI client disconnected; no further traffic')
+                if body.get('stream'):
+                    if 'text/event-stream' not in response.getheader('Content-Type', ''):
+                        guard.stop('CLI probe returned an unexpected stream protocol', 502)
+                    terminal = False
+                    try: decoded = raw.decode('utf-8')
+                    except UnicodeDecodeError: guard.stop('CLI probe contained invalid stream encoding', 502)
+                    for frame in decoded.replace('\r\n', '\n').split('\n\n'):
+                        lines = frame.splitlines()
+                        data = '\n'.join(line[5:].lstrip() for line in lines if line.startswith('data:'))
+                        if not data: continue
+                        try: event = json.loads(data)
+                        except ValueError: guard.stop('CLI probe contained malformed stream data', 502)
+                        if not isinstance(event, dict) or event.get('type') == 'error' or 'error' in event:
+                            guard.stop('CLI probe contained an embedded stream error', 502)
+                        if terminal:
+                            guard.stop('CLI probe contained output after stream completion', 502)
+                        terminal = event.get('type') == 'message_stop'
+                    if not terminal: guard.stop('CLI probe stream ended without completion', 502)
+                else:
+                    try: document = json.loads(raw)
+                    except ValueError: guard.stop('CLI probe contained malformed response data', 502)
+                    if not isinstance(document, dict) or 'error' in document:
+                        guard.stop('CLI probe contained an embedded response error', 502)
+                return status, raw
+            except (OSError, http.client.HTTPException):
+                if cancelled.is_set(): guard.stop('CLI client disconnected; no further traffic')
+                raise
+            finally:
+                done.set()
+                connection.close()
+                watcher.join(timeout=1)
 
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     server.daemon_threads = False  # Hold the OS lease until all forwarded requests finish.

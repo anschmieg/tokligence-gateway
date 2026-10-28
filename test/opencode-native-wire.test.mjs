@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { decodeChatRequest, createChatEncoder, safeNativeError } from "../native/opencode/bridge-wire.mjs";
+import { decodeChatRequest, createChatEncoder, createTerminalGate, safeNativeError } from "../native/opencode/bridge-wire.mjs";
 
 const tool = { type: "function", function: { name: "lookup", description: "Caller tool", parameters: { type: "object", properties: { id: { type: "integer" } }, required: ["id"], additionalProperties: false } } };
 
@@ -152,4 +152,41 @@ test('required tool selection without declared tools is rejected before native d
   for (const tools of [undefined, []]) assert.throws(() => decodeChatRequest({ ...body, tools }), /at least one declared function tool/);
   assert.equal(decodeChatRequest({ ...body, tool_choice: 'none' }).toolChoice.type, 'none');
   assert.equal(decodeChatRequest({ ...body, tools: [tool] }).toolChoice.type, 'required');
+});
+
+
+test('native terminal tools stay private until successful stream settlement', () => {
+  for (const success of [true, false]) {
+    const encoder = createChatEncoder({ model: 'fixture', id: 'gate' });
+    const gate = createTerminalGate();
+    for (const event of [{ type: 'tool-call', id: 'one', name: 'Read', input: {} }, { type: 'finish', reason: { normalized: 'tool-calls' } }]) {
+      assert.deepEqual(gate.push(event.type, encoder.push(event)), []);
+    }
+    const visible = gate.settle(success);
+    assert.equal(visible.some(chunk => chunk.choices?.[0]?.delta?.tool_calls), success);
+    assert.throws(() => gate.settle(true), /more than once/);
+  }
+  assert.throws(() => createTerminalGate().settle(true), /without terminal/);
+});
+
+test('native post-finish errors and semantic output cannot be silently accepted', () => {
+  for (const type of ['provider-error', 'text-delta', 'reasoning-end', 'tool-call', 'tool-input-delta', 'step-start', 'step-finish', 'finish']) {
+    const encoder = createChatEncoder({ model: 'fixture', id: 'late' });
+    encoder.push({ type: 'text-delta', text: 'partial' });
+    encoder.push({ type: 'finish', reason: { normalized: 'stop' } });
+    assert.throws(() => encoder.push({ type }), /after finish/);
+  }
+});
+
+test('native stream emits assistant role once and opt-in usage as an empty-choices frame', () => {
+  const encoder = createChatEncoder({ model: 'fixture', id: 'frames', includeUsage: true });
+  const first = encoder.push({ type: 'reasoning-delta', text: 'think' });
+  const second = encoder.push({ type: 'text-delta', text: 'answer' });
+  assert.equal(first[0].choices[0].delta.role, 'assistant');
+  assert.equal(second[0].choices[0].delta.role, undefined);
+  const tail = encoder.push({ type: 'finish', reason: { normalized: 'stop' }, usage: { inputTokens: 5, outputTokens: 3 } });
+  assert.equal(tail[0].choices[0].finish_reason, 'stop');
+  assert.equal(tail[0].usage, undefined);
+  assert.deepEqual(tail[1].choices, []);
+  assert.equal(tail[1].usage.total_tokens, 8);
 });

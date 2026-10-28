@@ -1,6 +1,9 @@
 import concurrent.futures
 import datetime
 import http.server
+import http.client
+import socket
+import time
 import json
 import os
 import pathlib
@@ -39,8 +42,8 @@ class SafetyTests(unittest.TestCase):
                 if owner.redirect:
                     self.send_header('Location', owner.redirect)
                 self.end_headers()
-                self.wfile.write(json.dumps({'error': {'code': 'FreeUsageLimitError',
-                    'retry_at': (utc_now() + datetime.timedelta(hours=1)).isoformat()}}).encode())
+                value = {'content': [{'type': 'text', 'text': 'fixture'}], 'type': 'message'} if owner.status == 200 else {'error': {'code': 'FreeUsageLimitError', 'retry_at': (utc_now() + datetime.timedelta(hours=1)).isoformat()}}
+                self.wfile.write(json.dumps(value).encode())
 
         self.server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -217,6 +220,86 @@ class SafetyTests(unittest.TestCase):
         with self.assertRaises(ProbeStopped):
             with LiveGuard(self.root, 'after-quota', 1, 1024):
                 self.fail('quota retried')
+
+    def test_relay_validates_stream_completion_and_embedded_errors(self):
+        variants = [
+            (b'data: {"type":"message_start"}\n\ndata: {"type":"message_stop"}\n\n', 200),
+            (b'data: {"type":"error","error":{"message":"synthetic"}}\n\n', 502),
+            (b'data: {"type":"message_start"}\n\n', 502),
+            (b'data: not-json\n\n', 502),
+            (b'data: {"type":"message_stop"}\n\ndata: {"type":"content_block_delta"}\n\n', 502),
+        ]
+        for index, (payload, expected) in enumerate(variants):
+            calls = []
+            class Upstream(http.server.BaseHTTPRequestHandler):
+                def log_message(self, *_): pass
+                def do_POST(self):
+                    self.rfile.read(int(self.headers['Content-Length']))
+                    calls.append(1)
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/event-stream')
+                    self.end_headers()
+                    self.wfile.write(payload)
+            server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                with LiveGuard(self.root, 'stream-' + str(index), 2, 16384) as guard:
+                    with claude_relay(guard, 'http://127.0.0.1:' + str(server.server_port), 'beam-free', self.auth, 5) as relay:
+                        body = {'model': 'opencode-native/beam-free', 'stream': True,
+                                'messages': [{'role': 'user', 'content': 'synthetic'}], 'max_tokens': 10}
+                        req = urllib.request.Request(relay + '/v1/messages', data=json.dumps(body).encode(), headers={'Authorization': self.auth})
+                        try: response = urllib.request.urlopen(req, timeout=5)
+                        except urllib.error.HTTPError as error: response = error
+                        with response:
+                            self.assertEqual(response.status, expected)
+                            if expected == 200: self.assertEqual(response.headers['Content-Type'], 'text/event-stream')
+                            response.read()
+                        self.assertEqual(guard.count, 1)
+                        if expected != 200:
+                            self.assertTrue(guard.blocked)
+                            self.assertEqual(self.send(relay), expected)
+                    self.assertEqual(calls, [1])
+            finally:
+                server.shutdown(); server.server_close(); thread.join()
+
+    def test_client_disconnect_cancels_upstream_and_prevents_next_request(self):
+        started = threading.Event()
+        closed = threading.Event()
+        class Upstream(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_): pass
+            def do_POST(self):
+                self.rfile.read(int(self.headers['Content-Length']))
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/event-stream')
+                self.end_headers()
+                self.wfile.write(b'data: {"type":"message_start"}\n\n')
+                self.wfile.flush()
+                started.set()
+                self.connection.settimeout(3)
+                try:
+                    if self.connection.recv(1) == b'': closed.set()
+                except ConnectionResetError: closed.set()
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with LiveGuard(self.root, 'cancel-cli', 2, 16384) as guard:
+                with claude_relay(guard, 'http://127.0.0.1:' + str(server.server_port), 'beam-free', self.auth, 5) as relay:
+                    client = http.client.HTTPConnection('127.0.0.1', int(relay.rsplit(':', 1)[1]), timeout=5)
+                    body = {'model': 'opencode-native/beam-free', 'stream': True, 'messages': [], 'max_tokens': 10}
+                    client.request('POST', '/v1/messages', body=json.dumps(body), headers={'Authorization': self.auth})
+                    self.assertTrue(started.wait(2))
+                    client.sock.shutdown(socket.SHUT_RDWR)
+                    client.close()
+                    self.assertTrue(closed.wait(2), 'upstream inference socket was left running')
+                    deadline = time.monotonic() + 2
+                    while not guard.blocked and time.monotonic() < deadline: time.sleep(.01)
+                    self.assertTrue(guard.blocked)
+                    self.assertEqual(self.send(relay), 429)
+                    self.assertEqual(guard.count, 1)
+        finally:
+            server.shutdown(); server.server_close(); thread.join()
 
     def test_redirects_and_external_gateway_urls_are_rejected(self):
         for value in ['https://example.com', 'http://user:secret@127.0.0.1:1', 'http://127.0.0.1:1/path']:
