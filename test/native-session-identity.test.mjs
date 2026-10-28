@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { nativeConversationIdentity as identity } from '../native-session-identity.mjs';
+import { nativeConversationIdentity as identity, nativeConversationScope } from '../native-session-identity.mjs';
 
 test('native identity uses explicit conversation metadata and rejects fallback/conflicting scopes', () => {
   assert.equal(identity({ 'x-session-id': 'ses_one' }), 'ses_one');
@@ -12,4 +12,12 @@ test('native identity uses explicit conversation metadata and rejects fallback/c
   }
   assert.throws(() => identity({ 'x-session-id': 'one' }, { metadata: { user_id: '{"session_id":"two"}' } }), { code: 'native_session_identity_conflict' });
   for (const value of ['', ' ', ['one', 'two'], 123, 'a'.repeat(257)]) assert.throws(() => identity({ 'x-session-id': value }), { code: 'native_session_identity_invalid' });
+});
+
+test('native scope binds identity to principal and does not expose raw identity', () => {
+  const body = { metadata: { user_id: '{"session_id":"same"}' } };
+  const first = nativeConversationScope({ authorization: 'principal-one' }, body);
+  assert.notEqual(first, nativeConversationScope({ authorization: 'principal-two' }, body));
+  assert.equal(first, nativeConversationScope({ authorization: 'principal-one', 'x-session-id': 'same' }, {}));
+  assert.match(first, /^[A-Za-z0-9_-]{43}$/);
 });

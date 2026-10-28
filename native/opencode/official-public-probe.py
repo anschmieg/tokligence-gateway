@@ -13,7 +13,7 @@ import urllib.request
 
 from live_safety import LiveGuard, ProbeStopped, parse_time, utc_now
 from official_control import CATALOG, official_relay, profile_environment
-from run_admission import inspect_plan, inspect_ledger, inspect_worker
+from run_admission import inspect_plan, inspect_ledger, inspect_worker, inspect_runtime
 
 
 class ControlSetupError(RuntimeError):
@@ -128,10 +128,9 @@ def main():
             parser.exit(2, 'Live control requires a reviewed --plan; no inference started\n')
         code_root = pathlib.Path(__file__).resolve().parents[2]
         plan, blockers = inspect_plan(args.plan, code_root, args.run_id, args.model, args.not_before)
-        blockers.extend(inspect_ledger(pathlib.Path(args.root), args.run_id))
+        blockers.extend(inspect_ledger(pathlib.Path(args.root), args.run_id, plan.get('window')))
         blockers.extend(inspect_worker(pathlib.Path(args.root), plan.get('overlay_sha256')))
-        if not args.bun_transport:
-            blockers.append('reviewed_bun_transport_required')
+        blockers.extend(inspect_runtime(plan, args.root, code_root, args.binary, args.bun_transport, args.pause_staging or args.check_only))
         try:
             verify_staging(pathlib.Path(args.root))
         except StagingRestoreError:

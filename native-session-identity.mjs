@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 // Native sessions need a conversation identity, never a request ID/cache key or
 // the legacy principal-wide default. Only the digest crosses the worker boundary.
 export function nativeConversationIdentity(headers = {}, body = {}) {
@@ -18,4 +19,8 @@ export function nativeConversationIdentity(headers = {}, body = {}) {
   if (!candidates.length) throw Object.assign(new Error('Native requests require a stable conversation ID in x-session-id or Claude session metadata'), { statusCode: 400, code: 'native_session_identity_required' });
   if (new Set(candidates).size !== 1) throw Object.assign(new Error('Native request contains conflicting conversation identifiers'), { statusCode: 400, code: 'native_session_identity_conflict' });
   return candidates[0];
+}
+
+export function nativeConversationScope(headers = {}, body = {}) {
+  return createHash('sha256').update(`${String(headers.authorization || '')}\0${nativeConversationIdentity(headers, body)}`).digest('base64url');
 }

@@ -1,5 +1,11 @@
 # OpenCode Zen completion checkpoint
 
+## Adversarial review of run preparation — latest
+
+Fixed4findings: native adapter now enforces principal/conversation identity independently of direct-route matching (aliases cannot bypass via stickykey); plan binds exact stagedCLI/Bun hashes and state/code root plus mandatory ownedpause for live; checkonly shares historicalcooldowns and detects exhausted/changed aggregatewindows/laternotbefore; ledger reservations now filefsync→rename→directoryfsync before I/O. Middleware double-call fault proves one physicaldispatch. Fixed synthetic owned-child readiness race without weakening actual ownership checks. See ADVERSARIAL-REVIEW.md for scope/evidence.
+
+Full351pass5runtime skips, lintpass; targetednative3pass incl actualClaude/scoped doublecall, compiledOpenCode isolatedcapture1pass, Python safety12 and official/admission16cases pass with Bun supplied. Prior80+5body comparisons and SDK1293typecheck remain valid (those runtime/compiler sources unchanged). Runtime/evidence hashes refreshed, SAME stable run/window IDs and01:34UTC schedule, no largerbudget or inference. Checkonly code requires no pause because it does not execute; ACTUAL live invocation still must use --pause-staging. Exact command in README remains correct. No productiondeployment or credentialchanges. Deployment/no-inference smoke result recorded after completion below.
+
 ## Final prepared-run verification and staging
 
 Functional commit **eb1c7be** pushed and deployed staging with the COMPLETE generated source bundle. New worker overlay **7e123663ec7d56b300918a1cd4fb4962eec8b3e86fa956e2acbff902a503258c**. Final full350pass/5explicitruntime skips; native6pass/0skip, including80compiler vectors plus5actualofficial persisted lifecycle body comparisons, realClaude recovery/reasoning, lifecycle/crash and HTTPscope tests. SDK1293files clean; lint passed. Logs local /tmp/zen-prepared-all-final.log, /tmp/zen-prepared-native-final.log, /tmp/zen-prepared-sdk.log; evidence summary and code hashes in prepared-evidence.json/staging-run-plan.json. No inference sent during preparation.

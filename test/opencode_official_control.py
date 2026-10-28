@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import time
+import select
 import unittest
 import urllib.error
 import urllib.request
@@ -240,9 +241,11 @@ print(json.dumps({'type':'step_finish','part':{'reason':'stop'}}))
                                    ('gateway', 'gateway/tgw-proxy.mjs')]:
                 script = self.root / relative
                 script.parent.mkdir(parents=True, exist_ok=True)
-                script.write_text('import time\ntime.sleep(30)\n')
-                child = subprocess.Popen([sys.executable, script.name if name == 'gateway' else str(script)], cwd=script.parent)
+                script.write_text('import time\nprint("ready",flush=True)\ntime.sleep(30)\n')
+                child = subprocess.Popen([sys.executable, script.name if name == 'gateway' else str(script)], cwd=script.parent, stdout=subprocess.PIPE, text=True)
                 children.append(child)
+                self.assertTrue(select.select([child.stdout], [], [], 3)[0], 'owned fixture did not start')
+                self.assertEqual(child.stdout.readline().strip(), 'ready')
                 (self.root / (name + '.pid')).write_text(str(child.pid))
                 (self.root / ('start-' + name + '.py')).write_text(
                     'import pathlib\nwith pathlib.Path(' + repr(str(restore)) + ").open('a') as f:f.write(" + repr(name + '\n') + ')\n')
@@ -255,6 +258,7 @@ print(json.dumps({'type':'step_finish','part':{'reason':'stop'}}))
             for child in children:
                 if child.poll() is None: child.kill()
                 child.wait()
+                child.stdout.close()
 
     def test_wrong_pid_owner_is_never_stopped(self):
         module = self.probe_module()
@@ -293,6 +297,11 @@ class AdmissionTests(unittest.TestCase):
             path.write_text(json.dumps(plan))
             self.assertEqual(inspect_plan(path, root, 'single', plan['model'], plan['not_before'])[1], [])
             self.assertIn('unselected_run_or_model', inspect_plan(path, root, 'new-id', plan['model'], plan['not_before'])[1])
+            self.assertIn('comparison_time_not_reached', inspect_plan(path, root, 'single', plan['model'], '2999-01-01T00:00:00+00:00')[1])
+            plan['window']['request_budget'] = True
+            path.write_text(json.dumps(plan))
+            self.assertIn('invalid_single_request_window', inspect_plan(path, root, 'single', plan['model'], plan['not_before'])[1])
+            plan['window']['request_budget'] = 1
             plan['gates']['session_comparison']['status'] = 'pending'
             path.write_text(json.dumps(plan))
             self.assertIn('gate_incomplete:session_comparison', inspect_plan(path, root, 'single', plan['model'], plan['not_before'])[1])
@@ -301,6 +310,41 @@ class AdmissionTests(unittest.TestCase):
             plan['not_before'] = '2999-01-01T00:00:00+00:00'
             path.write_text(json.dumps(plan))
             self.assertIn('comparison_time_not_reached', inspect_plan(path, root, 'single', plan['model'], plan['not_before'])[1])
+
+    def test_runtime_binding_rejects_wrong_root_binaries_or_missing_pause(self):
+        from run_admission import inspect_runtime, file_sha256
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / 'gateway').mkdir()
+            (root / 'runtime').mkdir()
+            cli = root / 'runtime/opencode-public-cli-1.18.32'
+            bun = root / 'runtime/bun'
+            cli.write_text('synthetic cli'); bun.write_text('synthetic bun')
+            plan = {'staging_root': str(root), 'runtime': {name: {'path': str(path), 'sha256': file_sha256(path)} for name, path in [('cli', cli), ('bun', bun)]}}
+            self.assertEqual(inspect_runtime(plan, root, root / 'gateway', None, bun, True), [])
+            self.assertIn('owned_staging_pause_required', inspect_runtime(plan, root, root / 'gateway', None, bun, False))
+            self.assertIn('staging_root_or_code_binding_mismatch', inspect_runtime(plan, root, root / 'other-code', None, bun, True))
+            alternate = root / 'other-cli'; alternate.write_bytes(cli.read_bytes())
+            self.assertIn('runtime_binding_mismatch:cli', inspect_runtime(plan, root, root / 'gateway', alternate, bun, True))
+            bun.write_text('changed runtime')
+            self.assertIn('runtime_binding_mismatch:bun', inspect_runtime(plan, root, root / 'gateway', None, bun, True))
+
+    def test_readiness_imports_history_and_checks_aggregate_window_without_writes(self):
+        from run_admission import inspect_ledger
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / 'live-probe.lock').touch()
+            ledger = root / 'live-probe-ledger.json'
+            window = {'id': 'window', 'allowed_runs': ['first', 'second'], 'request_budget': 1, 'output_budget': 1024}
+            ledger.write_text(json.dumps({'runs': {'first': {'window_id': 'window', 'requests': 1, 'reserved_output_tokens': 1024}}, 'windows': {'window': window}}))
+            history = root / 'public-native-probe.json'
+            history.write_text(json.dumps({'retry_at': (utc_now() + datetime.timedelta(hours=1)).isoformat()}))
+            before = ledger.read_bytes()
+            blocked = inspect_ledger(root, 'second', window)
+            self.assertIn('provider_cooldown_active', blocked)
+            self.assertIn('live_window_budget_exhausted', blocked)
+            self.assertEqual(ledger.read_bytes(), before)
+            self.assertIn('live_window_limits_changed', inspect_ledger(root, 'second', {**window, 'request_budget': 2}))
 
     def test_live_entrypoint_without_plan_refuses_before_loading_private_state(self):
         result = subprocess.run([sys.executable, str(HARNESS / 'official-public-probe.py'), '--root', '/nonexistent/private/state',

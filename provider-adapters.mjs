@@ -1,4 +1,5 @@
 import http from "node:http";
+import { nativeConversationScope } from "./native-session-identity.mjs";
 import https from "node:https";
 import tls from "node:tls";
 import { randomUUID } from "node:crypto";
@@ -556,6 +557,7 @@ export async function startAttempt({ candidate, req, path, body, env = process.e
       throw Object.assign(new Error("The native worker is not enabled or configured"), { statusCode: 503, code: "native_bridge_disabled" });
     }
     const request = JSON.parse(Buffer.isBuffer(body) ? body.toString("utf8") : body);
+    const conversationScope = nativeConversationScope(req.headers, request);
     if (candidate.protocol === "messages") validateNativeAnthropicRequest(request);
     const translated = candidate.protocol === "messages" ? anthropicToOpenAI(request, { forceStream: false, preserveToolErrors: true }) : request;
     if (candidate.protocol === "messages" && request.tool_choice?.disable_parallel_tool_use !== undefined) {
@@ -574,7 +576,7 @@ export async function startAttempt({ candidate, req, path, body, env = process.e
     const headers = {
       "content-type": "application/json", "content-length": String(payload.length),
       authorization: `Bearer ${env.OPENCODE_NATIVE_KEY}`,
-      "x-opencode-bridge-session": stickyKey || trace?.id || randomUUID(),
+      "x-opencode-bridge-session": conversationScope,
     };
     const { response, upstream } = await send({ target, headers, body: payload, signal, trace });
     if (response.headers["x-opencode-native-version"] !== "2.1.4") {

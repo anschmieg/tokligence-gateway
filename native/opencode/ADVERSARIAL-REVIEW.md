@@ -58,3 +58,16 @@ Second-pass deployment:649df97 staged with all nine hashed sources and generated
 ## Plan-level follow-up
 
 See LIVE-ACCEPTANCE-PLAN.md for the later adversarial review of rate-limit exposure, full-harness parity and session/tool lifecycle. It supersedes automatic live expansion and stale reset/timezone instructions above. Apollo reset is confirmed00:31UTC; earliest next window01:34UTC, conditional on documented gates. No new runtime fixes or test passes are claimed by this plan review.
+
+## Prepared-run adversarial review — October 28
+
+Four findings fixed, with no live inference:
+
+1. **High: the native identity check was only at direct-route selection.** An alias/profile selecting the adapter could supply a legacy default sticky key. The native adapter now independently validates conversation identity and derives the principal-bound scope, ignoring caller-supplied sticky keys. A direct adapter regression reproduces the bypass; principal isolation is tested.
+2. **Medium: live admission did not pin executables or bind the state root.** A changed Bun/CLI binary, alternate ledger root or missing staging pause could invalidate the prepared comparison or collide with the1GiB limit. The plan now pins exact runtime paths/SHA256, staging root and code location, and requires managed service pause for actual live execution. The zero-inference check remains non-mutating. Tests reject alternate roots/code, same-content alternate executables, changed binary bytes and missing pause.
+3. **Medium: dry-run readiness could disagree with the actual guard.** It omitted imported historical cooldowns, spent aggregate windows, changed window policies, and a caller-supplied later not-before. Readiness now uses the same historical cooldown reader as locked dispatch and reports those conditions without writing the ledger. Tests cover each case, including boolean budgets rejected as malformed.
+4. **Medium: rename alone did not establish crash durability.** Reservations/cooldowns now flush+fsync the pending ledger, rename, then fsync the directory before forwarding. A regression checks that ordering and injects a failed sync before any provider I/O. This uses Linux filesystem durability primitives, not a claim that power-loss behavior was physically tested.
+
+Extra fault coverage confirms invoking the native HTTP middleware twice still sends only once. A fixture startup race also surfaced: process-ownership tests could inspect /proc before the synthetic child had executed its script. The fixture now signals readiness explicitly before ownership is checked; production ownership checks remain strict.
+
+Verification: full351pass/5explicitruntime skips, lint clean; targeted real-runtime3pass (scoped HTTP including double dispatch and actual Claude/native tool/reasoning recovery), plus actual compiled OpenCode network-blocked capture1pass. Python safety12cases; official-control/admission16cases including Bun transport pass with the runtime supplied. Prior80+5 exact-body comparison and SDK1293-file results remain applicable: no compiler/worker/scoped-http source changed in this review. The four gates remain bounded synthetic evidence, not live quota availability or total CLI/TLS parity. Runtime/evidence hashes were refreshed; the existing stable run/window IDs and schedule are unchanged.

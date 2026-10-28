@@ -47,6 +47,20 @@ def parse_time(value):
         return None
 
 
+def recorded_cooldowns(root, ledger):
+    """Same read-only evidence sources for admission and locked dispatch."""
+    root = pathlib.Path(root)
+    cooldowns = [parse_time(ledger.get('cooldown_until'))]
+    for name in ['public-native-probe.json', 'live-matrix-results.json']:
+        evidence = root / name
+        if not evidence.exists():
+            continue
+        report = json.loads(evidence.read_text())
+        cooldowns.append(parse_time(report.get('retry_at')))
+        cooldowns.extend(parse_time(item.get('reset')) for item in report.get('results', []))
+    return [value for value in cooldowns if value and value > utc_now()]
+
+
 class LiveGuard:
     def __init__(self, root, run_id, requests, output_tokens, window=None):
         if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,79}', run_id):
@@ -73,16 +87,7 @@ class LiveGuard:
             fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             path = self.root / 'live-probe-ledger.json'
             self.ledger = json.loads(path.read_text()) if path.exists() else {'runs': {}}
-            cooldowns = [parse_time(self.ledger.get('cooldown_until'))]
-            # Respect evidence from probes performed before this ledger existed.
-            for name in ['public-native-probe.json', 'live-matrix-results.json']:
-                evidence = self.root / name
-                if not evidence.exists():
-                    continue
-                report = json.loads(evidence.read_text())
-                cooldowns.append(parse_time(report.get('retry_at')))
-                cooldowns.extend(parse_time(item.get('reset')) for item in report.get('results', []))
-            future = [value for value in cooldowns if value and value > utc_now()]
+            future = recorded_cooldowns(self.root, self.ledger)
             if future:
                 self.ledger['cooldown_until'] = max(future).isoformat()
                 self._save()
@@ -121,7 +126,14 @@ class LiveGuard:
         fd = os.open(pending, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, 'w') as output:
             json.dump(self.ledger, output, indent=2)
+            output.flush()
+            os.fsync(output.fileno())
         os.replace(pending, self.root / 'live-probe-ledger.json')
+        directory = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
 
     def reserve(self, max_tokens):
         with self.mutex:

@@ -9,6 +9,8 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
+import stat
 import urllib.error
 import urllib.request
 
@@ -75,6 +77,27 @@ class SafetyTests(unittest.TestCase):
         with self.assertRaisesRegex(ProbeStopped, 'unselected'):
             with LiveGuard(self.root, 'unlisted', 1, 1, window=window):
                 pass
+
+    def test_reservation_syncs_file_then_rename_then_directory_and_fails_before_io(self):
+        events = []
+        original_sync = os.fsync
+        original_replace = os.replace
+        def sync(fd):
+            events.append('directory_sync' if stat.S_ISDIR(os.fstat(fd).st_mode) else 'file_sync')
+            return original_sync(fd)
+        def replace(*args):
+            events.append('rename')
+            return original_replace(*args)
+        with mock.patch('live_safety.os.fsync', side_effect=sync), mock.patch('live_safety.os.replace', side_effect=replace):
+            with LiveGuard(self.root, 'synced', 2, 2048) as guard:
+                events.clear()
+                guard.reserve(1024)
+                self.assertEqual(events, ['file_sync', 'rename', 'directory_sync'])
+                with mock.patch('live_safety.os.fsync', side_effect=OSError('synthetic disk failure')):
+                    with self.assertRaises(OSError):
+                        guard.reserve(1024)
+                self.assertEqual(json.loads((self.root / 'live-probe-ledger.json').read_text())['runs']['synced']['requests'], 1)
+                self.assertEqual(self.calls, [])
 
     def test_loopback_gateway_ignores_proxy_environment(self):
         hits = []

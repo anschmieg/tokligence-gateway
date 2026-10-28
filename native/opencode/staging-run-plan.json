@@ -30,27 +30,40 @@
     }
   },
   "sha256": {
-    "native-session-identity.mjs": "3e801bd60e2537f47423683c02e9199a609774aecab54350cfc61308fe1f595d",
-    "native/opencode/live_safety.py": "3c637571ccd87915e7ab8dc30fc7d1168d2d4d0841ed94945e80e614ad7dd9c8",
+    "native-session-identity.mjs": "ac657a4841f027675a0d58550eccc917ea413bfe83c7730cd55a68c7bf5d33c1",
+    "native/opencode/live_safety.py": "01a452075803f2b26bd3f09d442792d9fb945158b84fa6d66e353a2baaeaa9f0",
     "native/opencode/official-models.json": "780e9babc994e489280e6b219e38dcf1f83838b3b17a74d789aa964a099bbe47",
-    "native/opencode/official-public-probe.py": "467b7e1e0c41067e5cd559f63c4a223bb5175857f346e80f4cbbe51ea62196bb",
+    "native/opencode/official-public-probe.py": "87032383f06fa1f3ec46c99ee7dcced677e452a5cc1216ad69bd83f7c58ec2ec",
     "native/opencode/official_control.py": "52b4f95b1e2f71c7ceb9e790c2668e3627dba6c6865d122735c62c0dcd0e23cc",
     "native/opencode/offline-session-fixture.py": "c52e6a9ee544c8d3ae8dc80cace2910884263833fa67d78e5e70a8d8d3144805",
-    "native/opencode/prepared-evidence.json": "47fb322b15c35b7af0d7451b7bc3f92990c42095a13e4b06db38bf58590daed4",
+    "native/opencode/prepared-evidence.json": "7add70bea4465fc8d5524479d55850dcba22bbb9d160e77d51e0b96bbe1822fd",
     "native/opencode/public-bun-transport.mjs": "a620d0dfa2bdbc638dc925ecf39d1a9d36581e208dbb6a524bc6bfb0adf91419",
-    "native/opencode/run_admission.py": "800705b55fc6673b7746c6851192fc580743e0fc87be8c71cc5d367f47c63532",
+    "native/opencode/run_admission.py": "3ee003f20425c8d4246ca6ce6519b88e6121cb08075adee5a20f76418f862687",
     "native/opencode/scoped-http.ts": "868999afa55304d6326e54e954a31bf29d60dd3861861a823715137b932478f7",
     "native/opencode/testing/native-parity.mjs": "b78c556010ef57028d120f91f7dde7101809cf5a6474734d74825ee86fc46791",
     "native/opencode/worker.ts": "490613d08ccdaeba6705979e7c6d71fa895db6daf56b9bd8b29872811cd2026d",
-    "provider-adapters.mjs": "28fd8d89d770491fb229172292d2955590126f64973b4125cab115b505a70a87",
+    "provider-adapters.mjs": "3367e3b8af0adf71dd42895c36d348ae2750a1b1811648a3c9b2dcc2aed9205c",
     "request-executor.mjs": "cc96ab901d002ec2c0ca6510487659d77e9a98e7755e872c58c579aa7f526196",
     "routing-planner.mjs": "cd345b41a00c9570f0f5605637390fa05e079988df5292b5e1af795b44a43497",
-    "test/native-session-identity.test.mjs": "d777d5c285a90966c4455905b4909af194663c8a86d7c55635ad4d9f48088cc1",
+    "test/native-session-identity.test.mjs": "825572cee0d7ddf8171b525dfab36307abb55aaaebea949e314857ccc20037e7",
     "test/opencode-native-integration.test.mjs": "87a949bc9a7924d258f5adb7bce3460564a27f8101b2b121a90ce450a5e730cb",
     "test/opencode-native-parity.test.mjs": "ceb30877d470f3620390fc87f2de86d444a79427eece6ebe8a927f3f1f596690",
     "test/opencode-native-worker.test.mjs": "f762ef32b99bbd73efecb2784281dd1047b58a117206ac56c7f35ec7e07be209",
-    "test/opencode_native_live_safety.py": "699ef5b4a77fdac720fa528916728140f4e85bf1af30b943d487ea4aad7fbb71",
-    "test/opencode_official_control.py": "76ed5935f466d23e19aadb78792d8c24fcdc20cd7e2f1ca6348267c8c625a303",
-    "tgw-proxy.mjs": "eee58631fef1863bbfe7ad36d3b24f297affb4b80040a65d078e6354ddf0cf5b"
+    "test/opencode_native_live_safety.py": "4d202853e3dfaf45f947ec5f6f35965c31aaad18836372d0f03ed4762a2df731",
+    "test/opencode_official_control.py": "6261c70abcae1994852887bbe2d2a3a660bca147baea2dc7532da2addc16d039",
+    "tgw-proxy.mjs": "eee58631fef1863bbfe7ad36d3b24f297affb4b80040a65d078e6354ddf0cf5b",
+    "test/opencode-native-scoped-http.test.mjs": "9e2301ea70101a5f615420402d48459453295f67694cffdc47e5d8873b66e2d2",
+    "test/opencode-native-adapter.test.mjs": "c495aa34669b6315f8e272c897de3cd9c4eed16f77bf21f2c128cb3ce37b9aaa"
+  },
+  "staging_root": "/home/agent/tokligence-staging",
+  "runtime": {
+    "cli": {
+      "path": "/home/agent/tokligence-staging/runtime/opencode-public-cli-1.18.32",
+      "sha256": "7c6e67883fcb230b7d4cb1bfea821756ed8b320c1fb44e9c36c8e7fc8725826b"
+    },
+    "bun": {
+      "path": "/home/agent/tokligence-staging/runtime/bun",
+      "sha256": "354c2b049c716aca07b2e5cddb887928ac58950675d1258bb6312083917793b6"
+    }
   }
 }
