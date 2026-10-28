@@ -103,6 +103,11 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
       assert.equal(JSON.parse(result.body).error.code, 'native_request_body_timeout');
     }
 
+    const overLimitBefore = captures.length;
+    const overLimit = await call({ max_tokens: 16001 });
+    assert.equal(overLimit.status, 400);
+    assert.equal((await overLimit.json()).error.code, 'native_output_limit_exceeded');
+    assert.equal(captures.length, overLimitBefore, 'excessive output limit fails before provider I/O');
     let response = await call({ max_tokens: 1000 });
     assert.equal(response.status, 200, await response.clone().text());
     const session = response.headers.get('x-opencode-native-session');

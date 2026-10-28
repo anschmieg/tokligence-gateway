@@ -129,3 +129,23 @@ test('fault-injected registry operations retain a bounded, recoverable native id
     assert.equal(Object.keys(JSON.parse(await readFile(file))).length, 1);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test('native registry migrates model-scoped identities and switches models without new sessions', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'native-model-switch-'));
+  const file = path.join(root, 'sessions.json');
+  const switches = [];
+  let fail = true;
+  await writeFile(file, JSON.stringify({ legacyA: { id: 'ses_existing', model: 'model-a', lastUsed: Date.now() } }));
+  const options = { file, limit: 4, ttlMs: 60000, allocateID: () => { throw new Error('Unexpected allocation'); }, create: async () => { throw new Error('Unexpected creation'); }, remove: async () => {}, switchModel: async (id, model) => { switches.push([id, model]); if (fail) { fail = false; throw new Error('Interrupted model selection'); } } };
+  try {
+    const first = await createSessionRegistry(options);
+    await assert.rejects(first.get('conversation', 'model-b', new Set(), ['legacyA']), /Interrupted/);
+    const recovered = await createSessionRegistry(options);
+    assert.equal((await recovered.get('conversation', 'model-b', new Set(), ['legacyA'])).id, 'ses_existing');
+    const saved = JSON.parse(await readFile(file));
+    assert.equal(saved.legacyA, undefined);
+    assert.equal(saved.conversation.model, 'model-b');
+    assert.equal((await recovered.get('conversation', 'model-a', new Set(), ['legacyA'])).id, 'ses_existing');
+    assert.deepEqual(switches, [['ses_existing', 'model-b'], ['ses_existing', 'model-b'], ['ses_existing', 'model-a']]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

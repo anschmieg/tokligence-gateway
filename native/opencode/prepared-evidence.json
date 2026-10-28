@@ -89,5 +89,25 @@
       "zen-adversarial-official.log": "795540f5be67fa1af36dac419061093c4eaa09936b6c1e222c83c4f5eefadfe5",
       "zen-adversarial-lint.log": "443507d5f6920626d9f180866cf396a11e09a15ae1d35a934a3028ec0afd36c2"
     }
+  },
+  "api_boundary_verification": {
+    "created_at": "2026-10-28T15:56:59.024513+00:00",
+    "primary_reference": "OpenCode2.1.4/Bun1.4.4 shared core",
+    "manual_auth": "user reports normal OAuth; historical headers not established by current profile inspections",
+    "same_version_cases_pass": 114,
+    "new_native_suite_pass": 7,
+    "unit_pass": 352,
+    "unit_runtime_skips": 6,
+    "sdk_files": 1293,
+    "model_switch_and_migration": "native switchModel preserves conversation ID; cross-model active requests serialize",
+    "output_limit": "reject above resolved catalog limit before provider inference",
+    "limitations": "see API-BOUNDARY-REVIEW.md; not all CLI/config/TLS cases, background HTTP is not covered by completion-only cap",
+    "log_sha256": {
+      "zen-api-boundary-native.log": "c1aa547368dc2dab073fd0d7be940d3a9f76b735b0ecf1d2012d8400856c64c9",
+      "zen-api-boundary-full.log": "d43fe060421bbaa91ba4c58cbc340f50cbfb6502bbd91b910de543958ff2cf9d",
+      "zen-api-boundary-sdk-verified.log": "b06614ede222dc8e9e67ca7c477fcb229e216e249d237bca0f4ac88ea3fcad2d",
+      "zen-api-boundary-output-limit.log": "142c49a93c7d9e9ebbb1bc81fc0d9a5a075a1cde3e778abfb3010bed600c9901",
+      "zen-api-boundary-metadata.log": "46ce8857dc14b11badd8bd19807a52b15ad2ba9868cc4a005c645a5059c2b2d9"
+    }
   }
 }

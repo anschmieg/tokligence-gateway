@@ -124,6 +124,9 @@ const registry = await createSessionRegistry({
     const ref = Model.Ref.make({ providerID: Provider.ID.make(providerID), id: Model.ID.make(model) })
     return (await host.runtime.runPromise(host.sessions.create({ id: Session.ID.make(id), location, model: ref, agent: Agent.ID.make("build") }))).id
   },
+  switchModel: async (id: string, model: string) => {
+    await host.runtime.runPromise(host.sessions.switchModel({ sessionID: Session.ID.make(id), model: Model.Ref.make({ providerID: Provider.ID.make(providerID), id: Model.ID.make(model) }) }))
+  },
   remove: async (id: string) => { await host.runtime.runPromise(host.sessions.remove(Session.ID.make(id)).pipe(Effect.catchTag("Session.NotFoundError", () => Effect.void))) },
 })
 const nativeLayers = SessionModelRequest.layer.pipe(
@@ -163,7 +166,7 @@ async function inference(request: Request) {
   if (!allow.has(input.model)) throw new BridgeInputError("Model is not enabled on this native worker", "native_model_not_allowed")
   const scope = request.headers.get("x-opencode-bridge-session")
   if (!scope || !/^[A-Za-z0-9._:-]{1,128}$/.test(scope)) throw new BridgeInputError("A gateway-scoped x-opencode-bridge-session is required")
-  const sessionKey = createHash("sha256").update(`${scope}\0${input.model}`).digest("hex")
+  const sessionKey = createHash("sha256").update(`conversation\0${scope}`).digest("hex")
   if (active.has(sessionKey)) return Response.json({ error: { type: "native_bridge_error", code: "native_session_busy", message: "This native session already has an active request" } }, { status: 409, headers: headers({ "retry-after": "1" }) })
   if (active.size >= 4) return Response.json({ error: { type: "native_bridge_error", code: "native_worker_busy", message: "Native worker concurrency limit reached" } }, { status: 503, headers: headers({ "retry-after": "1" }) })
   active.add(sessionKey)
@@ -184,7 +187,7 @@ async function inference(request: Request) {
   try {
     const ref = Model.Ref.make({ providerID: Provider.ID.make(providerID), id: Model.ID.make(input.model) })
     let entry
-    try { entry = await registry.get(sessionKey, input.model, active) }
+    try { entry = await registry.get(sessionKey, input.model, active, [input.model, ...[...allow].filter(model => model !== input.model)].map(model => createHash("sha256").update(`${scope}\0${model}`).digest("hex"))) }
     catch (error) {
       if (errorCode(error) === "native_session_capacity") { await cleanup(); return Response.json({ error: { code: "native_session_capacity", message: "All native sessions are active; retry shortly" } }, { status: 503, headers: headers({ "retry-after": "1" }) }) }
       throw error
@@ -198,6 +201,9 @@ async function inference(request: Request) {
         const model = yield* resolver.resolve(ref)
         if (!model) return yield* Effect.fail(new BridgeInputError("Model is unavailable in OpenCode's catalog", "native_model_unavailable"))
         if (!fixture && model.cost.some((price) => price.input > 0 || price.output > 0)) return yield* Effect.fail(new BridgeInputError("The native worker only serves verified free models", "native_paid_model_rejected"))
+        if (typeof input.options.maxTokens === "number" && input.options.maxTokens > model.limit.output) {
+          return yield* Effect.fail(new BridgeInputError("Requested output exceeds this model's native catalog limit", "native_output_limit_exceeded"))
+        }
         const prepare = yield* SessionModelRequest.Service
         const prepared = yield* prepare.external({
           session, agent: Agent.ID.make("build"),

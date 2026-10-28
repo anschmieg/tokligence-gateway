@@ -35,7 +35,7 @@ export async function acquireStateLock(file) {
   return handle;
 }
 
-export async function createSessionRegistry({ file, limit, ttlMs, allocateID, create, remove, now = Date.now }) {
+export async function createSessionRegistry({ file, limit, ttlMs, allocateID, create, remove, switchModel = async (_id, _model) => {}, now = Date.now }) {
   const sessions = new Map();
   try {
     const saved = JSON.parse(await fs.readFile(file, 'utf8'));
@@ -75,12 +75,22 @@ export async function createSessionRegistry({ file, limit, ttlMs, allocateID, cr
       entry.lastUsed = now();
       return serialize(save);
     },
-    get(key, model, active) {
+    get(key, model, active, aliases = []) {
       return serialize(async () => {
         for (const [candidate, entry] of sessions) {
           if ((candidate === key || !active.has(candidate)) && (entry.removing || now() - entry.lastUsed >= ttlMs)) await discard(candidate);
         }
         let entry = sessions.get(key);
+        if (!entry) {
+          // Adopt one pre-upgrade model-specific identity without creating a
+          // second native session. Other old entries remain eligible for TTL/LRU.
+          const legacy = aliases.find(candidate => sessions.has(candidate) && !active.has(candidate));
+          if (legacy) {
+            entry = sessions.get(legacy);
+            sessions.delete(legacy);
+            sessions.set(key, entry);
+          }
+        }
         if (!entry) {
           while (sessions.size >= limit) {
             const oldest = [...sessions].filter(([candidate]) => !active.has(candidate))
@@ -97,6 +107,12 @@ export async function createSessionRegistry({ file, limit, ttlMs, allocateID, cr
           await save();
           await create(model, entry.id);
           delete entry.creating;
+        }
+        if (entry.model !== model) {
+          // Native selection is idempotent. If persistence fails after this,
+          // the same selection is safe to apply again after restart.
+          await switchModel(entry.id, model);
+          entry.model = model;
         }
         entry.lastUsed = now();
         await save();

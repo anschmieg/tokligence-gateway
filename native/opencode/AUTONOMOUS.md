@@ -1,5 +1,13 @@
 # OpenCode Zen completion checkpoint
 
+## API-boundary audit / user auth correction — latest
+
+User states normal manual sessions also use OAuth and allows whichever native version minimizes architecture problems. Primary target is now **same pinned2.1.4 SDK/CLI core**, not emulating1.18 on top of2.1. Current/historical profile inspection does NOT prove auth headers at the time of manual success. Withdraw broad “manual=public” premise. Existing1.18/public control remains only a specifically scoped transport diagnostic, NOT normalOAuthparity proof; do not auto-add OAuthcalls or rotatecredentials/lanes.
+
+Read API-BOUNDARY-REVIEW.md: inventory covers login/refresh/config/poll/catalog/inference/session/modelchange/tools/fork/auxiliary calls/network. Added npm run test:native-api:114 actual sameversion component cases pass in OS network namespace with syntheticOAuth/HTTP. Common primary/external request headers and model/HTTP hooks match; context shaping intentionally differs. Per-completion oneHTTPdispatch does NOT cover native Console polling/refresh or catalog traffic. Those are shared upstream native behavior, not invented session-registration calls. No live inference/auth calls by this audit.
+
+Concrete lifecycle mismatch fixed: conversation+model keys split native session on modelchange; now one conversation key, actual host.sessions.switchModel, legacy-ID adoption and cross-model active lease. Caller transcript/tools remain external; nativefork/transcript parity is not claimed. Complete source overlay must be refreshed before restart. Final verification/deployment recorded after checks below;114 tests alone are not full native/live acceptance.
+
 ## Review fixes deployed and smoke-checked
 
 Functional20c16c7 pushed/deployed staging, ownedworker/gateway restarted healthy. Worker overlay unchanged7e123663ec7d56b300918a1cd4fb4962eec8b3e86fa956e2acbff902a503258c. Actual-root checkonly verifies newlypinnedruntimehashes/root and refuses ONLY comparison_time_not_reached/provider_cooldown_active. Ledger bytehash unchanged, official-glm-control-20261029 stillunreserved, productionsecondarypathabsent/defaultOAuth/flock checks pass. VPS6targetedgroups pass including all12Python safety and16official/admission cases with Bun supplied. No inference, production orcredentialchanges. Scheduler handoff refreshed, cadence stillfixed01:34UTC/next2026-10-29T01:34:00Z; FIRSTdisable ontrigger, ONErequest maximum, allpriorguards apply.
