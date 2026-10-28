@@ -131,5 +131,28 @@
       "zen-startup-review-lint-verified.log": "443507d5f6920626d9f180866cf396a11e09a15ae1d35a934a3028ec0afd36c2",
       "zen-startup-sdk-final.log": "f3d9aeea6125a7ae465537e1804e22e7b3c74747dbfbb67b71a3b8873c14a49f"
     }
+  },
+  "model_admission_review": {
+    "created_at": "2026-10-28T18:42:13.817609+00:00",
+    "unit_pass": 354,
+    "unit_runtime_skips": 7,
+    "native_pass": 8,
+    "sdk_files": 1293,
+    "lint": "passed",
+    "fixes": [
+      "native_available_list_selection",
+      "all_cache_pricing_enforced",
+      "capability_and_output_validation_before_session_selection",
+      "failed_preflight_does_not_renew_idle_TTL",
+      "required_tool_choice_needs_tools",
+      "safe_typed_preflight_errors"
+    ],
+    "log_sha256": {
+      "zen-model-policy-full.log": "49bca5e2e53f3913fcc2ed8a0d5ebd62780699b0acab769548fc17e8eb22dea2",
+      "zen-model-policy-native.log": "3b9a4152794aee040dd877f8ee05b78c7048a6fff90d6f66a53e958bbf288e10",
+      "zen-model-policy-sdk.log": "95d2db0f873fd4921017874d8f5ac7e4a133714579bc1268160911dae2bd36ab",
+      "zen-model-policy-lint.log": "443507d5f6920626d9f180866cf396a11e09a15ae1d35a934a3028ec0afd36c2",
+      "zen-model-policy-runtime.log": "9c5e2d5456201305f108c81996af9526dbb1f82f870cc2bf9fb6392768527a3c"
+    }
   }
 }

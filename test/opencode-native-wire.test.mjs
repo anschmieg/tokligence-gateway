@@ -146,3 +146,10 @@ test('native streaming respects usage opt-in while buffered completions retain a
   assert.equal(chunks.at(-1).usage, undefined);
   assert.equal(encoder.completion().usage.total_tokens, 3);
 });
+
+test('required tool selection without declared tools is rejected before native dispatch', () => {
+  const body = { model: 'fixture', messages: [{ role: 'user', content: 'hello' }], tool_choice: 'required' };
+  for (const tools of [undefined, []]) assert.throws(() => decodeChatRequest({ ...body, tools }), /at least one declared function tool/);
+  assert.equal(decodeChatRequest({ ...body, tool_choice: 'none' }).toolChoice.type, 'none');
+  assert.equal(decodeChatRequest({ ...body, tools: [tool] }).toolChoice.type, 'required');
+});

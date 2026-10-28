@@ -32,6 +32,21 @@ import { scopedHttp } from "./tokligence-scoped-http"
 import overlay from "./tokligence-overlay.json"
 import { verifySourceOverlay } from "./tokligence-source-overlay.mjs"
 
+function hasPaidPrice(model: Pick<Model.Info, "cost">) {
+  return model.cost.some(price => price.input > 0 || price.output > 0 || price.cache.read > 0 || price.cache.write > 0)
+}
+
+function nativeCauseError(cause: Cause.Cause<unknown>, signal: AbortSignal) {
+  if (signal.reason instanceof BridgeInputError) return signal.reason
+  return cause.reasons.map(reason => {
+    if (Cause.isFailReason(reason)) {
+      const value = reason.error
+      return value && typeof value === "object" && "error" in value ? value.error : value
+    }
+    return Cause.isDieReason(reason) ? reason.defect : undefined
+  }).find(Boolean) || new Error("Native request interrupted")
+}
+
 function errorCode(error: unknown) { return error && typeof error === "object" && "code" in error ? error.code : undefined }
 type BridgeInput = {
   model: string; stream: boolean; includeUsage: boolean; system: Array<{ text: string }>
@@ -182,35 +197,51 @@ async function inference(request: Request) {
   const onAbort = () => cancel.abort(request.signal.reason)
   request.signal.addEventListener("abort", onAbort, { once: true })
   if (request.signal.aborted) onAbort()
+  let sessionAdmitted = false
   let cleanupTask: Promise<void> | undefined
   const cleanup = () => cleanupTask ??= (async () => {
     clearTimeout(deadline)
     request.signal.removeEventListener("abort", onAbort)
-    const persisted = registry.touch(sessionKey)
+    const persisted = sessionAdmitted ? registry.touch(sessionKey) : Promise.resolve()
     active.delete(sessionKey)
     try { await persisted }
     catch { console.warn(JSON.stringify({ event: "native_session_touch_failed" })) }
   })()
   try {
     const ref = Model.Ref.make({ providerID: Provider.ID.make(providerID), id: Model.ID.make(input.model) })
+    // Match SessionRunnerModel's explicit-selection admission. ModelResolver's
+    // low-level lookup also returns disabled catalog records, so it is not an
+    // availability check. Validate before credential resolution or session edits.
+    const resolution = await host.runtime.runPromiseExit(Effect.gen(function* () {
+      const locations = yield* LocationServiceMap.Service
+      return yield* Effect.gen(function* () {
+        yield* Plugin.awaitActivation
+        const catalog = yield* Model.Service
+        const selected = (yield* catalog.available()).find(item => item.providerID === ref.providerID && item.id === ref.id)
+        if (!selected) return yield* Effect.fail(new BridgeInputError("Model is unavailable in OpenCode's catalog", "native_model_unavailable"))
+        if (!selected.capabilities.input.includes("text") || !selected.capabilities.output.includes("text")) return yield* Effect.fail(new BridgeInputError("The selected native model does not support this text completion surface", "native_model_text_unsupported"))
+        if (hasPaidPrice(selected)) return yield* Effect.fail(new BridgeInputError("The native worker only serves verified free models", "native_paid_model_rejected"))
+        if (input.tools.length && !selected.capabilities.tools) return yield* Effect.fail(new BridgeInputError("The selected native model does not support function tools", "native_model_tools_unsupported"))
+        if (typeof input.options.maxTokens === "number" && input.options.maxTokens > selected.limit.output) return yield* Effect.fail(new BridgeInputError("Requested output exceeds this model's native catalog limit", "native_output_limit_exceeded"))
+        const resolver = yield* ModelResolver.Service
+        return yield* resolver.resolveModel(selected)
+      }).pipe(Effect.provide(locations.get(location)))
+    }), { signal: cancel.signal })
+    if (Exit.isFailure(resolution)) throw nativeCauseError(resolution.cause, cancel.signal)
+    const model = resolution.value
+    if (cancel.signal.aborted) throw new BridgeInputError("Native request was cancelled before session admission", "native_request_cancelled", 408)
     let entry
     try { entry = await registry.get(sessionKey, input.model, active, [input.model, ...[...allow].filter(model => model !== input.model)].map(model => createHash("sha256").update(`${scope}\0${model}`).digest("hex"))) }
     catch (error) {
       if (errorCode(error) === "native_session_capacity") { await cleanup(); return Response.json({ error: { code: "native_session_capacity", message: "All native sessions are active; retry shortly" } }, { status: 503, headers: headers({ "retry-after": "1" }) }) }
       throw error
     }
+    sessionAdmitted = true
     const session = await host.runtime.runPromise(host.sessions.get(Session.ID.make(entry.id)))
     const events = Stream.unwrap(Effect.gen(function* () {
       const locations = yield* LocationServiceMap.Service
       return Stream.unwrap(Effect.gen(function* () {
         yield* Plugin.awaitActivation
-        const resolver = yield* ModelResolver.Service
-        const model = yield* resolver.resolve(ref)
-        if (!model) return yield* Effect.fail(new BridgeInputError("Model is unavailable in OpenCode's catalog", "native_model_unavailable"))
-        if (!fixture && model.cost.some((price) => price.input > 0 || price.output > 0)) return yield* Effect.fail(new BridgeInputError("The native worker only serves verified free models", "native_paid_model_rejected"))
-        if (typeof input.options.maxTokens === "number" && input.options.maxTokens > model.limit.output) {
-          return yield* Effect.fail(new BridgeInputError("Requested output exceeds this model's native catalog limit", "native_output_limit_exceeded"))
-        }
         const prepare = yield* SessionModelRequest.Service
         const prepared = yield* prepare.external({
           session, agent: Agent.ID.make("build"),
@@ -243,8 +274,7 @@ async function inference(request: Request) {
       }))
     })), { signal: cancel.signal }).then((exit) => {
       if (Exit.isFailure(exit)) {
-        const reasons = exit.cause.reasons
-        failure = cancel.signal.reason instanceof BridgeInputError ? cancel.signal.reason : reasons.map((reason) => Cause.isFailReason(reason) ? ("error" in reason.error ? reason.error.error : reason.error) : Cause.isDieReason(reason) ? reason.defect : undefined).find(Boolean) || new Error("Native request interrupted")
+        failure = nativeCauseError(exit.cause, cancel.signal)
       }
       done = true
       notify()
@@ -321,9 +351,9 @@ const server = Bun.serve({
                   if (parsed.hostname === "opencode.ai" || (fixture && ["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname))) endpoint = parsed.origin + parsed.pathname
                 } catch {}
               }
-              rows.push({ id, available: Boolean(model), package: model?.package, model_id: model?.modelID, endpoint,
+              rows.push({ id, available: Boolean(model?.enabled), package: model?.package, model_id: model?.modelID, endpoint,
                 reasoning_field: model?.compatibility?.reasoningField, configured_require_reasoning: model?.compatibility?.requireReasoning,
-                enabled: model?.enabled, free: model ? !model.cost.some(price => price.input > 0 || price.output > 0) : undefined })
+                enabled: model?.enabled, tools_supported: model?.capabilities.tools, text_supported: model ? model.capabilities.input.includes("text") && model.capabilities.output.includes("text") : undefined, free: model ? !hasPaidPrice(model) : undefined })
             }
             return rows
           }).pipe(Effect.provide(locations.get(location)))

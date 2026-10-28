@@ -51,9 +51,15 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
   });
   await new Promise(resolve => provider.listen(0, '127.0.0.1', resolve));
   const fixture = path.join(state, 'fixture.json');
-  await writeFile(fixture, JSON.stringify({ providers: { fixture: { package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: `http://127.0.0.1:${provider.address().port}/v1`, apiKey: 'synthetic' }, models: { 'test-model': { limit: { context: 64000, output: 16000 } } } } } }));
+  await writeFile(fixture, JSON.stringify({ providers: { fixture: { package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: `http://127.0.0.1:${provider.address().port}/v1`, apiKey: 'synthetic' }, models: {
+    'test-model': { limit: { context: 64000, output: 16000 } },
+    'disabled-model': { disabled: true, limit: { context: 64000, output: 16000 } },
+    'cache-priced': { cost: { input: 0, output: 0, cache: { read: 1, write: 0 } }, limit: { context: 64000, output: 16000 } },
+    'non-text': { capabilities: { tools: true, input: ['image'], output: ['image'] }, limit: { context: 64000, output: 16000 } },
+    'no-tools': { capabilities: { tools: false, input: ['text'], output: ['text'] }, limit: { context: 64000, output: 16000 } },
+  } } } }));
   const key = 'synthetic-private-worker-key-0000000000';
-  const worker = spawn(bun, ['run', path.join(source, 'packages/sdk/src/tokligence-bridge.ts')], { env: { ...process.env, OPENCODE_NATIVE_STATE: state, OPENCODE_NATIVE_PORT: '0', OPENCODE_NATIVE_KEY: key, OPENCODE_NATIVE_MODELS: 'test-model', OPENCODE_NATIVE_BODY_TIMEOUT_MS: '2000', OPENCODE_NATIVE_REQUEST_TIMEOUT_MS: '5000', OPENCODE_NATIVE_FIXTURE_CONFIG: fixture, ...Object.fromEntries(['DATA', 'CONFIG', 'CACHE', 'STATE'].map(name => [`XDG_${name}_HOME`, path.join(state, name.toLowerCase())])) }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const worker = spawn(bun, ['run', path.join(source, 'packages/sdk/src/tokligence-bridge.ts')], { env: { ...process.env, OPENCODE_NATIVE_STATE: state, OPENCODE_NATIVE_PORT: '0', OPENCODE_NATIVE_KEY: key, OPENCODE_NATIVE_MODELS: 'test-model,disabled-model,cache-priced,no-tools,non-text', OPENCODE_NATIVE_BODY_TIMEOUT_MS: '2000', OPENCODE_NATIVE_REQUEST_TIMEOUT_MS: '5000', OPENCODE_NATIVE_FIXTURE_CONFIG: fixture, ...Object.fromEntries(['DATA', 'CONFIG', 'CACHE', 'STATE'].map(name => [`XDG_${name}_HOME`, path.join(state, name.toLowerCase())])) }, stdio: ['ignore', 'pipe', 'pipe'] });
   let logs = '';
   worker.stderr.on('data', value => { logs += value; });
   try {
@@ -73,6 +79,10 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
     assert.equal(modelDiagnostic.models[0].id, 'test-model');
     assert.equal(modelDiagnostic.models[0].available, true);
     assert.equal(modelDiagnostic.models[0].free, true);
+    assert.equal(modelDiagnostic.models.find(model => model.id === 'disabled-model').available, false);
+    assert.equal(modelDiagnostic.models.find(model => model.id === 'cache-priced').free, false);
+    assert.equal(modelDiagnostic.models.find(model => model.id === 'non-text').text_supported, false);
+    assert.equal(modelDiagnostic.models.find(model => model.id === 'no-tools').tools_supported, false);
     assert.equal(captures.length, 0, 'model diagnostics do not invoke inference');
     assert.doesNotMatch(JSON.stringify(modelDiagnostic), /synthetic-private-worker-key|apiKey|authorization|cookie/i);
     const messages = [{ role: 'system', content: 'EXACT_CALLER_SYSTEM' }, { role: 'user', content: 'Long input '.repeat(5000) }];
@@ -103,11 +113,27 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
       assert.equal(JSON.parse(result.body).error.code, 'native_request_body_timeout');
     }
 
+    const registryPath = path.join(state, 'bridge-sessions.json');
+    const readRegistry = async () => { try { return await (await import('node:fs/promises')).readFile(registryPath, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return null; throw error; } };
+    const originalRegistry = await readRegistry();
+    for (const [model, code] of [['disabled-model', 'native_model_unavailable'], ['cache-priced', 'native_paid_model_rejected'], ['no-tools', 'native_model_tools_unsupported'], ['non-text', 'native_model_text_unsupported']]) {
+      const before = captures.length;
+      const rejected = await call({ model });
+      assert.equal(rejected.status, 400, await rejected.clone().text());
+      assert.equal((await rejected.json()).error.code, code);
+      assert.equal(captures.length, before, 'rejected catalog model never reaches provider');
+      assert.equal(await readRegistry(), originalRegistry, 'rejected model must not allocate/switch a native session');
+    }
+    const requiredWithoutTools = await call({ tools: [], tool_choice: 'required' });
+    assert.equal(requiredWithoutTools.status, 400);
+    await requiredWithoutTools.text();
+    assert.equal(await readRegistry(), originalRegistry);
     const overLimitBefore = captures.length;
     const overLimit = await call({ max_tokens: 16001 });
     assert.equal(overLimit.status, 400);
     assert.equal((await overLimit.json()).error.code, 'native_output_limit_exceeded');
     assert.equal(captures.length, overLimitBefore, 'excessive output limit fails before provider I/O');
+    assert.equal(await readRegistry(), originalRegistry, 'invalid output budget must not mutate native session');
     let response = await call({ max_tokens: 1000 });
     assert.equal(response.status, 200, await response.clone().text());
     const session = response.headers.get('x-opencode-native-session');
@@ -118,6 +144,16 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
     assert.equal(captures[0].body.max_completion_tokens, undefined);
     assert.deepEqual(captures[0].body.messages, messages);
     assert.equal(captures[0].body.tools[0].function.name, 'read_file');
+    const existingRegistry = await readRegistry();
+    const disabledAfterSuccess = await call({ model: 'disabled-model' });
+    assert.equal(disabledAfterSuccess.status, 400);
+    await disabledAfterSuccess.text();
+    assert.equal(await readRegistry(), existingRegistry, 'rejected model must not change selected model, identity or idle TTL');
+    const textOnly = await call({ model: 'no-tools', tools: [] });
+    assert.equal(textOnly.status, 200, await textOnly.clone().text());
+    await textOnly.text();
+    assert.equal(textOnly.headers.get('x-opencode-native-session'), session, 'text-only model still works without tools');
+
     mode = 'tools'; response = await call();
     const assistant = (await response.json()).choices[0].message;
     assert.equal(assistant.reasoning_content, 'native reasoning to replay');

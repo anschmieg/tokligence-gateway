@@ -83,3 +83,14 @@ Three findings fixed:
 Readiness is emitted after signal-handler installation. The positive public fixture explicitly accounts for the bwrap supervisor being terminated after readiness; it does not label that supervisor's exit a verified graceful worker shutdown.
 
 The combined verification also exposed a reference-fixture gap: TCP reset during CLI abort was discarded as an unclassified OSError, so a closed provider socket could be reported as not closed. The fixture now recognizes EOF and connection reset explicitly; timeout, unexpected data and unrelated exceptions still do not count as closure. A pure socket-outcome regression guards the distinction. This changes fixture accuracy, not provider retry/cancellation policy.
+
+## Model admission / invalid request review
+
+Findings fixed:
+
+- **High — disabled-model admission differed from the runner.** The bridge called ModelResolver.resolve, whose explicit lookup can return disabled catalog records. Native SessionRunnerModel checks the selected model against the available list first. The bridge now samples the native available catalog and resolves that selected record, rejecting disabled/unavailable models before per-model resolution or native session selection.
+- **High — free-only pricing omitted cache charges.** Both request admission and diagnostics checked only input/output price. They now inspect input, output, cache-read and cache-write prices across every tier. The same guard is exercised with synthetic fixture pricing instead of being skipped in fixtures. This is the bridge's stricter free-only policy, not a claim that the normal CLI disallows paid models.
+- **Medium — request validation occurred after session mutation.** Unsupported tools/text modality and above-catalog output budgets are now rejected before native allocation/model switching. A failed preflight also no longer renews an existing registry entry's idle timestamp. Tests check no inference and byte-identical registry state for rejected requests, both before first use and after a successful conversation.
+- **Medium — required tool choice without tools could be submitted upstream.** This inconsistent combination now fails during wire validation. Named selection already requires a declared tool; none/required with valid definitions retain their documented semantics.
+
+Positive regressions verify a tool-disabled model still serves plain text without definitions and preserves the native conversation ID on model switches. The worker exposes text/tools capability flags in authenticated zero-inference diagnostics and reports disabled models unavailable/cache-priced models nonfree. Failures from preflight preserve their safe typed errors through Effect's failure representation. Native configuration/catalog activation can still perform its normal background HTTP; these regressions count inference endpoint calls, not all credential/config traffic.

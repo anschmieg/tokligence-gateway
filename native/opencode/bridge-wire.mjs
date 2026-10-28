@@ -178,6 +178,7 @@ export function decodeChatRequest(body) {
     if (typeof body.parallel_tool_calls !== "boolean") return fail("parallel_tool_calls must be boolean");
     toolChoice = { ...(toolChoice || { type: "auto" }), disableParallelToolUse: !body.parallel_tool_calls };
   }
+  if (!tools.length && toolChoice?.type === "required") return fail("Required tool choice needs at least one declared function tool");
   if (tools.length && !toolChoice) toolChoice = { type: "auto" };
   const options = {};
   if (body.max_completion_tokens !== undefined && body.max_tokens !== undefined && body.max_completion_tokens !== body.max_tokens) return fail("Conflicting output token limits");

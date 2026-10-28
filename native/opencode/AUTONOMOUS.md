@@ -1,5 +1,13 @@
 # OpenCode Zen completion checkpoint
 
+## Model-admission verification complete
+
+Final full354pass/7explicitruntime skips; native8pass/0skip including114APIcases,80+5bodycomparisons, actualClaude/compiledCLI, startup/recovery/lifecycle/cancel regressions. SDK1293clean; lintpass. New real-runtime negatives disabled/cache-priced/non-text/tool-incompatible/invalidtoolchoice/overlimit requests make zero inference calls and leave registry unchanged, including existing model/identity/idleTTL. Plain-text no-tools positive preserves same conversation ID. Evidence/overlay refreshed, stableone-request window/ID/time unchanged. Logs /tmp/zen-model-policy-{full,native,sdk,lint,runtime}.log. No diagnostic inference or login probes; normalstaging backgrounddiscovery/refresh remains possible. Deployment/admission result follows after completion.
+
+## Model-admission review — latest changes
+
+NativeRunner availability check was bypassed by direct low-level ModelResolver.resolve. Worker now selects from native Model.available before resolveModel; disabled models fail before session selection. All input/output/cache-read/cache-write prices across tiers now enforced by free-only guard and diagnostics, including fixture regressions. Text/tool capability checks and output budgets precede native allocation/switching; failed preflight does not renew an existing idle TTL. Required tool choice without declared tools rejected locally. Positive text-only-without-tools and realClaude/cancel regressions included. Typed Effect failures preserve safe validation errors. This does not claimzero background native catalog/config HTTP, or normalCLI paid-model prohibition. No live inference/login probes. Complete overlay/evidence refresh and final deployment recorded after verification below.
+
 ## Startup/recovery fixes deployed
 
 Functional2664f1b pushed/deployed with full overlay **17d21ecdef56eb2f5a802ac8c514bbbfecda5fb437d554253f7bea18c359eed3**. Owned worker/gateway restarted healthy. Actual-root checkonly refuses ONLY comparison_time_not_reached/provider_cooldown_active; ledger bytehash unchanged, nextIDunreserved. All13targetedVPS checks pass (auth/state/adapter/guard/control). Admission verifies overlay/defaultOAuth/flock/productionsecondaryabsence. No diagnostic inference or device-login probes; normalOAuthbackgrounddiscovery/refresh remains possible.
