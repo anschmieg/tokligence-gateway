@@ -1,5 +1,11 @@
 # OpenCode Zen completion checkpoint
 
+## Startup/recovery fixes deployed
+
+Functional2664f1b pushed/deployed with full overlay **17d21ecdef56eb2f5a802ac8c514bbbfecda5fb437d554253f7bea18c359eed3**. Owned worker/gateway restarted healthy. Actual-root checkonly refuses ONLY comparison_time_not_reached/provider_cooldown_active; ledger bytehash unchanged, nextIDunreserved. All13targetedVPS checks pass (auth/state/adapter/guard/control). Admission verifies overlay/defaultOAuth/flock/productionsecondaryabsence. No diagnostic inference or device-login probes; normalOAuthbackgrounddiscovery/refresh remains possible.
+
+Scheduler handoff was consolidated to remove accumulated stale prefixes. Same fixed01:34UTC/next2026-10-29T01:34:00Z, FIRSTdisable, stableone-request/1024-output publictransportdiagnostic only; no automaticsecondrequest/matrix or auth/parity overclaim. UpcomingnormalOAuthreference requires separate sameversion preparation and exclusive refreshownership, never another owner/account/IP. See startupreview for all deliberate caller-loop differences and evidence.
+
 ## Startup/recovery review verification
 
 Final full353pass/7explicitruntime skips; native8pass/0skip including realClaude/compiledCLI,114APIcases,80+5bodycomparison, realstartup public-state and suspendedclaim regressions. SDK1293clean; lintpass. Logs /tmp/zen-startup-review-{full,native,lint}-verified.log and /tmp/zen-startup-sdk-final.log. Source/evidence hashes and overlay refreshed, stable run/window IDs/caps/time unchanged. No live inference/device-login probes; normal restoredOAuthhost may still perform native discovery/refresh. See startup/recovery findings below. Deployment and actual-root admission results follow after completion.
