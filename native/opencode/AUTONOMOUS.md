@@ -1,5 +1,13 @@
 # OpenCode Zen completion checkpoint
 
+## Same-VPS GLM success — October28 09:28:35UTC
+
+User supplied session **ses_e7e28fa42ffex6qBXbtGHzwLKe**. Read-only same-agent standard DB confirms officialCLI1.18.32, provider opencode, **glm-5.3-flash-free**, finish stop, no error, input258/output6/reasoning25 tokens at2026-10-28T09:28:35.066UTC. This supersedes model-mismatch as explanation for manual-versus-control discrepancy. No message content exposed; no inference sent by agent.
+
+Rejected official GLM control ran around00:01 via fresh modified profile + urllib HTTPS relay; manual GLM succeeded09:28 in normal profile/nativeBun transport. Same VPS/user/version/model/catalog endpoint now established. Historical egress/destination family, exact HTTP/TLS/profile and timing remain unmatched. Cannot call this an account/VPS-wide daylong block or claim model-specific quotas explain GLM. Also cannot infer directTLS is proven cause: server eligibility may have changed over9hours. Reasoning token count does not verify replay.
+
+Next useful work is offline normalCLI versus control profile/request/transport audit, without copying credentials or altering egress. Preserve recorded cooldown and01:03 schedule; do not probe GLM/BigPickle immediately to bypass rejection. Existing normal manual success is real live availability evidence, but not bridge/tool/continuation acceptance. Do not spend next turn adding BigPickle support merely to explain the now-resolved model mismatch. Scheduled continuation must read this newest evidence first and select a specific new comparison hypothesis rather than repeat the unchanged failed relay control.
+
 ## Same-VPS manual success — October28 09:23:59UTC
 
 User manually ran newly exposed officialCLI1.18.32 as agent uid30033 on fra-agent VPS. Read-only standard-profile DB confirms session ses_e7e2d3017ffeMNL4rtoVtpHCYC: provider opencode, model **big-pickle**, finish stop, no error, input6748/output9/reasoning20 tokens. No message content exposed. Current normal profile: no auth.json, account/control_account both0 rows, no global provider override; catalog API https://opencode.ai/inference/openai/v1. Big Pickle catalog costs input/output/cache0, interleaved reasoning_content. No inference sent during inspection.
