@@ -23,7 +23,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-open_gateway = urllib.request.build_opener(NoRedirect()).open
+open_gateway = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect()).open
 
 
 def gateway_url(value):

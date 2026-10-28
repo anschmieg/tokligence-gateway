@@ -1,0 +1,8 @@
+{
+  "version": "1.18.32",
+  "commit": "545f51d26cc39a907d2867492d498d9607ea5fa4",
+  "bun": "1.3.14",
+  "transformSha256": "c07d49e48dd2478ad2813a10805781a72551db2fd847b7df994cc854bf654c16",
+  "openaiCompatibleVersion": "2.0.41",
+  "openaiCompatibleDistSha256": "94f88aca6cd0060e1e642fdc1d7fc69d106c65e028c28013963f93cb626c037a"
+}

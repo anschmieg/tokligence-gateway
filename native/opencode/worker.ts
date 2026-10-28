@@ -4,7 +4,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { createHash, timingSafeEqual, randomUUID } from "node:crypto"
 import { Effect, Stream, Layer, Schema, Cause, Exit } from "effect"
-import { LLMClient, Message, SystemPart, ToolDefinition, type ToolChoice } from "@opencode/ai"
+import { LLMClient, LanguageModel, Message, SystemPart, ToolDefinition, type ToolChoice } from "@opencode/ai"
 import { EmbeddedHost } from "./internal/host"
 import { LocationServiceMap } from "@opencode/core/location-services"
 import { Location } from "@opencode/core/location"
@@ -195,7 +195,10 @@ async function inference(request: Request) {
         if (!fixture && model.cost.some((price) => price.input > 0 || price.output > 0)) return yield* Effect.fail(new BridgeInputError("The native worker only serves verified free models", "native_paid_model_rejected"))
         const prepare = yield* SessionModelRequest.Service
         const prepared = yield* prepare.external({
-          session, agent: Agent.ID.make("build"), model,
+          session, agent: Agent.ID.make("build"),
+          // Match the working 1.18 OpenAI-compatible tool encoding through
+          // native model compatibility, without rewriting serialized HTTP.
+          model: { ...model, model: LanguageModel.update(model.model, { compatibility: { ...model.model.compatibility, supportsStrictMode: false } }) },
           system: input.system.map((part) => SystemPart.make(part.text)),
           messages: input.messages.map((message) => Message.make(message)),
           tools: { definitions: input.tools.map((tool) => ToolDefinition.make(tool)), execute: () => Effect.die("External tools must never execute in the native worker") },
@@ -301,6 +304,7 @@ const server = Bun.serve({
                 } catch {}
               }
               rows.push({ id, available: Boolean(model), package: model?.package, model_id: model?.modelID, endpoint,
+                reasoning_field: model?.compatibility?.reasoningField, configured_require_reasoning: model?.compatibility?.requireReasoning,
                 enabled: model?.enabled, free: model ? !model.cost.some(price => price.input > 0 || price.output > 0) : undefined })
             }
             return rows

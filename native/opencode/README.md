@@ -74,7 +74,7 @@ The default is **one GLM basic request with at most1024 output tokens**, not the
 
 ```sh
 python3 /home/agent/tokligence-staging/gateway/native/opencode/live-tests.py \
-  --run-id glm-preflight-20261028 --not-before 2026-10-28T00:01:00+00:00
+  --run-id glm-preflight-20261029 --not-before 2026-10-29T01:03:00+00:00
 ```
 
 This does not change the staging worker's authentication mode. `--models` accepts only the four free IDs; `--phases` selects `basic,tools,long,claude`. Requests and reserved output tokens must fit explicit `--request-budget`/`--output-budget` values; a CLI request is capped at8192. Run small selected phases after a successful preflight, not repeated full matrices. The complete20-check coverage plan remains visible: omitted phases/models are untested, never passed.
@@ -89,14 +89,15 @@ After reset, use a stable identity for the single official-CLI GLM control:
 
 ```sh
 python3 /home/agent/tokligence-staging/gateway/native/opencode/official-public-probe.py \
-  --run-id official-glm-control-20261028 --pause-staging
+  --run-id official-glm-control-20261029 --not-before 2026-10-29T01:03:00+00:00 \
+  --pause-staging --bun-transport /home/agent/tokligence-staging/runtime/bun
 ```
 
-The default not-before is October28 00:01UTC. The same shared guard prevents replay, concurrent probes and calls during cooldown. The verified1.18.32 binary runs in an empty profile; no OAuth files or gateway credentials enter it. Its built-in public authentication is selected normally. Static `official-models.json` retains public metadata for four zero-cost aliases; only the output limit is reduced to1024. Tools, plugins, project config, updates, compaction and model fetching are disabled. The control admits exactly one selected-model Chat Completions request and forwards the original JSON/CLI metadata headers to the fixed HTTPS OpenCode endpoint, with normal TLS validation and no redirects/proxies/cookies. SDK retries are denied locally without further provider traffic. Inherited proxy configuration causes refusal, not an automatic egress change.
+An explicit `--not-before` timestamp is required; the authorized next comparison is October29 01:03UTC. The same shared guard prevents replay, concurrent probes and calls during cooldown. The verified1.18.32 binary runs in an empty profile; no OAuth files or gateway credentials enter it. Its built-in public authentication is selected normally. Static `official-models.json` retains public metadata for four zero-cost aliases; only the output limit is reduced to1024. Tools, plugins, project config, updates, compaction and model fetching are disabled. The control admits exactly one selected-model Chat Completions request and forwards the original JSON/CLI metadata headers to the fixed HTTPS OpenCode endpoint, with normal TLS validation and no redirects/proxies/cookies. SDK retries are denied locally without further provider traffic. Inherited proxy configuration causes refusal, not an automatic egress change.
 
 `--pause-staging` verifies recorded PID ownership (including relative script paths plus cwd), stops only those staging services to fit the1GiB user limit, then restores and checks their health in cleanup. Other processes, OAuth ownership and production remain untouched. Version/startup errors and timeouts preserve private diagnostics; per-run evidence lives under `live-reports/`. `--fixture-upstream` admits loopback `/v1` only and labels the result synthetic; it cannot choose another live origin. A successful control is not complete matrix coverage.
 
-Scope limitation: this is the official CLI generating HTTP requests through a counted relay; Python performs the onward HTTPS transport. It does **not** establish byte-for-byte or direct Bun-TLS parity. The report labels that transport explicitly. A rejection must not be described as an untouched direct-CLI result, and is not permission to retry unguarded. The network-blocked regression executes the real CLI through the same relay/profile and verifies one request, public auth, the model and exact token field.
+Scope limitation: this is the official CLI generating HTTP requests through a counted relay; The selected transport performs onward HTTPS (Bun in the command above; urllib when the Bun option is absent). It does **not** establish byte-for-byte or direct Bun-TLS parity. The report labels that transport explicitly. A rejection must not be described as an untouched direct-CLI result, and is not permission to retry unguarded. The network-blocked regression executes the real CLI through the same relay/profile and verifies one request, public auth, the model and exact token field.
 
 ## HTTP cancellation lifetime
 
@@ -129,3 +130,5 @@ The original private report retains this evidence, but its old `coverage_incompl
 Authenticated `GET /v1/diagnostics/models` on the native worker reports allowlisted resolved catalog model IDs, package, enabled/free flags and sanitized known-provider endpoint, plus auth mode. It does not prepare a turn or invoke inference, and does not expose credential settings. This distinguishes actual deployed model resolution from synthetic captures that override package/baseURL.
 
 The official control optionally accepts `--bun-transport /absolute/path/to/bun` to forward its one guarded request using Bun.fetch instead of Python TLS. The private subprocess retains fixed destination/public auth, no redirects or retries, bounded I/O and deadline; the parent owns reservation/cooldown. Offline capture accepts the same option and blocks external networking. This removes one transport difference without claiming untouched compiled-CLI parity or a proven quota fix.
+
+See [ADVERSARIAL-REVIEW.md](ADVERSARIAL-REVIEW.md) for the measured compatibility scope and remaining live gaps. Independent multi-turn compiler comparison is included in `test:native` when `OPENCODE_REFERENCE_SOURCE` (frozen installed1.18.32 source) and `OPENCODE_REFERENCE_BUN` (1.3.14) are supplied; hashes/version are checked against `reference-source.json`. The32 cases cover all four free models and require exact structural body equality. They do not establish full CLI/session/header/TLS parity. Live scripts now require an explicit `--not-before`; no implicit00:01 schedule remains.

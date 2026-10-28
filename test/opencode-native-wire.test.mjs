@@ -20,6 +20,7 @@ test("native input preserves caller prompts, schemas, reasoning, call IDs and re
   assert.deepEqual(result.system.map((part) => part.text), ["First prompt", "Second prompt", "Third prompt"]);
   assert.deepEqual(result.tools[0].inputSchema, tool.function.parameters);
   assert.deepEqual(result.messages[1].content, [
+    { type: "text", text: "" },
     { type: "reasoning", text: "Returned reasoning" },
     { type: "tool-call", id: "caller_1", name: "lookup", input: { id: 7 } },
   ]);
@@ -86,6 +87,16 @@ test('native authoritative end text is preserved and revisions cannot silently c
   assert.throws(() => encoder.push({ type: 'text-end', id: 'part', text: 'rewritten' }), /revised/);
 });
 
+test('native quota diagnostics survive invalid retry durations and unknown private tags', () => {
+  for (const retryAfterMs of [Number.MAX_VALUE, Infinity, -1, 'PRIVATE_CANARY']) {
+    const result = safeNativeError({ reason: { _tag: 'PRIVATE_CANARY', retryAfterMs, http: { status: 429 } } });
+    assert.equal(result.status, 429);
+    assert.equal(result.error.retry_at, undefined);
+    assert.doesNotMatch(JSON.stringify(result), /PRIVATE_CANARY/);
+  }
+  assert.equal(safeNativeError({ reason: { _tag: {} } }).status, 502);
+});
+
 for (const [reason, expected] of [["length", "length"], ["content-filter", "content_filter"]]) test(`native ${reason} withholds pending tool calls`, () => {
   const encoder = createChatEncoder({ model: "fixture", id: "one" });
   assert.deepEqual(encoder.push({ type: "tool-call", id: "one", name: "run", input: {} }), []);
@@ -109,6 +120,9 @@ test("native history preserves inline system reminders and tool errors", () => {
 
 for (const [label, mutate] of [
   ['duplicate tool results', body => body.messages.push({ ...body.messages.at(-1) })],
+  ['unanswered tool calls', body => body.messages.pop()],
+  ['user turn before tool results', body => body.messages.splice(1, 0, { role: 'user', content: 'interrupt without tool results' })],
+  ['assistant turn before tool results', body => body.messages.splice(1, 0, { role: 'assistant', content: 'answer' })],
   ['reasoning on system history', body => body.messages.unshift({ role: 'system', content: 'prompt', reasoning_content: 'must not be discarded' })],
   ['calls on system history', body => body.messages.unshift({ role: 'system', content: 'prompt', tool_calls: [] })],
   ['result IDs on assistant history', body => { body.messages[0].tool_call_id = 'one'; }],

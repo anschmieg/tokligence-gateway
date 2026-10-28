@@ -113,7 +113,7 @@ def main():
     parser.add_argument('--bun-transport', help='Use this Bun executable for guarded onward HTTPS; no Python TLS')
     parser.add_argument('--run-id', required=True)
     parser.add_argument('--model', default='glm-5.3-flash-free', choices=list(json.loads(CATALOG.read_text())['opencode']['models']))
-    parser.add_argument('--not-before', default='2026-10-28T00:01:00+00:00')
+    parser.add_argument('--not-before', required=True, help='Explicit earliest authorized comparison time, including timezone')
     parser.add_argument('--pause-staging', action='store_true')
     parser.add_argument('--fixture-upstream', help='Synthetic loopback /v1 only; report is explicitly not live evidence')
     args = parser.parse_args()

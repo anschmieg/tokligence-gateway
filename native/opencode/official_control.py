@@ -4,6 +4,7 @@ import base64
 import datetime
 import email.utils
 import http.server
+import http.client
 import json
 import os
 import pathlib
@@ -157,7 +158,12 @@ def official_relay(guard, model, fixture_upstream=None, timeout=60, bun_binary=N
                             response = error
                         with response:
                             status = response.status
-                            data = response.read(2 * 1024 * 1024 + 1)
+                            try:
+                                data = response.read(16 * 1024 if status >= 300 else 2 * 1024 * 1024 + 1)
+                            except (OSError, urllib.error.URLError, http.client.HTTPException):
+                                if status < 300:
+                                    raise
+                                data = b''
                             failure = public_failure(data, response.headers) if status >= 300 else None
                     if len(data) > 2 * 1024 * 1024:
                         raise ValueError('Control response exceeded limit')
@@ -166,7 +172,8 @@ def official_relay(guard, model, fixture_upstream=None, timeout=60, bun_binary=N
                 self.reply(status, data)
             except ProbeStopped:
                 status = guard.status if guard.status in (401, 403, 429) else 400
-                code = 'FreeUsageLimitError' if status == 429 else 'ProbeStopped'
+                actual = guard.entry.get('upstream_code')
+                code = actual if actual and actual != 'upstream_http_error' else ('rate_limit_error' if status == 429 else 'ProbeStopped')
                 self.reply(status, json.dumps({'error': {'type': code, 'message': 'Control stopped by safety guard'}}).encode())
             except (ValueError, TypeError, KeyError, OSError, urllib.error.URLError, subprocess.TimeoutExpired):
                 try:

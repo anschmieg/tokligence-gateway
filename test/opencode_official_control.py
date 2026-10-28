@@ -25,6 +25,8 @@ class OfficialTests(unittest.TestCase):
         self.root = pathlib.Path(self.temp.name)
         self.calls = []
         self.status = 200
+        self.error_body = None
+        self.truncated = False
         owner = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -40,9 +42,14 @@ class OfficialTests(unittest.TestCase):
                 self.send_header('x-opencode-log-id', '01a17f70-7a91-7e31-ac46-5859c5becdd6')
                 if owner.status == 307:
                     self.send_header('Location', owner.url + '/v1/should-not-follow')
+                if owner.truncated:
+                    self.send_header('Content-Length', '99999')
                 self.end_headers()
                 if owner.status != 200:
-                    self.wfile.write(json.dumps({'error': {'type': 'FreeUsageLimitError', 'message': 'PRIVATE_PROVIDER_MESSAGE'}}).encode())
+                    try:
+                        self.wfile.write(owner.error_body if owner.error_body is not None else json.dumps({'error': {'type': 'FreeUsageLimitError', 'message': 'PRIVATE_PROVIDER_MESSAGE'}}).encode())
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass
                 else:
                     self.wfile.write(b'data: {"choices":[{"index":0,"delta":{"content":"OFFICIAL_CONTROL_OK"},"finish_reason":null}]}\n\ndata: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
 
@@ -152,6 +159,26 @@ class OfficialTests(unittest.TestCase):
             reset = parse_time(guard.ledger['cooldown_until'])
             self.assertTrue(0 < (reset - utc_now()).total_seconds() <= 60)
         self.assertNotIn('PRIVATE_PROVIDER_MESSAGE', (self.root / 'live-probe-ledger.json').read_text())
+
+    def test_quota_headers_survive_large_or_truncated_error_bodies(self):
+        transports = [None] + ([os.environ['OPENCODE_NATIVE_BUN']] if os.environ.get('OPENCODE_NATIVE_BUN') else [])
+        for transport in transports:
+            for truncated in [False, True]:
+                with self.subTest(bun=bool(transport), truncated=truncated):
+                    self.status = 429
+                    self.truncated = truncated
+                    self.error_body = b'broken-json' if truncated else b'x' * (3 * 1024 * 1024)
+                    self.calls.clear()
+                    root = self.root / ('body-' + str(bool(transport)) + '-' + str(truncated))
+                    root.mkdir()
+                    with LiveGuard(root, 'error-body', 1, 1024) as guard:
+                        with official_relay(guard, 'glm-5.3-flash-free', self.url + '/v1', 2, bun_binary=transport) as relay:
+                            self.assertEqual(self.send(relay)[0], 429)
+                            self.assertEqual(self.send(relay)[0], 429)
+                        self.assertEqual(guard.status, 429)
+                        self.assertIn('cooldown_until', guard.ledger)
+                        self.assertEqual(guard.entry['upstream_request_id'], '01a17f70-7a91-7e31-ac46-5859c5becdd6')
+                        self.assertEqual(len(self.calls), 1)
 
     def test_redirect_never_forwards_to_another_path(self):
         self.status = 307

@@ -94,10 +94,12 @@ export function decodeChatRequest(body) {
 
   const calls = new Map();
   const results = new Set();
+  const pending = new Set();
   const system = [];
   let conversationStarted = false;
   const messages = body.messages.map((message) => {
     if (!object(message) || !["system", "user", "assistant", "tool"].includes(message.role)) return fail("Unsupported message role");
+    if ((message.role === "user" || message.role === "assistant") && pending.size) return fail("Every tool call must receive a result before the next conversation turn");
     const allowed = new Set(["role", "content", "reasoning_content", "reasoning", "tool_calls", "tool_call_id", "is_error", "provider_metadata"]);
     for (const key of Object.keys(message)) if (!allowed.has(key)) return fail(`Unsupported native bridge message field: ${key}`);
     const content = textParts(message.content);
@@ -128,18 +130,24 @@ export function decodeChatRequest(body) {
         let input;
         try { input = JSON.parse(call.function.arguments || "{}"); } catch { return fail("Tool call arguments must be valid JSON"); }
         calls.set(call.id, call.function.name);
+        pending.add(call.id);
         content.push({ type: "tool-call", id: call.id, name: call.function.name, input });
       }
+      // The working 1.18 CLI's OpenAI-compatible compiler represents a
+      // tool-only assistant's visible content as "", rather than null.
+      if (message.tool_calls.length && !content.some(part => part.type === "text")) content.unshift({ type: "text", text: "" });
     }
     if (message.role === "tool") {
       const name = calls.get(message.tool_call_id);
       if (!name) return fail("Tool results must reference an earlier assistant tool call");
       if (results.has(message.tool_call_id)) return fail("Each tool call must have only one result");
       results.add(message.tool_call_id);
+      pending.delete(message.tool_call_id);
       return { role: "tool", content: [{ type: "tool-result", id: message.tool_call_id, name, result: { type: message.is_error ? "error" : "text", value: content.map((part) => part.text).join("") } }] };
     }
     return { role: message.role, content, ...(message.provider_metadata ? { providerMetadata: message.provider_metadata } : {}) };
   }).filter(Boolean);
+  if (pending.size) return fail("Every tool call must receive a result before requesting another completion");
 
   if (body.tools !== undefined && !Array.isArray(body.tools)) return fail("tools must be an array");
   const names = new Set();
@@ -164,6 +172,7 @@ export function decodeChatRequest(body) {
     if (typeof body.parallel_tool_calls !== "boolean") return fail("parallel_tool_calls must be boolean");
     toolChoice = { ...(toolChoice || { type: "auto" }), disableParallelToolUse: !body.parallel_tool_calls };
   }
+  if (tools.length && !toolChoice) toolChoice = { type: "auto" };
   const options = {};
   if (body.max_completion_tokens !== undefined && body.max_tokens !== undefined && body.max_completion_tokens !== body.max_tokens) return fail("Conflicting output token limits");
   const max = body.max_completion_tokens ?? body.max_tokens;
@@ -191,7 +200,8 @@ export function decodeChatRequest(body) {
 export function safeNativeError(error) {
   if (error instanceof BridgeInputError) return { status: error.status, error: { type: error.status >= 400 && error.status < 500 ? "invalid_request_error" : "native_bridge_error", code: error.code, message: error.message } };
   const reason = error?.reason || error?.cause?.reason || {};
-  const tag = reason._tag;
+  const knownTags = new Set(["QuotaExceeded", "RateLimit", "Authentication", "InvalidRequest", "UnsupportedOperation", "ProviderConfiguration", "NoRoute", "ContentPolicy", "ProviderInternal", "Transport", "InvalidProviderOutput", "UnknownProvider", "Timeout"]);
+  const tag = typeof reason._tag === "string" && knownTags.has(reason._tag) ? reason._tag : undefined;
   const upstreamStatus = reason.http?.status;
   const status = Number.isInteger(upstreamStatus) && upstreamStatus >= 400 && upstreamStatus <= 599 ? upstreamStatus
     : tag === "QuotaExceeded" || tag === "RateLimit" ? 429 : tag === "Authentication" ? 401 : tag === "InvalidRequest" ? 400 : 502;
@@ -203,6 +213,8 @@ export function safeNativeError(error) {
     if (codes.has(candidate)) upstreamCode = candidate;
   } catch { /* Never return raw provider bodies or credential-bearing messages. */ }
   const retry = reason.retryAfterMs ?? reason.rateLimit?.retryAfterMs;
+  const retryAt = Number.isFinite(retry) && retry > 0 ? Date.now() + retry : NaN;
+  const validRetry = Number.isFinite(retryAt) && retryAt <= 8640000000000000;
   const requestId = reason.http?.headers?.["x-opencode-log-id"] || reason.http?.headers?.["x-request-id"];
   const parameter = typeof reason.parameter === "string" && /^(messages|tools|model|max_tokens|stream|temperature|reasoning)[.\[\]a-zA-Z0-9_-]{0,100}$/.test(reason.parameter) ? reason.parameter : undefined;
   return { status, error: {
@@ -210,7 +222,7 @@ export function safeNativeError(error) {
     code: upstreamCode || (tag ? `native_${tag.replace(/[^A-Za-z]/g, "").toLowerCase()}` : "native_worker_unavailable"),
     message: `OpenCode native inference failed (${upstreamCode || tag || "worker unavailable"}); no raw provider body is exposed.`,
     upstream_status: upstreamStatus,
-    ...(Number.isFinite(retry) && retry > 0 ? { retry_after_seconds: Math.ceil(retry / 1000), retry_at: new Date(Date.now() + retry).toISOString() } : {}),
+    ...(validRetry ? { retry_after_seconds: Math.ceil(retry / 1000), retry_at: new Date(retryAt).toISOString() } : {}),
     ...(typeof requestId === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(requestId) ? { upstream_request_id: requestId } : {}),
     ...(parameter ? { parameter } : {}),
   } };

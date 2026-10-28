@@ -62,6 +62,37 @@ class SafetyTests(unittest.TestCase):
             response.read()
             return response.status
 
+    def test_loopback_gateway_ignores_proxy_environment(self):
+        hits = []
+
+        class Proxy(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                pass
+
+            def do_POST(self):
+                hits.append(self.path)
+                self.send_response(429)
+                self.end_headers()
+
+        proxy = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Proxy)
+        thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+        thread.start()
+        try:
+            address = 'http://127.0.0.1:' + str(proxy.server_port)
+            env = {**os.environ, 'HTTP_PROXY': address, 'http_proxy': address, 'NO_PROXY': '', 'no_proxy': '',
+                   'PYTHONPATH': str(pathlib.Path(__file__).resolve().parents[1] / 'native/opencode')}
+            code = "from live_safety import open_gateway; import urllib.request,sys; r=open_gateway(urllib.request.Request(sys.argv[1], data=b'{}'),timeout=2); print(r.status);r.close()"
+            result = subprocess.run([sys.executable, '-c', code, self.url + '/v1/chat/completions'],
+                                    env=env, capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), '200')
+            self.assertEqual(hits, [])
+            self.assertEqual(len(self.calls), 1)
+        finally:
+            proxy.shutdown()
+            proxy.server_close()
+            thread.join()
+
     def test_single_owner_budget_and_no_replay(self):
         with LiveGuard(self.root, 'one', 2, 1024) as guard:
             guard.reserve(512)
