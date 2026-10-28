@@ -59,6 +59,17 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
       worker.stdout.on('data', value => { output += value; for (const line of output.split('\n')) { try { const event = JSON.parse(line); if (event.event === 'native_worker_ready') { clearTimeout(timer); resolve(event.port); } } catch {} } });
     });
     const endpoint = `http://127.0.0.1:${port}/v1/chat/completions`;
+    const diagnosticURL = `http://127.0.0.1:${port}/v1/diagnostics/models`;
+    assert.equal((await fetch(diagnosticURL)).status, 401);
+    const diagnostic = await fetch(diagnosticURL, { headers: { authorization: `Bearer ${key}` } });
+    assert.equal(diagnostic.status, 200, await diagnostic.clone().text());
+    const modelDiagnostic = await diagnostic.json();
+    assert.equal(modelDiagnostic.inference_performed, false);
+    assert.equal(modelDiagnostic.models[0].id, 'test-model');
+    assert.equal(modelDiagnostic.models[0].available, true);
+    assert.equal(modelDiagnostic.models[0].free, true);
+    assert.equal(captures.length, 0, 'model diagnostics do not invoke inference');
+    assert.doesNotMatch(JSON.stringify(modelDiagnostic), /synthetic-private-worker-key|apiKey|authorization|cookie/i);
     const messages = [{ role: 'system', content: 'EXACT_CALLER_SYSTEM' }, { role: 'user', content: 'Long input '.repeat(5000) }];
     const tools = [{ type: 'function', function: { name: 'read_file', description: 'Caller-owned tool', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } }];
     const call = (extra = {}, auth = key, signal) => fetch(endpoint, { method: 'POST', headers: { authorization: `Bearer ${auth}`, 'content-type': 'application/json', 'x-opencode-bridge-session': 'same-caller-session' }, body: JSON.stringify({ model: 'test-model', messages, tools, ...extra }), signal });

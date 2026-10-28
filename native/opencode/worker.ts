@@ -280,6 +280,35 @@ const server = Bun.serve({
     const url = new URL(request.url)
     if (url.pathname === "/health") { discardBody(request); return Response.json({ status: "ok", worker: "opencode-native", version: source.version, commit: source.commit, fixture: Boolean(fixture) }) }
     if (!authorized(request)) { discardBody(request); return Response.json({ error: { code: "unauthorized", message: "Invalid native worker authorization" } }, { status: 401 }) }
+    if (url.pathname === "/v1/diagnostics/models" && request.method === "GET") {
+      discardBody(request)
+      try {
+        const models = await host.runtime.runPromise(Effect.gen(function* () {
+          const locations = yield* LocationServiceMap.Service
+          return yield* Effect.gen(function* () {
+            yield* Plugin.awaitActivation
+            const catalog = yield* Model.Service
+            const rows = []
+            for (const id of allow) {
+              const model = yield* catalog.get(Provider.ID.make(providerID), Model.ID.make(id))
+              let endpoint: string | undefined
+              if (typeof model?.settings?.baseURL === "string") {
+                try {
+                  const parsed = new URL(model.settings.baseURL)
+                  // Only known public or fixture origins. Never emit arbitrary
+                  // configured URLs, userinfo, query tokens or credential data.
+                  if (parsed.hostname === "opencode.ai" || (fixture && ["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname))) endpoint = parsed.origin + parsed.pathname
+                } catch {}
+              }
+              rows.push({ id, available: Boolean(model), package: model?.package, model_id: model?.modelID, endpoint,
+                enabled: model?.enabled, free: model ? !model.cost.some(price => price.input > 0 || price.output > 0) : undefined })
+            }
+            return rows
+          }).pipe(Effect.provide(locations.get(location)))
+        }))
+        return Response.json({ auth_mode: authMode, inference_performed: false, models }, { headers: headers() })
+      } catch (error) { return errorResponse(error) }
+    }
     if (url.pathname !== "/v1/chat/completions" || request.method !== "POST") { discardBody(request); return Response.json({ error: { code: "not_found", message: "Unknown native worker endpoint" } }, { status: 404 }) }
     try { return await inference(request) } catch (error) { return errorResponse(error) }
   },
