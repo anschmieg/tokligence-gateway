@@ -1,5 +1,10 @@
 # OpenCode Zen completion checkpoint
 
+## Terminal review deployment complete
+
+Snapshotd7d6fc2 pushed/deployed staging; worker overlay unchanged e731d845ebb25e2fce15edb3a7b15df73cbd1733bff1b45b21c9152856623ee8. Earlier complete worker deployment passed40VPSchecks; final embedded-quota helper passed all14Pythoncases onVPS again. Final actual-root admission refuses ONLY comparison_time_not_reached/provider_cooldown_active; ownedserviceshealthy, overlay/defaultOAuth/flock/productionsecondaryabsence verified, ledger bytehash unchanged and nextIDunreserved. No extra worker restart for helper-only follow-up. Scheduler handoff updated; fixednext2026-10-29T01:34:00Z/FIRSTdisable/ONErequest max1024 unchanged. No diagnostic inference/device-login/production/account/IP changes. Original live acceptance remains incomplete and quota cause unproven. This latest checkpoint supersedes deployment-pending notes below.
+
+
 ## Terminal review staging / embedded quota follow-up
 
 Functional9961178 pushed/deployed with complete overlay e731d845ebb25e2fce15edb3a7b15df73cbd1733bff1b45b21c9152856623ee8; ownedserviceshealthy and40lightweightVPSchecks pass. Actual-root admission refuses ONLY comparison_time_not_reached/provider_cooldown_active; ledger bytehash unchanged, nextIDunreserved, defaultOAuth/flock/prodsecondaryabsence verified. Scheduler keepsfixed01:34UTC Oct29/FIRSTdisable, sameONErequest/1024window.
