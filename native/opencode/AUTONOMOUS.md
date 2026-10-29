@@ -1,5 +1,14 @@
 # OpenCode Zen completion checkpoint
 
+## Three adversarial findings fixed — helper-only follow-up
+
+Reference CLI admission now rejects ALL suspended session rows and job.background/* KV records read-only, fails closed on missing/changed schema, and repeats the check under the exclusive worker descriptor lease immediately before native CLI launch. It never clears claims/jobs or copies credentials; pending recovery blocks this comparison and requires investigation. This preserves ordinary native startup only when no stored agent work can replay.
+
+The bounded HTTP200/SSE control parses complete frames as they arrive and persists embedded quota/auth errors before EOF; type and code both recognized. A quota frame followed by a never-closing body now records429/cooldown and closes the reader without further provider dispatch. Terminal validation requires the selected choice, exactly one stop and DONE, rejects duplicate/late choice output and premature DONE, while permitting empty-choice usage framing. Total buffered size2MiB and response read deadline110seconds remain bounded. No outgoing provider request bytes/headers changed, worker overlay unchanged.
+
+Offline verification: full359pass/10explicit runtime skips; affectedOAuth3groups pass (actual network-isolated pinnedCLI/gateway13fake calls plus 9Python methods/18fetch cases/7orchestration variants). Pending-recovery orchestration proves zero CLI launches/inference reservations/gateway calls and ownedservice restoration; read-only SQLite tests preserve claims/job bytes and reject schema drift. Logs /tmp/zen-review3-{control,reference,full,lint}.log; private synthetic evidence /tmp/native-oauth-reference-A8Rocy. SDK/complete native evidence from previous snapshot applies to unchanged worker/core overlay. No live inference/login and no automation activation. Staging helper deployment/admission results follow.
+
+
 ## Same-version OAuth comparison implemented and staged
 
 Snapshot179896a pushed/deployed with complete overlay fe8bf81c34e8b076d155868f09429c0197b4095a3a53d5374bf4c2a4fb5a7178. Both recorded ownedservices healthy; actual-root OAuth admission refuses ONLY comparison_time_not_reached/provider_cooldown_active. Real ledger bytehash unchanged, newrunIDunreserved, defaultOAuth/flock/productionsecondaryabsence checks pass. Timer updated and confirmed enabled:false,nextRunAt:null. No live inference in this implementation turn. Final follow-up: full359pass/10runtime skips; affectedOAuth3groups pass including newWebSocket zero-dispatch fault, worker1pass/1explicit runtime skip; SDK1293clean and lintpass. Prior complete native12pass remains evidence for unchanged groups. VPS extra fakefixture refused due missingBubblewrap; local actualCLI netns evidence passes, do not claim VPS fixturepassed. Live acceptance remains incomplete pending eligible bounded OAuth comparison; no automaticprobe armed.

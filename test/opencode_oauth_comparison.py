@@ -53,10 +53,14 @@ print('owned-descendants-reaped')
         self.assertEqual(result.stdout.strip(), 'owned-descendants-reaped')
 
     def test_live_transaction_serializes_ownership_and_stops_before_second_request_on_failure(self):
-        for mode in ['success', 'reference-quota', 'missing-marker', 'outside-xdg', 'gateway-quota', 'priced-model']:
+        for mode in ['success', 'reference-quota', 'missing-marker', 'outside-xdg', 'gateway-quota', 'priced-model', 'pending-recovery']:
             with self.subTest(mode=mode):
                 root = self.root / mode; root.mkdir()
                 state = root / 'state'; state.mkdir(); (state / 'workspace').mkdir()
+                with sqlite3.connect(state / 'opencode.db') as conn:
+                    conn.execute('CREATE TABLE session_v2 (time_suspended INTEGER)')
+                    conn.execute('CREATE TABLE kv (key TEXT)')
+                    if mode == 'pending-recovery': conn.execute('INSERT INTO session_v2 VALUES (123)')
                 (root / 'live-reports').mkdir()
                 values = {key: str(state / key.lower()) for key in ['XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME']}
                 if mode == 'outside-xdg': values['XDG_CONFIG_HOME'] = str(root / 'outside-state')
@@ -131,11 +135,27 @@ print('owned-descendants-reaped')
                 self.assertEqual(ownership['restored'], 1)
                 self.assertEqual(ownership['gateway_calls'], int(mode in ['success', 'gateway-quota']))
                 report = json.loads((root / 'live-reports/synthetic-transaction.json').read_text())
-                self.assertEqual(report['requests'], 0 if mode in ['outside-xdg', 'priced-model'] else 2 if mode in ['success', 'gateway-quota'] else 1)
+                self.assertEqual(report['requests'], 0 if mode in ['outside-xdg', 'priced-model', 'pending-recovery'] else 2 if mode in ['success', 'gateway-quota'] else 1)
                 self.assertNotIn('synthetic-private', output.getvalue())
                 with (state / 'worker.lock').open('a+') as released:
                     import fcntl
                     fcntl.flock(released, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def test_native_reference_rejects_recovery_read_only_and_fails_closed_on_schema_drift(self):
+        database = self.root / 'recovery.db'
+        with sqlite3.connect(database) as conn:
+            conn.execute('CREATE TABLE session_v2 (time_suspended INTEGER)')
+            conn.execute('CREATE TABLE kv (key TEXT)')
+        driver.assert_no_recoverable_work(database)
+        for sql in ["INSERT INTO session_v2 VALUES (123)", "INSERT INTO kv VALUES ('job.background/synthetic')"]:
+            with sqlite3.connect(database) as conn: conn.execute(sql)
+            before = database.read_bytes()
+            with self.assertRaises(ValueError): driver.assert_no_recoverable_work(database)
+            self.assertEqual(database.read_bytes(), before, 'Never clear or rewrite recovery state')
+            with sqlite3.connect(database) as conn:
+                conn.execute('DELETE FROM session_v2'); conn.execute('DELETE FROM kv')
+        with sqlite3.connect(database) as conn: conn.execute('DROP TABLE kv')
+        with self.assertRaises(sqlite3.Error): driver.assert_no_recoverable_work(database)
 
     def test_native_reference_requires_free_available_text_catalog_before_inference(self):
         row = {'id': 'glm-5.3-flash-free', 'modelID': 'glm-5.3-flash-free', 'providerID': 'opencode', 'enabled': True,
@@ -232,9 +252,14 @@ print('owned-lease-released')
         variants = [('good', good, 200, 1, False),
                     ('tools', 'data: {"choices":[{"delta":{"tool_calls":[{"id":"one"}]},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]\n\n', 200, 1, True),
                     ('truncated', 'data: {"choices":[{"delta":{"content":"CONTROL_OK"},"finish_reason":null}]}\n\n', 200, 1, True),
+                    ('post-finish-content', good.split('data: [DONE]')[0] + 'data: {"choices":[{"delta":{"content":"late"},"finish_reason":null}]}\n\ndata: [DONE]\n\n', 200, 1, True),
+                    ('duplicate-finish', good.replace('data: [DONE]', 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]'), 200, 1, True),
+                    ('wrong-choice', good.replace('"delta":', '"index":1,"delta":'), 200, 1, True),
                     ('malformed', 'data: invalid-json\n\n', 200, 1, True),
                     ('quota', '{"error":{"type":"FreeUsageLimitError"}}', 429, 1, True),
                     ('quota-broken-body', '', 429, 1, True), ('quota-stalled-body', '', 429, 1, True),
+                    ('embedded-code-quota', 'data: {"error":{"code":"FreeUsageLimitError"}}\n\n', 200, 1, True),
+                    ('embedded-hanging-quota', 'data: {"error":{"code":"FreeUsageLimitError"}}\n\n', 200, 1, True),
                     ('embedded-quota', 'data: {"error":{"type":"FreeUsageLimitError"}}\n\n', 200, 1, True),
                     ('public-auth', good, 200, 0, True), ('over-budget', good, 200, 0, True),
                     ('websocket', good, 200, 0, True), ('wrong-model', good, 200, 0, True), ('cookie', good, 200, 0, True)]
@@ -253,7 +278,7 @@ const nativeBody = new TextEncoder().encode(JSON.stringify({model:process.env.CA
 globalThis.fetch = async (url, init) => {
  if(String(url)!==target)return real(url,init);
  physical++;assert.equal(init.body,nativeBody);assert.equal(init.redirect,'manual');
- const body=process.env.CASE==='quota-broken-body'?new ReadableStream({start(c){c.error(new Error('synthetic broken body'))}}):process.env.CASE==='quota-stalled-body'?new ReadableStream({}):process.env.PAYLOAD;
+ const body=process.env.CASE==='embedded-hanging-quota'?new ReadableStream({start(c){c.enqueue(new TextEncoder().encode(process.env.PAYLOAD))}}):process.env.CASE==='quota-broken-body'?new ReadableStream({start(c){c.error(new Error('synthetic broken body'))}}):process.env.CASE==='quota-stalled-body'?new ReadableStream({}):process.env.PAYLOAD;
  return new Response(body,{status:Number(process.env.STATUS),headers:{'content-type':Number(process.env.STATUS)===200?'text/event-stream':'application/json','retry-after':'3600'}});
 };
 let sockets=0;globalThis.WebSocket=class {constructor(){sockets++}};
@@ -273,7 +298,7 @@ console.log(JSON.stringify({physical,passed}));
                     if 'quota' in name:
                         self.assertEqual(guard.status, 429)
                         self.assertIn('cooldown_until', guard.ledger)
-                        self.assertEqual(guard.entry.get('retry_at_source'), 'conservative_unknown' if name == 'embedded-quota' else 'provider')
+                        self.assertEqual(guard.entry.get('retry_at_source'), 'conservative_unknown' if name.startswith('embedded-') else 'provider')
 
     def test_oauth_admission_rejects_public_old_versions_budget_changes_and_stale_evidence(self):
         runtime = self.root / 'runtime'; source = runtime / 'opencode'
@@ -295,6 +320,8 @@ console.log(JSON.stringify({physical,passed}));
         summary.update(live_tested=False, classified_body_differences=[], overlay_sha256='synthetic-overlay', source_commit=driver.read_json(HERE / 'source.json')['commit'], cli_archive_files_verified=200); evidence.write_text(json.dumps(summary))
         state = self.root / 'state'; state.mkdir()
         with sqlite3.connect(state / 'opencode.db') as conn:
+            conn.execute('CREATE TABLE session_v2 (time_suspended INTEGER)')
+            conn.execute('CREATE TABLE kv (key TEXT)')
             conn.execute('CREATE TABLE credential (id TEXT, integration_id TEXT, value TEXT, active INTEGER)')
             conn.execute('INSERT INTO credential VALUES (?,?,?,?)', ('synthetic-credential', 'opencode', '{"type":"oauth"}', 1))
         plan = {'kind': 'native-oauth-comparison-v1', 'status': 'prepared', 'authentication': 'oauth', 'version': '2.1.4',

@@ -24,10 +24,10 @@
   "node_sha256": "3159f9115ab4be7d318b7c28e946837a4dceb7f2b3c43232aa2f2e3852550b90",
   "cli_tree_sha256": "8ccddaeb1cf8f880abd9f379016e98b365a7a4948681be2ff863e080d7617005",
   "code_sha256": {
-    "oauth-comparison.py": "443d127f6b89fc3acc38d74f248730382f804e392bab74057c8606e9201647ac",
+    "oauth-comparison.py": "85e78382fd30a6aa46c6ee29f8728e4322e090eaf5a8cc9610662370b22bba52",
     "oauth_meter.py": "71a692ef8956ded0fa71459c1de586332520fc9590006b970d57d3e8f0ca593d",
     "oauth_profile.py": "d3f18b644be3129ce86957b51d3c957e6cd33819f7b4b627bb14b09249bddc66",
-    "metered-native-fetch.mjs": "99e6d26f69fb41015514873751445cd14beaecdef66063edf7be46d77b8137a2",
+    "metered-native-fetch.mjs": "d208394ede0e22b8f2a18189c587eacb4f9e347cb5b01e6bbf7eb0d6e5b975a9",
     "live_safety.py": "b0570af4ceb84f279821a642860f3194d5312b22e2b84894158beec0f613426a",
     "official_control.py": "52b4f95b1e2f71c7ceb9e790c2668e3627dba6c6865d122735c62c0dcd0e23cc",
     "official-public-probe.py": "aaa19a30f8bee59d13031947738727888637c08d0b3e029ba0653f2e9d1963b2",
@@ -88,7 +88,7 @@
     "upstream-model.mjs": "23e6492249245ebda66230d760fdfc11faec3622afcd9ebc893f0297944c8fad",
     "usage-observer.mjs": "25b77d2f9b97c302431a278bb2978f97c6e8a6d86e0ad218998ddba0e56b227e"
   },
-  "evidence_sha256": "b72ea6fc8a1b195afa7d91767a58aec2239123f25445e8d62086d3bed9d623b2",
+  "evidence_sha256": "30d7743973c8bf81835ca571bd6a27d0c3aa4ae217f88ff4eed72b67ca3e676c",
   "classified_body_differences": [
     "intentional bridge omission of native strict:false",
     "intentional bridge tool_choice:auto versus native omission",

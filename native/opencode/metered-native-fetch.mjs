@@ -83,44 +83,79 @@ globalThis.fetch = async (input, init) => {
   // before the native agent can execute a hallucinated tool call. Provider
   // request bytes and native TLS remain untouched; response delivery is buffered.
   if (inference && response.ok && config.controlMarker) {
-    const reader = response.body.getReader();
-    const chunks = []; let size = 0;
-    while (true) {
-      const item = await reader.read(); if (item.done) break;
-      size += item.value.byteLength;
-      if (size > 2 * 1024 * 1024) {
-        await reader.cancel(); await notify('/invalid', { reason: 'invalid_native_control_response' });
-        throw new Error('Control response exceeded limit');
+    const reader = response.body?.getReader();
+    const chunks = []; let size = 0, pending = '', text = '', finish = false, done = false;
+    const decoder = new TextDecoder('utf-8', { fatal: true });
+    const deadline = Date.now() + 110000;
+    async function frame(value) {
+      const data = value.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n');
+      if (!data) return;
+      if (done) throw new Error('Output after completion');
+      if (data === '[DONE]') {
+        if (!finish) throw new Error('Completion before finish');
+        done = true; return;
       }
-      chunks.push(item.value);
+      const event = JSON.parse(data);
+      if (event.error) {
+        const error = event.error;
+        const quota = ['FreeUsageLimitError', 'FreeTierError', 'rate_limit_error'].some(code => error.type === code || error.code === code);
+        const auth = ['authentication_error', 'permission_error'].some(code => error.type === code || error.code === code);
+        const status = [401, 403, 429].includes(error.upstream_status) ? error.upstream_status
+          : quota ? 429 : auth ? 401 : 502;
+        // Persist a complete error frame immediately, even if the peer never
+        // closes the stream. The remaining body must not delay the cooldown.
+        await notify('/outcome', { status, body: JSON.stringify(event), headers: {} });
+        throw new Error('Embedded control error');
+      }
+      if (!Array.isArray(event.choices) || event.choices.length > 1) throw new Error('Invalid control choices');
+      for (const choice of event.choices) {
+        if (finish) throw new Error('Choice after terminal finish');
+        if (choice.index !== undefined && choice.index !== 0) throw new Error('Unexpected control choice');
+        const delta = choice.delta;
+        if (!delta || typeof delta !== 'object' || Array.isArray(delta)) throw new Error('Invalid control delta');
+        if (delta.tool_calls?.length || delta.function_call) throw new Error('Control returned tools');
+        if (delta.role !== undefined && delta.role !== 'assistant') throw new Error('Invalid control role');
+        if (delta.content !== undefined && delta.content !== null) {
+          if (typeof delta.content !== 'string') throw new Error('Invalid control text');
+          text += delta.content;
+        }
+        if (choice.finish_reason !== undefined && choice.finish_reason !== null) {
+          if (choice.finish_reason !== 'stop') throw new Error('Control did not stop');
+          finish = true;
+        }
+      }
     }
-    const raw = new Uint8Array(size); let offset = 0;
-    for (const chunk of chunks) { raw.set(chunk, offset); offset += chunk.byteLength; }
-    let text = '', finish = false, done = false;
     try {
-      const frames = new TextDecoder('utf-8', { fatal: true }).decode(raw).replaceAll('\r\n', '\n').split('\n\n');
-      for (const frame of frames) {
-        const data = frame.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n');
-        if (!data) continue;
-        if (done) throw new Error('Output after completion');
-        if (data === '[DONE]') { done = true; continue; }
-        const event = JSON.parse(data);
-        if (event.error) {
-          const status = event.error.upstream_status ?? (['FreeUsageLimitError', 'rate_limit_error'].includes(event.error.type) ? 429 : 502);
-          await notify('/outcome', { status, body: JSON.stringify(event), headers: {} });
-          throw new Error('Embedded control error');
-        }
-        for (const choice of event.choices || []) {
-          if (choice.delta?.tool_calls?.length || choice.delta?.function_call) throw new Error('Control returned tools');
-          if (choice.delta?.content) text += choice.delta.content;
-          if (choice.finish_reason) { if (choice.finish_reason !== 'stop') throw new Error('Control did not stop'); finish = true; }
+      if (!reader) throw new Error('Missing control stream');
+      while (true) {
+        let timer, item;
+        try {
+          item = await Promise.race([reader.read(), new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error('Control stream deadline')), Math.max(1, deadline - Date.now()));
+          })]);
+        } finally { clearTimeout(timer); }
+        if (item.done) { pending += decoder.decode(); break; }
+        size += item.value.byteLength;
+        if (size > 2 * 1024 * 1024) throw new Error('Control response exceeded limit');
+        chunks.push(item.value);
+        pending += decoder.decode(item.value, { stream: true });
+        // Normalize only complete CRLF pairs; a CR split across chunks stays
+        // in pending until the next chunk supplies its LF.
+        pending = pending.replaceAll('\r\n', '\n');
+        let boundary;
+        while ((boundary = pending.indexOf('\n\n')) !== -1) {
+          const value = pending.slice(0, boundary); pending = pending.slice(boundary + 2);
+          await frame(value);
         }
       }
-      if (!done || !finish || text.trim() !== config.controlMarker) throw new Error('Control incomplete');
+      if (pending.trim() || !done || !finish || text.trim() !== config.controlMarker) throw new Error('Control incomplete');
     } catch (error) {
+      if (reader) void reader.cancel().catch(() => {});
       await notify('/invalid', { reason: 'invalid_native_control_response' });
       throw error;
     }
+    const raw = new Uint8Array(size); let offset = 0;
+    for (const chunk of chunks) { raw.set(chunk, offset); offset += chunk.byteLength; }
     return new Response(raw, { status: response.status, statusText: response.statusText, headers: response.headers });
   }
   return response;

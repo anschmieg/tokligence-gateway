@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 const run = promisify(execFile);
 test('native OAuth admission and quota persistence reject changed identity, auth and budgets', { timeout: 15000 }, async () => {
   await run('python3', ['test/opencode_oauth_comparison.py',
+    'OAuthComparisonTests.test_native_reference_rejects_recovery_read_only_and_fails_closed_on_schema_drift',
     'OAuthComparisonTests.test_native_meter_phase_cap_and_safe_quota_persistence',
     'OAuthComparisonTests.test_native_reference_requires_free_available_text_catalog_before_inference',
     'OAuthComparisonTests.test_fixture_supervisor_reaps_detached_orphan_descendants',

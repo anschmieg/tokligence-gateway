@@ -124,6 +124,8 @@ def inspect(plan, root, run_id):
                 or worker_env.get('OPENCODE_NATIVE_AUTH_MODE', 'oauth') != 'oauth'):
             blockers.append('native_gateway_configuration_mismatch')
         database = root / 'state/opencode.db'
+        try: assert_no_recoverable_work(database)
+        except (ValueError, sqlite3.Error): blockers.append('native_reference_recovery_not_idle')
         with sqlite3.connect(database.as_uri() + '?mode=ro', uri=True) as conn:
             rows = conn.execute("SELECT id, value, active FROM credential WHERE integration_id = 'opencode'").fetchall()
         if len(rows) != 1 or read_credential_type(rows[0][1]) != 'oauth' or rows[0][2] != 1: blockers.append('exclusive_oauth_credential_missing')
@@ -134,6 +136,19 @@ def inspect(plan, root, run_id):
     blockers.extend(inspect_ledger(root, run_id, window))
     blockers.extend(inspect_worker(root, plan.get('overlay_sha256')))
     return list(dict.fromkeys(blockers))
+
+
+def assert_no_recoverable_work(database):
+    """Never boot the ordinary native CLI with stored agent recovery work.
+
+    Check read-only at admission and again under the worker descriptor lease.
+    Fail closed on schema drift. Do not clear claims or background jobs.
+    """
+    with sqlite3.connect(pathlib.Path(database).resolve().as_uri() + '?mode=ro', uri=True) as conn:
+        if conn.execute('SELECT 1 FROM session_v2 WHERE time_suspended IS NOT NULL LIMIT 1').fetchone():
+            raise ValueError('Native reference has suspended session work')
+        if conn.execute("SELECT 1 FROM kv WHERE key GLOB 'job.background/*' LIMIT 1").fetchone():
+            raise ValueError('Native reference has background recovery work')
 
 
 def read_credential_type(value):
@@ -208,6 +223,7 @@ def main():
                     # reference process. Never unlink, reseed or copy this state.
                     with (root / 'state/worker.lock').open('a+') as lease:
                         fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        assert_no_recoverable_work(root / 'state/opencode.db')
                         values = read_json(root / 'worker-env.json')
                         state = root / 'state'
                         env = {'PATH': str(root / 'runtime') + ':/usr/bin:/bin', 'HOME': str(state),
