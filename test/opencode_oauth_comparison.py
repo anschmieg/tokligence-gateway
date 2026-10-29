@@ -237,7 +237,7 @@ print('owned-lease-released')
                     ('quota-broken-body', '', 429, 1, True), ('quota-stalled-body', '', 429, 1, True),
                     ('embedded-quota', 'data: {"error":{"type":"FreeUsageLimitError"}}\n\n', 200, 1, True),
                     ('public-auth', good, 200, 0, True), ('over-budget', good, 200, 0, True),
-                    ('wrong-model', good, 200, 0, True), ('cookie', good, 200, 0, True)]
+                    ('websocket', good, 200, 0, True), ('wrong-model', good, 200, 0, True), ('cookie', good, 200, 0, True)]
         for name, payload, status, physical, blocked in variants:
             root = self.root / name; root.mkdir()
             with self.subTest(name=name), LiveGuard(root, name, 2, 2048) as guard:
@@ -256,7 +256,9 @@ globalThis.fetch = async (url, init) => {
  const body=process.env.CASE==='quota-broken-body'?new ReadableStream({start(c){c.error(new Error('synthetic broken body'))}}):process.env.CASE==='quota-stalled-body'?new ReadableStream({}):process.env.PAYLOAD;
  return new Response(body,{status:Number(process.env.STATUS),headers:{'content-type':Number(process.env.STATUS)===200?'text/event-stream':'application/json','retry-after':'3600'}});
 };
+let sockets=0;globalThis.WebSocket=class {constructor(){sockets++}};
 await import(process.env.PRELOAD);
+if(process.env.CASE==='websocket'){assert.throws(()=>new WebSocket('wss://example.invalid'));assert.equal(sockets,0);}
 let passed=false;
 try {const response=await fetch(target,{method:'POST',body:nativeBody,headers:{authorization:process.env.CASE==='public-auth'?'Bearer public':'Bearer synthetic',...(process.env.CASE==='cookie'?{cookie:'synthetic'}:{})}});if(response.ok)await response.text();passed=response.ok;}catch{}
 if(process.env.CASE.includes('quota')) {let refused=false;try{await fetch(target,{method:'POST',body:nativeBody,headers:{authorization:'Bearer synthetic'}})}catch{refused=true}assert.equal(refused,true);}

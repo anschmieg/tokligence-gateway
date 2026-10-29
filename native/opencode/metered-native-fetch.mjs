@@ -11,7 +11,20 @@ async function notify(route, value) {
   if (reply.status !== 200) throw new Error('Native probe stopped by persistent meter');
   await reply.arrayBuffer();
 }
+// The bounded control supports HTTP only. Native Bun also exposes WebSocket;
+// reject its constructor before network I/O and prevent an HTTP fallback race.
+let unsupportedTransport;
+if (globalThis.WebSocket) globalThis.WebSocket = new Proxy(globalThis.WebSocket, {
+  construct() {
+    unsupportedTransport ||= notify('/invalid', { reason: 'unsupported_native_websocket' }).catch(() => {});
+    throw new Error('WebSocket transport is outside the bounded native control');
+  },
+});
 globalThis.fetch = async (input, init) => {
+  if (unsupportedTransport) {
+    await unsupportedTransport;
+    throw new Error('Native control stopped after unsupported transport');
+  }
   const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url);
   const method = (init?.method || input.method || 'GET').toUpperCase();
   const headers = new Headers(init?.headers || input.headers);

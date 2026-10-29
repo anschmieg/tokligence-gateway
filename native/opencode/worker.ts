@@ -229,6 +229,7 @@ async function inference(request: Request) {
     }), { signal: cancel.signal })
     if (Exit.isFailure(resolution)) throw nativeCauseError(resolution.cause, cancel.signal)
     const model = resolution.value
+    if (model.transport === "websocket") throw new BridgeInputError("WebSocket models are not supported by this HTTP bridge", "native_transport_unsupported")
     if (cancel.signal.aborted) throw new BridgeInputError("Native request was cancelled before session admission", "native_request_cancelled", 408)
     let entry
     try { entry = await registry.get(sessionKey, input.model, active, [input.model, ...[...allow].filter(model => model !== input.model)].map(model => createHash("sha256").update(`${scope}\0${model}`).digest("hex"))) }

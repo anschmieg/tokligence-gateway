@@ -81,7 +81,7 @@ def native_meter(guard, model, max_tokens=1024, allow_tools=False, max_calls=1, 
                             guard.stop('Native OAuth control rejected; no further traffic', status, failure)
                     elif self.path != '/background':
                         reason = value.get('reason')
-                        safe = reason if reason in {'unexpected_native_destination', 'invalid_native_request_body', 'native_transport_failed', 'invalid_native_control_response'} else 'invalid_protocol_action'
+                        safe = reason if reason in {'unsupported_native_websocket', 'unexpected_native_destination', 'invalid_native_request_body', 'native_transport_failed', 'invalid_native_control_response'} else 'invalid_protocol_action'
                         guard.stop('Native meter refused: ' + safe)
             except ProbeStopped: code = 200 if self.path in ('/outcome', '/observed-rejection') else 429
             except (ValueError, TypeError, OSError):

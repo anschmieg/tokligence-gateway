@@ -18,16 +18,16 @@
   },
   "console": "https://opencode.ai/console",
   "inference": "https://opencode.ai/inference/openai/v1/chat/completions",
-  "overlay_sha256": "7f4acb71d31d2e6b58aa4d91db550c3fb4c5c5b4e0beeace0ad2e7e3f8a107d3",
+  "overlay_sha256": "fe8bf81c34e8b076d155868f09429c0197b4095a3a53d5374bf4c2a4fb5a7178",
   "credential_id_sha256": "42f5eeb05bbfc7cd6d19f6d5531ffd77cba7577a85f63f20f970084f84f45144",
   "bun_sha256": "354c2b049c716aca07b2e5cddb887928ac58950675d1258bb6312083917793b6",
   "node_sha256": "3159f9115ab4be7d318b7c28e946837a4dceb7f2b3c43232aa2f2e3852550b90",
   "cli_tree_sha256": "8ccddaeb1cf8f880abd9f379016e98b365a7a4948681be2ff863e080d7617005",
   "code_sha256": {
     "oauth-comparison.py": "443d127f6b89fc3acc38d74f248730382f804e392bab74057c8606e9201647ac",
-    "oauth_meter.py": "730027f5674c000f7bacaf07a83a26b7810b53109b31453e16a5dadb83adba4b",
+    "oauth_meter.py": "71a692ef8956ded0fa71459c1de586332520fc9590006b970d57d3e8f0ca593d",
     "oauth_profile.py": "d3f18b644be3129ce86957b51d3c957e6cd33819f7b4b627bb14b09249bddc66",
-    "metered-native-fetch.mjs": "318bb05d8de931a86463e4735bcbf0d89c78e1aa10cfb49cfd36c0929f039f82",
+    "metered-native-fetch.mjs": "99e6d26f69fb41015514873751445cd14beaecdef66063edf7be46d77b8137a2",
     "live_safety.py": "b0570af4ceb84f279821a642860f3194d5312b22e2b84894158beec0f613426a",
     "official_control.py": "52b4f95b1e2f71c7ceb9e790c2668e3627dba6c6865d122735c62c0dcd0e23cc",
     "official-public-probe.py": "aaa19a30f8bee59d13031947738727888637c08d0b3e029ba0653f2e9d1963b2",
@@ -88,7 +88,7 @@
     "upstream-model.mjs": "23e6492249245ebda66230d760fdfc11faec3622afcd9ebc893f0297944c8fad",
     "usage-observer.mjs": "25b77d2f9b97c302431a278bb2978f97c6e8a6d86e0ad218998ddba0e56b227e"
   },
-  "evidence_sha256": "8b466f06e4f059f52fee0330e51f27645399504cb5fd7bd67125a2dd115e51be",
+  "evidence_sha256": "b72ea6fc8a1b195afa7d91767a58aec2239123f25445e8d62086d3bed9d623b2",
   "classified_body_differences": [
     "intentional bridge omission of native strict:false",
     "intentional bridge tool_choice:auto versus native omission",
