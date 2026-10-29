@@ -2,6 +2,8 @@
 
 ## Three adversarial findings fixed — helper-only follow-up
 
+Fix8f90919 pushed/deployed staging. All9PythonOAuth methods pass onVPS (18nativefetchcases/7orchestration variants). Actual-root read-only admission refuses ONLY comparison_time_not_reached/provider_cooldown_active: recovery state is idle; ownedhealth/defaultOAuth/flock/completeoverlay/secondaryproductionabsence checks pass. Real ledger bytehash unchanged, nextIDunreserved. Timer confirmed disabled/no nextRunAt. No service restart needed for helper-only changes, no live inference. Private VPS log /home/agent/tokligence-staging/review3-offline.log.
+
 Reference CLI admission now rejects ALL suspended session rows and job.background/* KV records read-only, fails closed on missing/changed schema, and repeats the check under the exclusive worker descriptor lease immediately before native CLI launch. It never clears claims/jobs or copies credentials; pending recovery blocks this comparison and requires investigation. This preserves ordinary native startup only when no stored agent work can replay.
 
 The bounded HTTP200/SSE control parses complete frames as they arrive and persists embedded quota/auth errors before EOF; type and code both recognized. A quota frame followed by a never-closing body now records429/cooldown and closes the reader without further provider dispatch. Terminal validation requires the selected choice, exactly one stop and DONE, rejects duplicate/late choice output and premature DONE, while permitting empty-choice usage framing. Total buffered size2MiB and response read deadline110seconds remain bounded. No outgoing provider request bytes/headers changed, worker overlay unchanged.
