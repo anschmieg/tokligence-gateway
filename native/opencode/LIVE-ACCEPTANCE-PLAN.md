@@ -1,5 +1,14 @@
 # Reviewed live acceptance plan — October 28, 2026
 
+## October29 outcome — supersedes automatic progression below
+
+The sole admitted official public control received429 FreeUsageLimitError on its ONEactual request. Reset2026-10-30T00:00:00.852986+00:00. Windowofficial-comparison-window-20261029 is consumed and runofficial-glm-control-20261029 must never replay. Timer is disabled. No native/public/OAuth/matrix follow-up is allowed as a response to this rejection; expiry alone is not permission for another scheduled probe.
+
+This is not a matched normalOAuth comparison:1.18 CLI generated HTTP, separate Bun1.4.4 performed HTTPS, public credential selected. Normal manual sessions may use OAuth. Do not infer bucket scope, request-malformation penalties, or universal VPS/account blocking from this result.
+
+Next useful preparation, before any future inference: specify an actual pinned2.1.4 normalCLI/runner reference (not merely relabeling external preparation), use native plugin/auth/config discovery and the same owned staging credential with no duplicate refresh owner, isolate the reference process under the staging memory limit, and serialize owned service stop/restore. A fresh synthetic profile/credential/fakeprovider must verify the full reference startup/continuation/cancellation/cleanup offline before real credential use; ordinary source-compilation tests alone do not establish this. Preserve native header/session/auth generation and document intentional external prompt/tool-loop differences. Define an independent bounded hypothesis and immutable aggregate request/output budget with spacing for any later comparison; no provider calls while this rejection is unresolved, no extra public/native lanes to obtain a success. Current live-tests.py matrix remains outside admitted aggregate windows and must not run. No such new live window or automatic follow-up is created here.
+
+
 Status: the earlier plan is not cleared for automatic matrix expansion. No provider inference was performed in this review. A well-formed request can still receive a quota rejection; neither a reset margin nor request parity guarantees availability. Historical 24-hour errors do not establish a penalty for malformed requests.
 
 ## Findings and required gates
