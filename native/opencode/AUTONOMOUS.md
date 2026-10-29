@@ -1,5 +1,12 @@
 # OpenCode Zen completion checkpoint
 
+## Public control retired in code — replacement preparation required
+
+User correctly rejected using a public1.18 diagnostic to answer normalOAuth2.1 behavior. official-public-probe.py now unconditionally refuses ALL nonfixture invocations, including --check-only, before private state/runtime/admission I/O. New plans/runIDs/reset times cannot reactivate this entrypoint. Loopback synthetic regressions remain supported. Removed stale executable public commands from README. Historical plan/evidence/ledger remain intact; do NOT refresh the consumed public plan to force readiness.
+
+Verified full357pass/8runtime skips and all17official/control/admissionPythoncases with pinnedBun; lintpass. New regression exercises noflags/checkonly/newplan+pause against nonexistentstate/binary and proves no state creation. Initial regression had testfixture ownership error (AdmissionTests has no self.root), corrected to privateTemporaryDirectory before final full pass. Logs /tmp/zen-retire-public-{full-final,control-final,lint}.log. No provider/login calls, no credential/sourceoverlay/production changes. Replacement same-version normalOAuthCLI/runner comparison is NOT yet implemented or live-ready. Prepare actual reference startup/auth/config/session loop offline with fakecredentials and OS-blocked networking; preserve one real refreshowner later, aggregate caps, currentcooldown and disabledtimer. Retirement does not fix provider quota or prove root cause.
+
+
 ## October29 scheduled control completed — live blocked
 
 FIRST disabled fixed-time task scheduled-task:command:mcp:9c2e80ed-cdd2-4b4b-a6e3-26ba3d67cea9:schedule-task:opencode-zen-autonomous-20261027-v1. It remains disabled; no next run. At01:34UTC actual-root --check-only returned ready/no blockers; no active probe, previous cooldown expired, stable ID unreserved. Executed ONLY official-glm-control-20261029 in existing immutable window, maxONEactual request/1024output; no native/matrix follow-up.

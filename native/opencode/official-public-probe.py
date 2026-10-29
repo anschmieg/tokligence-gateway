@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One accounted public official-CLI control; staging only, no OAuth or live discovery."""
+"""Retired public live control; synthetic regression fixtures only."""
 import argparse
 import contextlib
 import json
@@ -120,6 +120,13 @@ def main():
     parser.add_argument('--pause-staging', action='store_true')
     parser.add_argument('--fixture-upstream', help='Synthetic loopback /v1 only; report is explicitly not live evidence')
     args = parser.parse_args()
+    # This historical public1.18 diagnostic cannot answer the normalOAuth2.1
+    # integration question. Refuse before private state, runtime or admission I/O;
+    # new run IDs/plans/reset times must not accidentally reactivate it.
+    if not args.fixture_upstream:
+        print(json.dumps({'status': 'retired', 'inference_performed': False,
+                          'blockers': ['public_reference_not_oauth_comparison']}))
+        return 2
     if not args.fixture_upstream and any(value for key, value in os.environ.items() if key.lower() in ('http_proxy', 'https_proxy', 'all_proxy')):
         parser.exit(2, 'Official control not started: inherited proxy configuration requires review\n')
     plan = None

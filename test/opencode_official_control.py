@@ -362,11 +362,19 @@ class AdmissionTests(unittest.TestCase):
             self.assertEqual(ledger.read_bytes(), before)
             self.assertIn('live_window_limits_changed', inspect_ledger(root, 'second', {**window, 'request_budget': 2}))
 
-    def test_live_entrypoint_without_plan_refuses_before_loading_private_state(self):
-        result = subprocess.run([sys.executable, str(HARNESS / 'official-public-probe.py'), '--root', '/nonexistent/private/state',
-            '--run-id', 'not-reserved', '--not-before', '1970-01-01T00:00:00+00:00', '--check-only'], capture_output=True, text=True)
-        self.assertEqual(result.returncode, 2)
-        self.assertIn('requires a reviewed --plan', result.stderr)
+    def test_retired_public_live_entrypoint_cannot_be_reactivated_by_new_plan_or_run(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder) / 'must-not-be-created'
+            for flags in [[], ['--check-only'], ['--plan', '/nonexistent/plan', '--pause-staging']]:
+                result = subprocess.run([sys.executable, str(HARNESS / 'official-public-probe.py'),
+                    '--root', str(root), '--binary', '/nonexistent/binary',
+                    '--run-id', 'new-id-is-not-a-bypass', '--not-before', '1970-01-01T00:00:00+00:00',
+                    *flags], capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(json.loads(result.stdout), {
+                    'status': 'retired', 'inference_performed': False,
+                    'blockers': ['public_reference_not_oauth_comparison']})
+                self.assertFalse(root.exists())
 
 
 if __name__ == '__main__':

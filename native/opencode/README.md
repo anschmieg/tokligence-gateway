@@ -83,21 +83,11 @@ This does not change the staging worker's authentication mode. `--models` accept
 
 Actual Claude Code calls pass through an authenticated loopback relay that enforces the selected model, budgets every inference including retries, rejects redirects and never forwards cookies/client authorization. Only a scoped Read fixture is permitted. The relay accepts the SDK's exact `beta=true` query, caps output, and serializes forwarding so a first quota rejection prevents simultaneous retries reaching the gateway. Its ownership lease remains held until forwarded work finishes; CLI process groups are reaped. Synthetic regressions cover crashes, concurrent owners/retries, quota import, model/auth rejection, budget exhaustion and redirect refusal. Real Claude Code/native-runtime regression also traverses this relay and verifies its request count against observed tool turns.
 
-## Accounted official public control
+## Retired official public live control
 
-After reset, use a stable identity for the single official-CLI GLM control:
+The1.18/public diagnostic received429 on October29 and did not answer the user's normalOAuth2.1 integration question. Its live entrypoint now unconditionally returns `retired` before state/runtime/admission I/O, including `--check-only`. Changing run IDs, plans or reset times cannot reactivate it. Only explicit loopback synthetic fixtures remain executable. Historical reports/ledger are preserved; the timer is disabled. Do not run old live commands from historical checkpoints.
 
-```sh
-python3 /home/agent/tokligence-staging/gateway/native/opencode/official-public-probe.py \
-  --run-id official-glm-control-20261029 --not-before 2026-10-29T01:03:00+00:00 \
-  --pause-staging --bun-transport /home/agent/tokligence-staging/runtime/bun
-```
-
-An explicit `--not-before` timestamp is required; the authorized next comparison is October29 01:03UTC. The same shared guard prevents replay, concurrent probes and calls during cooldown. The verified1.18.32 binary runs in an empty profile; no OAuth files or gateway credentials enter it. Its built-in public authentication is selected normally. Static `official-models.json` retains public metadata for four zero-cost aliases; only the output limit is reduced to1024. Tools, plugins, project config, updates, compaction and model fetching are disabled. The control admits exactly one selected-model Chat Completions request and forwards the original JSON/CLI metadata headers to the fixed HTTPS OpenCode endpoint, with normal TLS validation and no redirects/proxies/cookies. SDK retries are denied locally without further provider traffic. Inherited proxy configuration causes refusal, not an automatic egress change.
-
-`--pause-staging` verifies recorded PID ownership (including relative script paths plus cwd), stops only those staging services to fit the1GiB user limit, then restores and checks their health in cleanup. Other processes, OAuth ownership and production remain untouched. Version/startup errors and timeouts preserve private diagnostics; per-run evidence lives under `live-reports/`. `--fixture-upstream` admits loopback `/v1` only and labels the result synthetic; it cannot choose another live origin. A successful control is not complete matrix coverage.
-
-Scope limitation: this is the official CLI generating HTTP requests through a counted relay; The selected transport performs onward HTTPS (Bun in the command above; urllib when the Bun option is absent). It does **not** establish byte-for-byte or direct Bun-TLS parity. The report labels that transport explicitly. A rejection must not be described as an untouched direct-CLI result, and is not permission to retry unguarded. The network-blocked regression executes the real CLI through the same relay/profile and verifies one request, public auth, the model and exact token field.
+The replacement must use the same pinned2.1.4 native CLI/runner, native OAuth/config discovery and a single credential owner, then compare the actual provider boundary with the gateway. It must first pass a complete synthetic/network-isolated reference fixture and explicit aggregate live admission. This replacement is not yet implemented or cleared for live use. No diagnostic inference is allowed during the current cooldown or as a lane switch after rejection.
 
 ## HTTP cancellation lifetime
 
@@ -141,17 +131,7 @@ Native requests now require an explicit stable conversation identity: `x-session
 
 The final model HTTP middleware preserves native fetch, headers, bodies, hooks and timeout settings while explicitly refusing redirects and allowing at most one physical fetch dispatch per completion. This intentionally differs from automatic redirect behavior in the default runtime. It prevents hidden redirect traffic, not provider-side quotas.
 
-Live official controls require `--plan`. The prepared plan pins evidence and code hashes, the worker overlay, one stable run ID and an aggregate one-request/1024-output window. Replayed IDs, changed window limits, stale evidence, active probe owners, unhealthy/wrong service owners, missing worker flock, wrong auth mode, active cooldowns or early time refuse dispatch. A check-only command does not reserve the ID, stop services, or send inference:
-
-```sh
-python3 /home/agent/tokligence-staging/gateway/native/opencode/official-public-probe.py \
-  --run-id official-glm-control-20261029 \
-  --not-before 2026-10-29T01:34:00+00:00 \
-  --plan /home/agent/tokligence-staging/gateway/native/opencode/staging-run-plan.json \
-  --bun-transport /home/agent/tokligence-staging/runtime/bun --check-only
-```
-
-For the eligible scheduled control, replace `--check-only` with `--pause-staging`. The timer disables itself first. Success does not authorize another request in this window. Stop on rejection or uncertain delivery; no fallback/retry/account/IP rotation. The aggregate cap applies to controls admitted with this plan, not arbitrary gateway traffic; multi-run native matrix automation remains prohibited until it uses an equivalent shared admission budget.
+The historical single-request plan is consumed and its public live entrypoint is retired. Shared admission, persistent aggregate budgets and reviewed evidence remain mandatory requirements for a replacement OAuth comparison. They are safeguards against extra traffic, not proof of quota availability. No new live window is active. Multi-run native matrix automation remains prohibited until covered by equivalent admission.
 
 `capture-official-cli.py --lifecycle` runs the actual compiled CLI with scoped Read permission in an OS network namespace. It captures parallel results, actual reasoning replay, process restart/resume, graceful cancellation/socket closure and resume afterward. Five actual CLI request bodies are replayed through the native compiler and compared exactly, in addition to the80 existing compiler vectors. It verifies stable session headers and classifies the current version-specific header names. Native additionally has tracing/session-affinity headers;1.18 has its own per-message request header. These legitimate differences remain visible, not spoofed. This is strong coverage of the declared synthetic lifecycle, not full live auth/TLS/process equivalence.
 
