@@ -1,5 +1,16 @@
 # Reviewed live acceptance plan — October 28, 2026
 
+## Implemented matched OAuth replacement — latest
+
+The same-version replacement is now implemented: actual2.1.4 native-source CLI and actualgateway share one synthetic OAuth database sequentially in OS network isolation, with native refresh/config and exact classified wire comparisons. See README and oauth-reference-evidence.json. This replaces the earlier statement that the reference still needs implementation. The public1.18 control remains permanently retired/consumed.
+
+A separate hash-bound oauth-run-plan.json prepares stable native-oauth-comparison-20261030, earliestOctober30 01:34UTC, maxTWOdispatch reservations/2048output and >=120seconds spacing. Driver defaults to --check-only and must not execute unless all current gates pass. The timer remains disabled; no automatic activation follows from preparation. The current provider cooldown still blocks inference. This is an independently prepared same-version normalOAuth basic comparison, not switching lanes immediately after rejection to get a success.
+
+Native source launch uses supported serve/run--server, fixed pinned buildconstants and no dotenv/bunfig autoload; state/credential remains the existing stagingsecondary database under an inherited OSlock and parent-death termination, never copied/reseeded. The basic control intentionally disables/omits tools and caps output via native configuration; it buffers/validates its response to prevent hallucinated tool execution. The native fetch meter preserves outgoing request/BunTLS and bounds actual dispatches; it only sends accounting to loopback. Gateway replays the reference history from memory. Missing/public auth, unknown destinations/fields, malformed outcomes and any rejection stop before another inference. Header status/reset survive broken error bodies. Native background HTTP remains explicitly separate.
+
+The two-request window ends after the basic pair, including success. Live tool/reasoning/long/Claude/four-model acceptance requires later independently bounded windows. Do not run existing live-tests.py matrix automatically. Prepared code/evidence is not a claim of successful liveOAuth or a guarantee against429.
+
+
 ## October29 outcome — supersedes automatic progression below
 
 The sole admitted official public control received429 FreeUsageLimitError on its ONEactual request. Reset2026-10-30T00:00:00.852986+00:00. Windowofficial-comparison-window-20261029 is consumed and runofficial-glm-control-20261029 must never replay. Timer is disabled. No native/public/OAuth/matrix follow-up is allowed as a response to this rejection; expiry alone is not permission for another scheduled probe.

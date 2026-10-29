@@ -87,7 +87,33 @@ Actual Claude Code calls pass through an authenticated loopback relay that enfor
 
 The1.18/public diagnostic received429 on October29 and did not answer the user's normalOAuth2.1 integration question. Its live entrypoint now unconditionally returns `retired` before state/runtime/admission I/O, including `--check-only`. Changing run IDs, plans or reset times cannot reactivate it. Only explicit loopback synthetic fixtures remain executable. Historical reports/ledger are preserved; the timer is disabled. Do not run old live commands from historical checkpoints.
 
-The replacement must use the same pinned2.1.4 native CLI/runner, native OAuth/config discovery and a single credential owner, then compare the actual provider boundary with the gateway. It must first pass a complete synthetic/network-isolated reference fixture and explicit aggregate live admission. This replacement is not yet implemented or cleared for live use. No diagnostic inference is allowed during the current cooldown or as a lane switch after rejection.
+The replacement must use the same pinned2.1.4 native CLI/runner, native OAuth/config discovery and a single credential owner, then compare the actual provider boundary with the gateway. It must first pass a complete synthetic/network-isolated reference fixture and explicit aggregate live admission. The same-version replacement is implemented below. No diagnostic inference is allowed during the current cooldown or as a lane switch after rejection.
+
+## Same-version OAuth reference and bounded comparison
+
+`capture-oauth-reference.py` runs the actual pinned2.1.4 native CLI using its supported `serve` + `run --server` path, then the real gateway/worker. Both use the same synthetic OAuth database sequentially. No real profiles or credentials are mounted. Linux bubblewrap blocks external networking, the checkout mount excludes .env/.git/untracked files (verified by a private canary), and subreaping/pidfds clean up detached descendants. The CLI source is compared with the SHA-pinned upstream archive before execution. Install the CLI/TUI workspaces in addition to the SDK dependencies, using the frozen lockfile and ignored install scripts:
+
+```sh
+bun install --cwd .cache/opencode-native --frozen-lockfile --ignore-scripts --filter @opencode/cli --filter @opencode/tui
+python3 native/opencode/capture-oauth-reference.py \
+  --source .cache/opencode-native --archive .cache/opencode-native.tar.gz \
+  --bun /absolute/path/to/pinned/bun --node /absolute/path/to/node \
+  --output /new/private/evidence-directory
+```
+
+This verifies native refresh/config/org handling, persistent CLI continuation, parallel native execute success/error, actual reasoning replay and correlated cancellation on both paths. The final tool-free profile is also replayed through the gateway. Exact body/stable-header comparison fails on unexplained differences. Explicit existing compatibility differences are native omitted versus bridge auto tool choice, native strict:false versus bridge omission, native null versus bridge empty text for tool-call assistants, and empty tool definitions forced by the restricted control versus bridge omission. Volatile tracing/session IDs and content length are validated separately; they are not spoofed. The reference is a native-source release-constant build with explicit Solid preload and release-style Bun flags, not a compiled TUI binary or every default CLI profile.
+
+`oauth-comparison.py` is the separate live driver. Its default/`--check-only` mode is read-only. It requires a new hash-bound `oauth-run-plan.json`, the exact qualified evidence/overlay/CLI tree/Bun, existing active staging OAuth credential identity, owned healthy services, retained worker lock, elapsed time/cooldown and unused aggregate budget. It checks the native local model catalog for zero input/output/cache prices and text capability before inference, while retaining the catalog’s API model alias. It never copies/reseeds the credential. There is no automatic public fallback, retry, matrix expansion or scheduler activation.
+
+The admitted basic comparison has at most TWO actual provider requests/2048 reserved output tokens: one native CLI control, then one explicit native gateway request ONLY after control success and at least120seconds pacing. The CLI uses the existing staging database under an inherited exclusive descriptor lock, with parent-death termination; normal failures restore recorded staging services. A hard driver kill can leave staging stopped, but must not leave a second refresh owner. Tools are denied and omitted via supported native configuration; the first control response is bounded/buffered and checked before the native agent could execute a hallucinated tool call. Native requests go directly through original Bun fetch/TLS; the authenticated loopback meter only reserves/observes calls and holds the reference history in memory for matched gateway replay. Rejections are persisted from headers before bounded error-body collection; diagnostics distinguish provider reset data from conservative unknown-reset policy. Normal native Console/catalog and three read-only local-provider discovery probes remain background HTTP outside the inference budget.
+
+```sh
+python3 /home/agent/tokligence-staging/gateway/native/opencode/oauth-comparison.py \
+  --plan /home/agent/tokligence-staging/gateway/native/opencode/oauth-run-plan.json \
+  --run-id native-oauth-comparison-20261030 --check-only
+```
+
+`--execute` replaces `--check-only` only when admission is ready and the recorded live window is eligible. Never alter IDs/hashes/roots/credentials to force readiness. The timer remains disabled. A successful pair is basic coverage only; live tools/reasoning/long/four-model acceptance remains separate and incomplete. Gateway physical dispatch is independently limited to one per call; its live provider wire is qualified offline, not captured by an HTTP forwarding proxy. Both the native CLI meter and the OAuth worker reject missing/public authorization before inference; OAuth environment key/auth-content overrides are forbidden. No claim that these guards cure provider quotas follows from the fixtures.
 
 ## HTTP cancellation lifetime
 

@@ -13,6 +13,9 @@ test('public native auth is explicit and cannot consume OAuth state or overrides
   for (const key of ['OPENCODE_NATIVE_SEED_FILE', 'OPENCODE_API_KEY', 'OPENCODE_AUTH_CONTENT', 'OPENCODE_CONSOLE_TOKEN']) {
     assert.throws(() => nativeAuthMode({ OPENCODE_NATIVE_AUTH_MODE: 'public', [key]: 'private-canary' }), error => !error.message.includes('private-canary') && /forbid/.test(error.message));
   }
+  for (const key of ['OPENCODE_API_KEY', 'OPENCODE_AUTH_CONTENT', 'OPENCODE_CONSOLE_TOKEN']) {
+    assert.throws(() => nativeAuthMode({ [key]: 'private-canary' }), /alternate authentication overrides/);
+  }
   assert.doesNotThrow(() => assertNativeCredentialCount('public', 0));
   assert.doesNotThrow(() => assertNativeCredentialCount('oauth', 1));
   assert.throws(() => assertNativeCredentialCount('public', 1), /separate state/);

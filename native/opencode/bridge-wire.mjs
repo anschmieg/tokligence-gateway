@@ -16,6 +16,9 @@ export class BridgeStreamError extends BridgeInputError {
 export function nativeAuthMode(env) {
   const mode = env.OPENCODE_NATIVE_AUTH_MODE || "oauth";
   if (!["oauth", "public"].includes(mode)) throw new Error("Invalid OPENCODE_NATIVE_AUTH_MODE");
+  if (mode === "oauth" && ["OPENCODE_API_KEY", "OPENCODE_AUTH_CONTENT", "OPENCODE_CONSOLE_TOKEN"].some(key => env[key])) {
+    throw new Error("OAuth native workers forbid alternate authentication overrides");
+  }
   if (mode === "public" && ["OPENCODE_NATIVE_SEED_FILE", "OPENCODE_API_KEY", "OPENCODE_AUTH_CONTENT", "OPENCODE_CONSOLE_TOKEN"].some(key => env[key])) {
     throw new Error("Public native workers forbid credential seeds and authentication overrides");
   }
@@ -26,6 +29,17 @@ export function assertNativeCredentialCount(mode, count) {
   if (count !== (mode === "public" ? 0 : 1)) throw new Error(mode === "public"
     ? "Public native workers require a separate state with no OpenCode credentials"
     : "The isolated native worker must own exactly one OpenCode credential");
+}
+
+// Validate the final resolved HTTP authorization, not merely the database mode.
+// Native discovery can expose a public fallback after a connection/config error.
+export function assertNativeAuthorization(mode, headers) {
+  const authorization = headers.get('authorization') || '';
+  const valid = mode === 'oauth' ? /^Bearer \S+$/.test(authorization) && authorization !== 'Bearer public'
+    : mode === 'public' && authorization === 'Bearer public';
+  if (!valid || headers.has('cookie')) throw new BridgeInputError(
+    `OpenCode ${mode} mode resolved incompatible authorization; no inference was sent.`,
+    'native_authorization_mode_mismatch', 503);
 }
 
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -204,7 +218,20 @@ export function decodeChatRequest(body) {
   return { model: body.model, stream: body.stream === true, includeUsage: body.stream_options?.include_usage === true, system, leadingSystem, messages, tools, toolChoice, options };
 }
 
+function ownedBridgeError(value, seen = new Set(), depth = 0) {
+  if (value instanceof BridgeInputError) return value;
+  if (!value || typeof value !== 'object' || depth > 8 || seen.has(value)) return;
+  seen.add(value);
+  for (const key of ['error', 'cause', 'reason']) {
+    const found = ownedBridgeError(value[key], seen, depth + 1);
+    if (found) return found;
+  }
+}
+
 export function safeNativeError(error) {
+  // Native HTTP/AI layers wrap transport exceptions. Only recover our own
+  // diagnostic class, never raw provider error messages or arbitrary bodies.
+  error = ownedBridgeError(error) || error;
   if (error instanceof BridgeInputError) return { status: error.status, error: { type: error.status >= 400 && error.status < 500 ? "invalid_request_error" : "native_bridge_error", code: error.code, message: error.message } };
   const reason = error?.reason || error?.cause?.reason || {};
   const knownTags = new Set(["QuotaExceeded", "RateLimit", "Authentication", "InvalidRequest", "UnsupportedOperation", "ProviderConfiguration", "NoRoute", "ContentPolicy", "ProviderInternal", "Transport", "InvalidProviderOutput", "UnknownProvider", "Timeout"]);

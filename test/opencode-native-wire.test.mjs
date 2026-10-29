@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { decodeChatRequest, createChatEncoder, createTerminalGate, safeNativeError } from "../native/opencode/bridge-wire.mjs";
+import { decodeChatRequest, createChatEncoder, createTerminalGate, safeNativeError, assertNativeAuthorization } from "../native/opencode/bridge-wire.mjs";
 
 const tool = { type: "function", function: { name: "lookup", description: "Caller tool", parameters: { type: "object", properties: { id: { type: "integer" } }, required: ["id"], additionalProperties: false } } };
 
@@ -189,4 +189,21 @@ test('native stream emits assistant role once and opt-in usage as an empty-choic
   assert.equal(tail[0].usage, undefined);
   assert.deepEqual(tail[1].choices, []);
   assert.equal(tail[1].usage.total_tokens, 8);
+});
+
+
+test('final resolved authorization must match the declared native auth mode', () => {
+  assert.doesNotThrow(() => assertNativeAuthorization('oauth', new Headers({ authorization: 'Bearer synthetic-private' })));
+  assert.doesNotThrow(() => assertNativeAuthorization('public', new Headers({ authorization: 'Bearer public' })));
+  for (const [mode, headers] of [['oauth', {}], ['oauth', { authorization: 'Bearer public' }],
+    ['oauth', { authorization: 'Bearer synthetic', cookie: 'private-canary' }],
+    ['public', { authorization: 'Bearer synthetic-private' }]]) {
+    let failure;
+    try { assertNativeAuthorization(mode, new Headers(headers)); } catch (error) { failure = error; }
+    assert.ok(failure);
+    const wrapped = safeNativeError({ reason: { cause: { error: failure } } });
+    assert.equal(wrapped.status, 503);
+    assert.equal(wrapped.error.code, 'native_authorization_mode_mismatch');
+    assert.doesNotMatch(JSON.stringify(wrapped), /synthetic-private|private-canary/);
+  }
 });
