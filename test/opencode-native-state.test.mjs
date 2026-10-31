@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { acquireStateLock, createSessionRegistry } from '../native/opencode/state-store.mjs';
+import { acquireStateLock, createSessionRegistry, createQuotaCircuit } from '../native/opencode/state-store.mjs';
 
 test('native lock ignores stale PID contents and retains one inode across acquisitions', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'native-lock-'));
@@ -175,4 +175,34 @@ test('registry sync failure blocks native creation until reference persistence s
     assert.equal(created, 1);
     assert.equal(JSON.parse(await readFile(file)).scope.id, 'ses_sync');
   } finally { fs.open = originalOpen; await rm(root, { recursive: true, force: true }); }
+});
+
+
+test('native quota circuit survives restart, honors shared cooldowns, serializes longest limit and fails closed', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'native-quota-'));
+  const file = path.join(root, 'quota.json'), sharedFile = path.join(root, 'ledger.json');
+  let clock = Date.now();
+  try {
+    const options = { file, sharedFile, now: () => clock };
+    const circuit = createQuotaCircuit(options);
+    await writeFile(sharedFile, '{}');
+    assert.equal(await circuit.active(), null);
+    await Promise.all([401, 403, 429].map((status, index) => circuit.record({ status, error: { retry_at: new Date(clock + (index + 1) * 10000).toISOString(), message: 'SECRET_NOT_PERSISTED' } })));
+    assert.equal((await circuit.active()).status, 429);
+    assert.equal((await createQuotaCircuit(options).active()).status, 429);
+    assert.equal((await readFile(file, 'utf8')).includes('SECRET'), false);
+    await writeFile(sharedFile, JSON.stringify({ cooldown_until: new Date(clock + 60000).toISOString() }));
+    assert.equal(Date.parse((await circuit.active()).retry_at), clock + 60000);
+    await circuit.record({ status: 429, error: { code: 'native_provider_cooldown' } });
+    assert.equal(Date.parse((await circuit.active()).retry_at), clock + 60000, 'Local refusals never extend provider reset');
+    clock += 61000;
+    assert.equal(await circuit.active(), null);
+    await writeFile(sharedFile, 'broken json');
+    await assert.rejects(circuit.active(), { code: 'native_quota_state_invalid' });
+    await rm(sharedFile);
+    await assert.rejects(circuit.active(), { code: 'native_quota_state_invalid' });
+    await writeFile(sharedFile, '{}');
+    await circuit.record({ status: 403, error: {} });
+    assert.equal(Date.parse((await circuit.active()).retry_at), clock + 86400000);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

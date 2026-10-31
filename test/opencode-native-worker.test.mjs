@@ -246,7 +246,7 @@ with LiveGuard(sys.argv[2],'native-cli-fixture',5,40960) as guard:
         assert.ok(captures.filter(capture => capture.body.messages.some(message => JSON.stringify(message.content).includes('fixture'))).some(capture => capture.body.max_tokens === 8192));
       } finally { if (relay && relay.exitCode === null && relay.signalCode === null) { relay.stdin.end(); relay.kill('SIGKILL'); } if (wireTap) { wireTap.closeAllConnections(); await new Promise(resolve => wireTap.close(resolve)); } gateway.kill('SIGKILL'); await new Promise(resolve => { if (gateway.exitCode !== null || gateway.signalCode !== null) resolve(); else gateway.once('exit', resolve); }); }
     });
-    for (const rejection of [401, 403, 429, 500]) {
+    for (const rejection of [500]) {
       mode = 'reject-' + rejection;
       const before = captures.length;
       const rejected = await call();
@@ -262,10 +262,6 @@ with LiveGuard(sys.argv[2],'native-cli-fixture',5,40960) as guard:
       await rejected.text();
       assert.equal(captures.length, before + 1, failed + ' must not retry or follow redirect');
     }
-    mode = 'quota'; const quotaBefore = captures.length; response = await call();
-    assert.equal(response.status, 429, await response.clone().text());
-    assert.doesNotMatch(await response.text(), /PRIVATE_UPSTREAM_BODY/);
-    assert.equal(captures.length, quotaBefore + 1);
     mode = 'truncated'; const truncatedBefore = captures.length; response = await call({ stream: true });
     const truncated = await response.text();
     assert.equal(captures.length, truncatedBefore + 1, 'truncated SSE is not replayed');
@@ -311,6 +307,19 @@ with LiveGuard(sys.argv[2],'native-cli-fixture',5,40960) as guard:
     await new Promise(resolve => setTimeout(resolve, 30));
     mode = 'text'; response = await call();
     assert.equal(response.status, 200, await response.clone().text());
+    mode = 'quota'; const quotaBefore = captures.length; response = await call();
+    assert.equal(response.status, 429, await response.clone().text());
+    assert.doesNotMatch(await response.text(), /PRIVATE_UPSTREAM_BODY/);
+    assert.equal(captures.length, quotaBefore + 1);
+    const afterQuota = captures.length;
+    const retryBlocked = await call();
+    assert.equal(retryBlocked.status, 429);
+    assert.equal((await retryBlocked.json()).error.code, 'native_provider_cooldown');
+    assert.equal(captures.length, afterQuota, 'Recorded provider cooldown prevents physical retries');
+    const circuitRecord = JSON.parse(await (await import('node:fs/promises')).readFile(path.join(state, 'native-quota.json'), 'utf8'));
+    assert.equal(circuitRecord.status, 429);
+    assert.ok(Date.parse(circuitRecord.retry_at) > Date.now());
+
   } finally {
     worker.kill('SIGTERM');
     await new Promise(resolve => { if (worker.exitCode !== null) resolve(); else { worker.once('exit', resolve); setTimeout(() => { worker.kill('SIGKILL'); resolve(); }, 3000).unref(); } });

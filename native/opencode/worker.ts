@@ -27,7 +27,7 @@ import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { llmClient } from "@opencode/core/effect/app-node-platform"
 import { BridgeInputError, readChatBody, decodeChatRequest, createChatEncoder, createTerminalGate, safeNativeError, nativeAuthMode, assertNativeCredentialCount, assertNativeAuthorization } from "./tokligence-bridge-wire.mjs"
 import source from "./tokligence-source.json"
-import { acquireStateLock, createSessionRegistry, claimAuthState, assertPublicDatabaseEmpty } from "./tokligence-state-store.mjs"
+import { acquireStateLock, createSessionRegistry, claimAuthState, assertPublicDatabaseEmpty, createQuotaCircuit } from "./tokligence-state-store.mjs"
 import { scopedHttp } from "./tokligence-scoped-http"
 import overlay from "./tokligence-overlay.json"
 import { verifySourceOverlay } from "./tokligence-source-overlay.mjs"
@@ -70,6 +70,7 @@ if (!allow.size) throw new Error("OPENCODE_NATIVE_MODELS must explicitly allow m
 await verifySourceOverlay(path.resolve(import.meta.dir, "../../.."), overlay)
 await fs.mkdir(state, { recursive: true, mode: 0o700 })
 const lock = await acquireStateLock(path.join(state, "worker.lock"))
+const quotaCircuit = createQuotaCircuit({ file: path.join(state, "native-quota.json"), sharedFile: process.env.OPENCODE_NATIVE_COOLDOWN_FILE })
 await claimAuthState(state, authMode)
 if (authMode === "public") await assertPublicDatabaseEmpty(state, (file: string) => new SqliteDatabase(file, { readonly: true }))
 const metadata = { name: "cli", version: source.version, channel: "latest" }
@@ -165,8 +166,9 @@ const headers = (extra: Record<string, string> = {}) => ({
   "x-opencode-native-version": source.version, "x-opencode-native-commit": source.commit, ...extra,
   "x-opencode-native-overlay": overlay.digest,
 })
-function errorResponse(error: unknown) {
+async function errorResponse(error: unknown) {
   const result = safeNativeError(error)
+  try { await quotaCircuit.record(result) } catch { return Response.json({ error: { code: "native_quota_persistence_failed", message: "Native quota cooldown could not be persisted; inference remains blocked" } }, { status: 503, headers: headers() }) }
   return Response.json({ error: result.error }, { status: result.status, headers: headers({
     ...("retry_after_seconds" in result.error && result.error.retry_after_seconds ? { "retry-after": String(result.error.retry_after_seconds) } : {}),
   }) })
@@ -177,6 +179,13 @@ let ingesting = 0
 const requestTimeoutMs = positiveSetting("OPENCODE_NATIVE_REQUEST_TIMEOUT_MS", 120000, 600000)
 const bodyTimeoutMs = positiveSetting("OPENCODE_NATIVE_BODY_TIMEOUT_MS", 30000, 30000)
 async function inference(request: Request) {
+  let cooldown
+  try { cooldown = await quotaCircuit.active() } catch { discardBody(request); return Response.json({ error: { code: "native_quota_state_invalid", message: "Native quota state cannot be verified" } }, { status: 503, headers: headers() }) }
+  if (cooldown) {
+    discardBody(request)
+    const retry = Math.max(1, Math.ceil((Date.parse(cooldown.retry_at) - Date.now()) / 1000))
+    return Response.json({ error: { type: cooldown.status === 429 ? "rate_limit_error" : "native_bridge_error", code: "native_provider_cooldown", message: "OpenCode inference is locally blocked by a recorded provider cooldown", retry_at: cooldown.retry_at, retry_after_seconds: retry } }, { status: cooldown.status, headers: headers({ "retry-after": String(retry) }) })
+  }
   if (ingesting + active.size >= 4) { discardBody(request); return Response.json({ error: { type: "native_bridge_error", code: "native_worker_busy", message: "Native worker concurrency limit reached" } }, { status: 503, headers: headers({ "retry-after": "1" }) }) }
   ingesting++
   let raw
@@ -257,7 +266,11 @@ async function inference(request: Request) {
         const client = yield* LLMClient.Service
         const scope = yield* Effect.scope
         return client.stream(prepared.request, { ...prepared.options, http: scopedHttp(scope, prepared.options.http,
-          fixture ? undefined : (headers) => assertNativeAuthorization(authMode, headers)) })
+          fixture ? undefined : (headers) => {
+            const cooldown = quotaCircuit.peek()
+            if (cooldown) throw new BridgeInputError("Native provider cooldown is active", "native_provider_cooldown", cooldown.status)
+            assertNativeAuthorization(authMode, headers)
+          }) })
       })).pipe(Stream.provide(nativeLayers), Stream.provide(AppNodeBuilder.build(llmClient)), Stream.provide(locations.get(location)))
     }))
     const encoder = createChatEncoder({ model: input.model, includeUsage: input.includeUsage, id: `chatcmpl_${randomUUID()}` })
@@ -275,7 +288,7 @@ async function inference(request: Request) {
         signal.addEventListener("abort", ready, { once: true })
         if (signal.aborted || chunks.length < 64) ready()
       }))
-    })), { signal: cancel.signal }).then((exit) => {
+    })), { signal: cancel.signal }).then(async (exit) => {
       try {
         if (Exit.isFailure(exit)) {
           terminal.settle(false)
@@ -285,7 +298,15 @@ async function inference(request: Request) {
           chunks.push(...terminal.settle(true))
         }
       } catch (error) { failure = error }
-      finally { done = true; notify() }
+      finally {
+        // Observe provider failures independently of whether the downstream
+        // caller keeps reading. Persist before releasing terminal completion.
+        if (failure) {
+          try { await quotaCircuit.record(safeNativeError(failure)) }
+          catch { failure = new BridgeInputError("Native quota cooldown could not be persisted", "native_quota_persistence_failed", 503) }
+        }
+        done = true; notify()
+      }
     })
     const next = async () => {
       while (!chunks.length && !done) await new Promise<void>((resolve) => { notify = resolve })
@@ -317,6 +338,7 @@ async function inference(request: Request) {
           controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(value)}\n\n`))
         } catch (error) {
           const result = safeNativeError(error)
+          try { await quotaCircuit.record(result) } catch { /* In-memory circuit still blocks further dispatch. */ }
           controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ error: result.error })}\n\n`))
           controller.close()
           await cleanup()

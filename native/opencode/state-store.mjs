@@ -153,3 +153,46 @@ export async function createSessionRegistry({ file, limit, ttlMs, allocateID, cr
     },
   };
 }
+
+// One worker owns this file under worker.lock. An optional diagnostic ledger is
+// read-only: the native worker never writes another process's quota ledger.
+export function createQuotaCircuit({ file, sharedFile, now = Date.now }) {
+  let known = null, tail = Promise.resolve();
+  const choose = values => values.filter(value => value && Date.parse(value.retry_at) > now())
+    .sort((a, b) => Date.parse(b.retry_at) - Date.parse(a.retry_at))[0] || null;
+  const read = async (target, shared = false) => {
+    if (!target) return null;
+    try {
+      if ((await fs.stat(target)).size > 1024 * 1024) throw new Error('Quota state too large');
+      const value = JSON.parse(await fs.readFile(target, 'utf8'));
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid quota object');
+      const retry = shared ? value.cooldown_until : value.retry_at;
+      if (shared && retry === undefined) return null;
+      if (typeof retry !== 'string' || !Number.isFinite(Date.parse(retry)) || (!shared && (value.version !== 1 || ![401, 403, 429].includes(value.status)))) throw new Error('Invalid quota state');
+      return { status: shared ? 429 : value.status, code: 'native_provider_cooldown', retry_at: retry };
+    } catch (error) { if (error.code === 'ENOENT' && !shared) return null; throw Object.assign(new Error('Native quota state cannot be verified'), { code: 'native_quota_state_invalid' }); }
+  };
+  return {
+    peek: () => choose([known]),
+    async active() { known = choose([known, await read(file), await read(sharedFile, true)]); return known; },
+    record(result) {
+      if (![401, 403, 429].includes(result.status) || result.error.code === 'native_provider_cooldown') return Promise.resolve();
+      const retry = Date.parse(result.error.retry_at);
+      const record = { version: 1, status: result.status, code: 'native_provider_cooldown',
+        retry_at: new Date(Number.isFinite(retry) && retry > now() ? retry : now() + 86400000).toISOString() };
+      known = choose([known, record]);
+      const action = async () => {
+        const saved = choose([known, await read(file)]);
+        known = saved;
+        if (!saved) return;
+        const pending = await fs.open(`${file}.pending`, 'w', 0o600);
+        try { await pending.writeFile(JSON.stringify({ ...saved, version: 1 })); await pending.sync(); }
+        finally { await pending.close(); }
+        await fs.rename(`${file}.pending`, file);
+        const directory = await fs.open(path.dirname(file), 'r');
+        try { await directory.sync(); } finally { await directory.close(); }
+      };
+      const pendingResult = tail.then(action); tail = pendingResult.catch(() => {}); return pendingResult;
+    },
+  };
+}

@@ -35,7 +35,7 @@
   "quota_cooldown_persisted": true,
   "live_tested": false,
   "source_commit": "68bc26b7da1990ce10ffecfbc1e09eb13aa5d824",
-  "overlay_sha256": "fe8bf81c34e8b076d155868f09429c0197b4095a3a53d5374bf4c2a4fb5a7178",
+  "overlay_sha256": "62457ef7b5e65045987fc70ec55295e9d1cbf57edfdfb379e9e7058533fd078f",
   "cli_archive_files_verified": 120,
-  "verification_log_sha256": "f72cdb9c0c68745198de5585809a9a69b9aedbbbaf21db474db2ecc829c93fe3"
+  "verification_log_sha256": "8233f77e1e13b15d34fc8947b49abbfd2e111f84dbbf4e9e37f4d607d042816e"
 }
