@@ -197,6 +197,11 @@ test('native quota circuit survives restart, honors shared cooldowns, serializes
     assert.equal(Date.parse((await circuit.active()).retry_at), clock + 60000, 'Local refusals never extend provider reset');
     clock += 61000;
     assert.equal(await circuit.active(), null);
+    await writeFile(`${file}.pending`, JSON.stringify({ version: 1, status: 429, retry_at: new Date(clock + 120000).toISOString() }));
+    assert.equal(Date.parse((await createQuotaCircuit(options).active()).retry_at), clock + 120000, 'Crash before rename retains cooldown');
+    await writeFile(`${file}.pending`, 'partial-json');
+    await assert.rejects(createQuotaCircuit(options).active(), { code: 'native_quota_state_invalid' });
+    await rm(`${file}.pending`);
     await writeFile(sharedFile, 'broken json');
     await assert.rejects(circuit.active(), { code: 'native_quota_state_invalid' });
     await rm(sharedFile);

@@ -61,7 +61,11 @@ globalThis.fetch = async (input, init) => {
     const auth = headers.get('authorization') || '';
     await notify('/reserve', { model: value.model, max_tokens: value.max_tokens,
       request: value, competing_limit: value.max_completion_tokens !== undefined, tools: (value.tools || []).length,
-      cookies: headers.has('cookie'), oauth_bearer: /^Bearer \S+$/.test(auth) && auth !== 'Bearer public', stream: value.stream });
+      cookies: headers.has('cookie'), oauth_bearer: /^Bearer \S+$/.test(auth) && auth !== 'Bearer public', stream: value.stream,
+      evidence: { body_sha256: createHash('sha256').update(body).digest('hex'),
+        org_header_present: headers.has('x-org-id'),
+        session_header_present: headers.has('x-opencode-session'),
+        native_user_agent: headers.get('user-agent') === 'opencode/latest/2.1.4/cli' } });
   } else await notify('/background', {});
   let response;
   try { response = await original(input, { ...init, redirect: 'manual' }); }

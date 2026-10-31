@@ -232,6 +232,12 @@ print('owned-descendants-reaped')
                     self.assertEqual(guard.status, status)
                     self.assertIn('cooldown_until', guard.ledger)
                 self.assertNotIn('PRIVATE_CANARY', (root / 'live-probe-ledger.json').read_text())
+        root = self.root / 'invalid-evidence'; root.mkdir()
+        with LiveGuard(root, 'invalid-evidence', 1, 1024) as guard:
+            with native_meter(guard, 'glm-5.3-flash-free') as config:
+                self.assertEqual(send('/reserve', {**value, 'evidence': {'native_user_agent': 'PRIVATE_CANARY'}}), 429)
+                self.assertEqual(guard.count, 0)
+                self.assertNotIn('PRIVATE_CANARY', (root / 'live-probe-ledger.json').read_text())
 
     @unittest.skipUnless(os.environ.get('OPENCODE_NATIVE_BUN'), 'Pinned Bun required for inherited lease/crash test')
     def test_native_reference_inherits_lease_and_dies_with_driver(self):
@@ -334,6 +340,12 @@ console.log(JSON.stringify({physical,passed}));
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(json.loads(result.stdout), {'physical': physical, 'passed': not blocked})
                     self.assertEqual(bool(guard.blocked), blocked)
+                    if physical:
+                        evidence = guard.entry['native_dispatches'][0]
+                        self.assertRegex(evidence['body_sha256'], r'^[0-9a-f]{64}$')
+                        self.assertEqual(evidence['oauth_bearer'], True)
+                        self.assertNotIn('Bearer synthetic', json.dumps(guard.ledger))
+                        self.assertNotIn('CONTROL_OK', json.dumps(guard.ledger))
                     if name == 'startup-only': self.assertEqual(guard.count, 0)
                     if 'quota' in name:
                         self.assertEqual(guard.status, 429)

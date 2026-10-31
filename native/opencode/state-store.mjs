@@ -174,7 +174,7 @@ export function createQuotaCircuit({ file, sharedFile, now = Date.now }) {
   };
   return {
     peek: () => choose([known]),
-    async active() { known = choose([known, await read(file), await read(sharedFile, true)]); return known; },
+    async active() { known = choose([known, await read(file), await read(`${file}.pending`), await read(sharedFile, true)]); return known; },
     record(result) {
       if (![401, 403, 429].includes(result.status) || result.error.code === 'native_provider_cooldown') return Promise.resolve();
       const retry = Date.parse(result.error.retry_at);
@@ -182,7 +182,7 @@ export function createQuotaCircuit({ file, sharedFile, now = Date.now }) {
         retry_at: new Date(Number.isFinite(retry) && retry > now() ? retry : now() + 86400000).toISOString() };
       known = choose([known, record]);
       const action = async () => {
-        const saved = choose([known, await read(file)]);
+        const saved = choose([known, await read(file), await read(`${file}.pending`)]);
         known = saved;
         if (!saved) return;
         const pending = await fs.open(`${file}.pending`, 'w', 0o600);

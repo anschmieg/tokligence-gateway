@@ -44,7 +44,19 @@ def native_meter(guard, model, max_tokens=1024, allow_tools=False, max_calls=1, 
                             guard.stop('Native reference contains unreviewed body fields')
                         with guard.forward_lock:
                             if calls >= max_calls: guard.stop('Native reference phase request budget exhausted')
+                            evidence = value.get('evidence')
+                            if (capture_requests or evidence is not None) and (not isinstance(evidence, dict)
+                                    or not isinstance(evidence.get('body_sha256'), str)
+                                    or not re.fullmatch(r'[0-9a-f]{64}', evidence['body_sha256'])
+                                    or any(type(evidence.get(key)) is not bool for key in ['org_header_present', 'session_header_present', 'native_user_agent'])):
+                                guard.stop('Native dispatch evidence missing or invalid')
                             guard.reserve(value['max_tokens'])
+                            if isinstance(evidence, dict):
+                                # Explicit safe fields only. No auth, headers, prompts or raw body.
+                                summary = {key: evidence[key] for key in ['body_sha256', 'org_header_present', 'session_header_present', 'native_user_agent'] if key in evidence}
+                                summary.update(oauth_bearer=True, cookies=False, max_tokens=value['max_tokens'])
+                                guard.entry.setdefault('native_dispatches', []).append(summary)
+                                guard._save()
                             calls += 1
                             if capture_requests:
                                 if not isinstance(value.get('request'), dict): guard.stop('Native meter missing request capture')
