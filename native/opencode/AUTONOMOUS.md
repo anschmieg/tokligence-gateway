@@ -1,5 +1,9 @@
 # OpenCode Zen completion checkpoint
 
+## October31 user-authorized three-minute continuation watch
+
+User explicitly requested continued testing after redeploy and watch every3minutes. Existing task9c2e80ed-cdd2-4b4b-a6e3-26ba3d67cea9 is now enabled interval180000ms; firstnext2026-10-31T22:16:51.660UTC. This supersedes old disabledtimer notes only. Watch means monitor readiness/processes, NOT inference everytick. Its handoff requires preserving consumed native-oauth-comparison-20261030, verifying durable zero-dispatch startupfailure, then preparing one separatelydocumented bounded replacement native-oauth-runtimefix-20261031/window native-oauth-runtimefix-window-20261031 using exacttestedhashes and allcurrentadmissiongates. No existingledger/ID/window reset. Max2actualdispatches/2048totaloutput/1024each, nativeCLI first, gateway only on strictsuccess after120seconds. Disabletimer BEFORE the one-shot execute; leave disabled on any rejection/uncertainty or basicpaircompletion. Never invent anotherID after that attempt. No matrix/accountIProtation/credentialcopy/productionchanges. User authorized this continuation after local zero-requestfailure, not retries after provider rejection.
+
 ## October31 attempted comparison — zero inference; startup defect fixed
 
 Fixa98d3bb pushed/deployed staging, no service restart. Full359pass/10runtime skips, affectedOAuth2groups pass; all10PythonOAuth methods pass onVPS. Read-only admission now refuses ONLY run_id_already_reserved: effectiveworkerXDG validation/health/overlay/flock/OAuthowner/recoverystate pass; no activecooldown. Ledger bytehashunchanged byfix/admission; consumed runID preserved. Timerupdateddisabled/no next run. Private VPS test log oct31-xdg-tests.log; local /tmp/zen-oct31-{xdg,full,lint}.log.
