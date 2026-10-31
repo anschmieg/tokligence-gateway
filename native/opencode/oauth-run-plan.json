@@ -24,7 +24,7 @@
   "node_sha256": "3159f9115ab4be7d318b7c28e946837a4dceb7f2b3c43232aa2f2e3852550b90",
   "cli_tree_sha256": "8ccddaeb1cf8f880abd9f379016e98b365a7a4948681be2ff863e080d7617005",
   "code_sha256": {
-    "oauth-comparison.py": "85e78382fd30a6aa46c6ee29f8728e4322e090eaf5a8cc9610662370b22bba52",
+    "oauth-comparison.py": "3874f037137e3fac29f602edeb4e826924026e02f5eecc9db875f5b5f0ceca4c",
     "oauth_meter.py": "71a692ef8956ded0fa71459c1de586332520fc9590006b970d57d3e8f0ca593d",
     "oauth_profile.py": "d3f18b644be3129ce86957b51d3c957e6cd33819f7b4b627bb14b09249bddc66",
     "metered-native-fetch.mjs": "d208394ede0e22b8f2a18189c587eacb4f9e347cb5b01e6bbf7eb0d6e5b975a9",

@@ -1,5 +1,11 @@
 # OpenCode Zen completion checkpoint
 
+## October31 attempted comparison — zero inference; startup defect fixed
+
+User asked to proceed. Actual-root read-only admission returnedready/no blockers. Executed ONLY existing native-oauth-comparison-20261030/window native-oauth-window-20261030. It failed with KeyError before native CLI launch or inference reservation: driver incorrectly required XDG paths in worker-env.json although launcher injects them into the live worker process. Report requests0/output0, reference/gatewayfalse, errorKeyError; no new429/provider response. Both ownedservices restored. ExistingrunID remains consumed; no replay/newrun/window created to retry. Old expired cooldown retained unchanged. Private report live-reports/native-oauth-comparison-20261030.json.
+
+Fix reads ONLY four XDG values from command-verified active worker PID, checks process identity and confines paths to native state. It validates these during read-only admission and captures them before service handoff; does not copy private env variables or assume env-file completeness. Regression covers real launcher-style paths without env-file XDG values, missing/external paths and wrong process command; prior orchestration still tests locked handoff and failures. No additional inference/device-login/refreshowner created by this fix. Timer remains disabled. Tests/deployment results follow.
+
 ## Three adversarial findings fixed — helper-only follow-up
 
 Fix8f90919 pushed/deployed staging. All9PythonOAuth methods pass onVPS (18nativefetchcases/7orchestration variants). Actual-root read-only admission refuses ONLY comparison_time_not_reached/provider_cooldown_active: recovery state is idle; ownedhealth/defaultOAuth/flock/completeoverlay/secondaryproductionabsence checks pass. Real ledger bytehash unchanged, nextIDunreserved. Timer confirmed disabled/no nextRunAt. No service restart needed for helper-only changes, no live inference. Private VPS log /home/agent/tokligence-staging/review3-offline.log.

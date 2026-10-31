@@ -53,7 +53,7 @@ print('owned-descendants-reaped')
         self.assertEqual(result.stdout.strip(), 'owned-descendants-reaped')
 
     def test_live_transaction_serializes_ownership_and_stops_before_second_request_on_failure(self):
-        for mode in ['success', 'reference-quota', 'missing-marker', 'outside-xdg', 'gateway-quota', 'priced-model', 'pending-recovery']:
+        for mode in ['success', 'reference-quota', 'missing-marker', 'gateway-quota', 'priced-model', 'pending-recovery']:
             with self.subTest(mode=mode):
                 root = self.root / mode; root.mkdir()
                 state = root / 'state'; state.mkdir(); (state / 'workspace').mkdir()
@@ -123,7 +123,7 @@ print('owned-descendants-reaped')
                     return original_lstat(path, *args, **kwargs)
                 output = io.StringIO()
                 with mock.patch.object(sys, 'argv', ['oauth-comparison', '--root', str(root), '--plan', str(plan_path), '--run-id', 'synthetic-transaction', '--execute']), \
-                     mock.patch.object(driver, 'inspect', return_value=[]), mock.patch.object(driver, 'load_staging_control', return_value=staging), \
+                     mock.patch.object(driver, 'inspect', return_value=[]), mock.patch.object(driver, 'effective_worker_xdg', side_effect=ValueError('Invalid effective XDG') if mode == 'outside-xdg' else None, return_value=values), mock.patch.object(driver, 'load_staging_control', return_value=staging), \
                      mock.patch.object(driver, 'native_meter', side_effect=meter), mock.patch.object(driver.subprocess, 'Popen', side_effect=popen), \
                      mock.patch.object(driver, 'verify_free_model', return_value='glm-5.3-flash-free', side_effect=ValueError('Synthetic priced model') if mode == 'priced-model' else None), \
                      mock.patch.object(driver, 'stop'), mock.patch.object(driver, 'open_gateway', side_effect=gateway), \
@@ -140,6 +140,24 @@ print('owned-descendants-reaped')
                 with (state / 'worker.lock').open('a+') as released:
                     import fcntl
                     fcntl.flock(released, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def test_effective_worker_xdg_uses_owned_process_and_rejects_missing_or_external_paths(self):
+        root = self.root; (root / 'worker.pid').write_text('123')
+        proc = root / 'proc'; process = proc / '123'; process.mkdir(parents=True)
+        (process / 'stat').write_text('synthetic-stable-stat')
+        (process / 'cmdline').write_bytes(str(root / 'runtime/opencode/packages/sdk/src/tokligence-bridge.ts').encode() + b'\0')
+        values = {name: str(root / 'state' / leaf) for name, leaf in zip(
+            ['XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME'], ['data', 'xdg-config', 'cache', 'xdg-state'])}
+        def write(items): (process / 'environ').write_bytes(b'\0'.join((key + '=' + value).encode() for key, value in items.items()))
+        write({**values, 'PRIVATE_CANARY': 'never-copy'})
+        self.assertEqual(driver.effective_worker_xdg(root, proc), values)
+        for name in values:
+            invalid = dict(values); del invalid[name]; write(invalid)
+            with self.assertRaises(ValueError): driver.effective_worker_xdg(root, proc)
+            write({**values, name: str(root / 'outside')})
+            with self.assertRaises(ValueError): driver.effective_worker_xdg(root, proc)
+        write(values); (process / 'cmdline').write_bytes(b'unrelated-command')
+        with self.assertRaises(ValueError): driver.effective_worker_xdg(root, proc)
 
     def test_native_reference_rejects_recovery_read_only_and_fails_closed_on_schema_drift(self):
         database = self.root / 'recovery.db'
@@ -333,7 +351,7 @@ console.log(JSON.stringify({physical,passed}));
                 'source_sha256': {name: driver.sha(source / name) for name in driver.SOURCE_FILES},
                 'cli_tree_sha256': driver.cli_tree_sha(source), 'node_sha256': driver.sha(runtime / 'node'), 'gateway_sha256': {name: driver.sha(self.root / 'gateway' / name) for name in driver.GATEWAY_FILES}, 'bun_sha256': driver.sha(runtime / 'bun'), 'evidence_sha256': driver.sha(evidence),
                 'credential_id_sha256': driver.hashlib.sha256(b'synthetic-credential').hexdigest(), 'classified_body_differences': []}
-        with mock.patch.object(driver.subprocess, 'check_output', return_value='1.4.4\n'), mock.patch.object(driver, 'inspect_ledger', return_value=[]), mock.patch.object(driver, 'inspect_worker', return_value=[]):
+        with mock.patch.object(driver.subprocess, 'check_output', return_value='1.4.4\n'), mock.patch.object(driver, 'inspect_ledger', return_value=[]), mock.patch.object(driver, 'inspect_worker', return_value=[]), mock.patch.object(driver, 'effective_worker_xdg', return_value={}):
             self.assertEqual(driver.inspect(plan, self.root, 'comparison'), [])
             for field, value in [('authentication', 'public'), ('version', '1.18.32'), ('status', 'draft'),
                                  ('minimum_gap_seconds', 0), ('credential_id_sha256', 'changed'), ('evidence_sha256', 'changed'), ('node_sha256', 'changed'), ('gateway_sha256', {})]:

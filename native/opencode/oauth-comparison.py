@@ -134,8 +134,35 @@ def inspect(plan, root, run_id):
     except (OSError, ValueError, KeyError, sqlite3.Error, subprocess.SubprocessError):
         blockers.append('oauth_runtime_or_evidence_unavailable')
     blockers.extend(inspect_ledger(root, run_id, window))
+    try: effective_worker_xdg(root)
+    except (OSError, ValueError, IndexError): blockers.append('worker_effective_xdg_unverified')
     blockers.extend(inspect_worker(root, plan.get('overlay_sha256')))
     return list(dict.fromkeys(blockers))
+
+
+def effective_worker_xdg(root, proc_root=pathlib.Path('/proc')):
+    """Read only the four paths from the verified live worker, not env-file assumptions."""
+    pid = int((root / 'worker.pid').read_text())
+    process = proc_root / str(pid)
+    before = (process / 'stat').read_bytes()
+    expected = str(root / 'runtime/opencode/packages/sdk/src/tokligence-bridge.ts').encode()
+    if expected not in (process / 'cmdline').read_bytes().split(b'\0'):
+        raise ValueError('Native worker command ownership mismatch')
+    values = dict(item.split(b'=', 1) for item in (process / 'environ').read_bytes().split(b'\0') if b'=' in item)
+    if (process / 'stat').read_bytes() != before:
+        # Only compare immutable process identity; CPU counters may legitimately change.
+        after = (process / 'stat').read_bytes()
+        if before.rsplit(b') ', 1)[1].split()[19] != after.rsplit(b') ', 1)[1].split()[19]:
+            raise ValueError('Native worker process identity changed')
+    state = (root / 'state').resolve()
+    result = {}
+    for name in ['XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME']:
+        value = values.get(name.encode(), b'').decode()
+        if not value: raise ValueError('Native worker XDG path missing')
+        target = pathlib.Path(value).resolve()
+        if target == state or not target.is_relative_to(state): raise ValueError('Native worker XDG path outside state')
+        result[name] = str(target)
+    return result
 
 
 def assert_no_recoverable_work(database):
@@ -201,6 +228,7 @@ def main():
     if blockers or not args.execute:
         print(json.dumps({'status': 'not_ready' if blockers else 'ready', 'inference_performed': False, 'blockers': blockers}))
         return 2 if blockers else 0
+    reference_xdg = effective_worker_xdg(root)
     report = {'scope': 'bounded same-version OAuth basic comparison; not full live acceptance', 'run_id': args.run_id,
               'reference_passed': False, 'gateway_passed': False, 'coverage_incomplete': True}
     guard = LiveGuard(root, args.run_id, 2, 2048, window=plan['window'])
@@ -224,7 +252,6 @@ def main():
                     with (root / 'state/worker.lock').open('a+') as lease:
                         fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
                         assert_no_recoverable_work(root / 'state/opencode.db')
-                        values = read_json(root / 'worker-env.json')
                         state = root / 'state'
                         env = {'PATH': str(root / 'runtime') + ':/usr/bin:/bin', 'HOME': str(state),
                                'OPENCODE_DB': str(state / 'opencode.db'), 'PWD': str(state / 'workspace'),
@@ -233,10 +260,7 @@ def main():
                                'OPENCODE_FILEWATCHER_DISABLE': '1', 'OPENCODE_DISABLE_AUTOUPDATE': '1',
                                'OPENCODE_CONFIG_CONTENT': json.dumps(control_config(1024)),
                                'OPENCODE_PASSWORD': os.urandom(32).hex(), 'DO_NOT_TRACK': '1'}
-                        for key in ['XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME']:
-                            target = pathlib.Path(values[key]).resolve()
-                            if not target.is_relative_to(state): raise ValueError('Native state root mismatch')
-                            env[key] = str(target)
+                        env.update(reference_xdg)
                         api_identity = {'model': None}
                         with native_meter(guard, lambda: api_identity['model'], max_calls=1, capture_requests=True, allowed_request_fields=MATCHED_FIELDS) as meter:
                             config_path = root / 'live-reports' / (args.run_id + '.meter.json')
