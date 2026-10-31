@@ -353,6 +353,7 @@ console.log(JSON.stringify({physical,passed}));
                 'credential_id_sha256': driver.hashlib.sha256(b'synthetic-credential').hexdigest(), 'classified_body_differences': []}
         with mock.patch.object(driver.subprocess, 'check_output', return_value='1.4.4\n'), mock.patch.object(driver, 'inspect_ledger', return_value=[]), mock.patch.object(driver, 'inspect_worker', return_value=[]), mock.patch.object(driver, 'effective_worker_xdg', return_value={}):
             self.assertEqual(driver.inspect(plan, self.root, 'comparison'), [])
+            self.assertIn('worker_effective_xdg_plan_mismatch', driver.inspect({**plan, 'effective_xdg': {'changed': 'path'}}, self.root, 'comparison'))
             for field, value in [('authentication', 'public'), ('version', '1.18.32'), ('status', 'draft'),
                                  ('minimum_gap_seconds', 0), ('credential_id_sha256', 'changed'), ('evidence_sha256', 'changed'), ('node_sha256', 'changed'), ('gateway_sha256', {})]:
                 self.assertTrue(driver.inspect({**plan, field: value}, self.root, 'comparison'), field)

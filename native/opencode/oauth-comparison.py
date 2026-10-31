@@ -134,7 +134,10 @@ def inspect(plan, root, run_id):
     except (OSError, ValueError, KeyError, sqlite3.Error, subprocess.SubprocessError):
         blockers.append('oauth_runtime_or_evidence_unavailable')
     blockers.extend(inspect_ledger(root, run_id, window))
-    try: effective_worker_xdg(root)
+    try:
+        effective_xdg = effective_worker_xdg(root)
+        if 'effective_xdg' in plan and plan['effective_xdg'] != effective_xdg:
+            blockers.append('worker_effective_xdg_plan_mismatch')
     except (OSError, ValueError, IndexError): blockers.append('worker_effective_xdg_unverified')
     blockers.extend(inspect_worker(root, plan.get('overlay_sha256')))
     return list(dict.fromkeys(blockers))
@@ -229,6 +232,9 @@ def main():
         print(json.dumps({'status': 'not_ready' if blockers else 'ready', 'inference_performed': False, 'blockers': blockers}))
         return 2 if blockers else 0
     reference_xdg = effective_worker_xdg(root)
+    if 'effective_xdg' in plan and plan['effective_xdg'] != reference_xdg:
+        print(json.dumps({'status': 'not_ready', 'inference_performed': False, 'blockers': ['worker_effective_xdg_plan_mismatch']}))
+        return 2
     report = {'scope': 'bounded same-version OAuth basic comparison; not full live acceptance', 'run_id': args.run_id,
               'reference_passed': False, 'gateway_passed': False, 'coverage_incomplete': True}
     guard = LiveGuard(root, args.run_id, 2, 2048, window=plan['window'])
