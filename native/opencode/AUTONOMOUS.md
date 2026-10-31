@@ -1,5 +1,9 @@
 # OpenCode Zen completion checkpoint
 
+## Zero-inference discovery PASSED on staging
+
+Snapshota29dd5d startup-only native-oauth-startup-20261031 completed successfully: startup_passedtrue, requests0/output0, noerror/status/reason. Bothownedservices restored. ReportplanSHA2026a3306ba385d5b813c4dc5dfe7038dc8591868573c514f9b8cef9ad8bbc0f, reportSHA4e80d9c80d8e2f835b87ebf345d5271669e44f666f140958a2952b89310255a0. Discovery includesrealCLIboot/nativeOAuthconfig/catalogfreeAPIalias resolution with inference physicallyblocked. This is NOT liveinference success. New oauth-verifiedboot-plan.json binds this proof for native-oauth-verifiedboot-20261031/window native-oauth-verifiedboot-window-20261031, phasecomparison, unchanged2dispatch/2048output/120sgap. No consumedIDsreset; autonomouscontinuation authorized bylatestuser. Anyfreshrejection stopsfuture diagnostictraffic. Timerremainsdisabled.
+
 ## User requested autonomous architecture completion beyond basic checks
 
 Latest user explicitly authorizes continued implementation/staging verification beyond the basic pair, with no429retry storms. Added dedicated discovery-only mode (--startup-only): no CLI inferenceclient, no gatewaydispatch; max_calls0 meter and independent finalfetch inferenceAllowed:false each block before network/reservation. Modebound startupplan cannot execute comparison; successful discovery then permits separatelybudgeted comparison only after assessment. Native auth/config/catalog startup remains real (may refresh the single stagingcredential), inference is forbidden. Same existing DB under ownedservicepause/exclusivelock/parentdeathwrapper, no token/DBcopy or new owner. Historical IDs/windows remain consumed, no automatic reset. Priorcatalogfixe03f265 is baseline. Tests and staging evidence follow.
