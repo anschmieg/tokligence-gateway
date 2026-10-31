@@ -48,7 +48,8 @@ print(json.dumps({"result":"CLAUDE_TOOL_OK " + "fixture " * 700 + " CLAUDE_LONG_
     let runNumber = 0;
     const run = async () => {
       const runID = 'synthetic-' + ++runNumber;
-      const child = spawn('python3', ['native/opencode/live-tests.py', '--root', root, '--url', `http://127.0.0.1:${provider.address().port}`, '--not-before', '1970-01-01T00:00:00+00:00', '--run-id', runID, '--models', 'beam-free,glm-5.3-flash-free,deepseek-v4.1-flash-free,mimo-v2.6-flash-free', '--phases', 'basic,tools,long,claude', '--request-budget', '40', '--output-budget', '220000'], { stdio: ['ignore', 'ignore', 'pipe'] });
+      const harness = "import sys,runpy;from unittest.mock import patch;sys.path.insert(0,'native/opencode');import acceptance_plan;\nwith patch.object(acceptance_plan,'admit_case',return_value={'window':None,'minimum_gap_seconds':0,'plan_sha256':'synthetic'}), patch.object(acceptance_plan,'recheck_case'): runpy.run_path('native/opencode/live-tests.py',run_name='__main__')";
+      const child = spawn('python3', ['-c', harness, '--plan', 'test-only-mocked-admission', '--root', root, '--url', `http://127.0.0.1:${provider.address().port}`, '--not-before', '1970-01-01T00:00:00+00:00', '--run-id', runID, '--models', 'beam-free,glm-5.3-flash-free,deepseek-v4.1-flash-free,mimo-v2.6-flash-free', '--phases', 'basic,tools,long,claude', '--request-budget', '40', '--output-budget', '220000'], { stdio: ['ignore', 'ignore', 'pipe'] });
       let errors = ''; child.stderr.on('data', value => { errors += value; });
       const [code] = await once(child, 'exit');
       const report = JSON.parse(await readFile(path.join(root, 'live-reports', runID + '.json')));

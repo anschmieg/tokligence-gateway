@@ -61,6 +61,19 @@ def recorded_cooldowns(root, ledger):
         report = json.loads(evidence.read_text())
         cooldowns.append(parse_time(report.get('retry_at')))
         cooldowns.extend(parse_time(item.get('reset')) for item in report.get('results', []))
+    # Native-owned quota state is read-only here. This closes the reverse
+    # direction too: a gateway rejection must block later diagnostic CLI calls.
+    for name in ['native-quota.json', 'native-quota.json.pending']:
+        evidence = root / 'state' / name
+        try:
+            if evidence.stat().st_size > 1024 * 1024: raise ValueError('Native quota state oversized')
+            record = json.loads(evidence.read_text())
+        except FileNotFoundError: continue
+        reset = parse_time(record.get('retry_at')) if isinstance(record, dict) else None
+        if (not reset or type(record.get('version')) is not int or record['version'] != 1
+                or type(record.get('status')) is not int or record['status'] not in (401, 403, 429)):
+            raise ValueError('Native quota state cannot be verified')
+        cooldowns.append(reset)
     return [value for value in cooldowns if value and value > utc_now()]
 
 
@@ -138,10 +151,16 @@ class LiveGuard:
         finally:
             os.close(directory)
 
-    def reserve(self, max_tokens):
+    def reserve(self, max_tokens, cancelled=None):
         with self.mutex:
+            if cancelled and cancelled(): self.stop('CLI client disconnected; no further traffic')
             if self.blocked:
                 raise ProbeStopped(self.blocked)
+            future = recorded_cooldowns(self.root, self.ledger)
+            if future:
+                self.ledger['cooldown_until'] = max(future).isoformat()
+                self._save()
+                self.stop('Recorded provider cooldown blocks dispatch')
             if not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or not 1 <= max_tokens <= 8192:
                 self.stop('Invalid output budget')
             if self.count >= self.limit or self.output_count + max_tokens > self.output_limit:
@@ -274,7 +293,7 @@ def claude_relay(guard, base_url, model, authorization, timeout):
                     return True
             if peer_gone():
                 guard.stop('CLI client disconnected; no further traffic')
-            guard.reserve(body['max_tokens'])
+            guard.reserve(body['max_tokens'], cancelled=peer_gone)
             user = body.get('metadata', {}).get('user_id') if isinstance(body.get('metadata'), dict) else None
             if isinstance(user, str):
                 try: user = json.loads(user)

@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Run bounded live tests on the staging VPS after the configured quota reset."""
 import argparse, datetime, json, os, pathlib, subprocess, tempfile, urllib.request, urllib.error, uuid, sys, signal
-from live_safety import LiveGuard, ProbeStopped, claude_relay, gateway_url, open_gateway
+from live_safety import ProbeStopped, claude_relay, gateway_url, open_gateway
+
+from acceptance_plan import admit_case, recheck_case, PacedGuard, CaseNotAdmitted
 
 parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--plan', required=True, help='Reviewed single-case plan with successful same-owner foundation proof')
 parser.add_argument('--root', default='/home/agent/tokligence-staging')
 parser.add_argument('--url', default='http://127.0.0.1:4190')
 parser.add_argument('--request-timeout', type=float, default=690)
@@ -18,6 +21,11 @@ args.url = gateway_url(args.url)
 if datetime.datetime.now(datetime.timezone.utc) < datetime.datetime.fromisoformat(args.not_before):
     raise SystemExit('Refusing live traffic before the configured post-reset time')
 root = pathlib.Path(args.root)
+try:
+    case = admit_case(args, root)
+except CaseNotAdmitted as error:
+    print(json.dumps({'status': 'not_started', 'coverage_incomplete': True, 'blockers': error.blockers}))
+    raise SystemExit(2)
 config = json.loads((root / 'gateway-env.json').read_text())
 all_models = ['beam-free', 'glm-5.3-flash-free', 'deepseek-v4.1-flash-free', 'mimo-v2.6-flash-free']
 models = args.models.split(',')
@@ -26,7 +34,7 @@ if not models or len(set(models)) != len(models) or any(model not in all_models 
     parser.error('Select unique, explicitly allowed free models')
 if not phases or len(set(phases)) != len(phases) or any(phase not in ['basic', 'tools', 'long', 'claude'] for phase in phases):
     parser.error('Select unique supported phases')
-guard = LiveGuard(root, args.run_id, args.request_budget, args.output_budget)
+guard = PacedGuard(root, args.run_id, args.request_budget, args.output_budget, window=case['window'], minimum_gap_seconds=case['minimum_gap_seconds'])
 try:
     guard.__enter__()
 except (ProbeStopped, BlockingIOError):
@@ -142,6 +150,8 @@ def matrix(model, phase):
     if phase == 'claude': record(model, 'claude-code-read-and-long-output', claude)
 
 try:
+    try: recheck_case(case, args, root)
+    except CaseNotAdmitted: guard.stop('Case admission changed before dispatch')
     # Verify short cases for every model before spending quota on long outputs.
     for phase in phases:
         for model in models: matrix(model, phase)
@@ -155,7 +165,7 @@ finally:
         for name in ['basic', 'parallel-tools', 'reasoning-replay', 'long-input-output', 'claude-code-read-and-long-output']:
             if (model, name) not in recorded:
                 results.append({'model': model, 'test': name, 'passed': None, 'status': 'untested', 'reason': 'Matrix stopped before this check ran'})
-    report = {'at': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'run_id': args.run_id, 'requests': guard.count, 'reserved_output_tokens': guard.output_count, 'coverage_incomplete': any(item.get('status') in ('untested', 'blocked') for item in results), 'results': results}
+    report = {'at': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'run_id': args.run_id, 'plan_sha256': case['plan_sha256'], 'requests': guard.count, 'reserved_output_tokens': guard.output_count, 'coverage_incomplete': any(item.get('status') in ('untested', 'blocked') for item in results), 'results': results}
     try:
         reports = root / 'live-reports'
         reports.mkdir(mode=0o700, exist_ok=True)

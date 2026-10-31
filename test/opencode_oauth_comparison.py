@@ -363,7 +363,7 @@ console.log(JSON.stringify({physical,passed}));
         (runtime / 'node').write_text('synthetic-node')
         for name in driver.GATEWAY_FILES:
             target = self.root / 'gateway' / name; target.parent.mkdir(parents=True, exist_ok=True); target.write_text('synthetic-gateway-source')
-        for name in ['worker-env.json', 'gateway-env.json']: (self.root / name).write_text(json.dumps({'OPENCODE_NATIVE_KEY':'synthetic-internal','OPENCODE_NATIVE_ENABLED':'true','OPENCODE_NATIVE_URL':'http://127.0.0.1:4187/v1'}))
+        for name in ['worker-env.json', 'gateway-env.json']: (self.root / name).write_text(json.dumps({'OPENCODE_NATIVE_KEY':'synthetic-internal','OPENCODE_NATIVE_ENABLED':'true','OPENCODE_NATIVE_URL':'http://127.0.0.1:4187/v1','OPENCODE_NATIVE_COOLDOWN_FILE':str(self.root / 'live-probe-ledger.json')}))
         evidence = self.root / 'gateway/native/opencode/oauth-reference-evidence.json'; evidence.parent.mkdir(parents=True)
         summary = {key: True for key in ['passed', 'external_network_blocked', 'oauth_on_both', 'org_on_both', 'reasoning_replay_verified',
             'parallel_tool_success_and_error', 'persisted_cli_resume', 'reference_cancel_closed', 'gateway_cancel_closed',

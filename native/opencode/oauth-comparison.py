@@ -31,7 +31,7 @@ SOURCE_FILES = ['packages/cli/src/index.ts', 'packages/cli/src/server-process.ts
 MATCHED_FIELDS = {'model', 'messages', 'tools', 'tool_choice', 'stream', 'stream_options', 'max_tokens', 'temperature', 'top_p', 'stop', 'reasoning_effort', 'parallel_tool_calls'}
 CODE_FILES = ['oauth-comparison.py', 'oauth_meter.py', 'oauth_profile.py', 'metered-native-fetch.mjs',
               'live_safety.py', 'official_control.py', 'official-public-probe.py', 'run_admission.py',
-              'capture-oauth-reference.py', 'testing/oauth-reference.py', 'testing/oauth-seed.ts', 'source.json', 'owned-cli-exec.py']
+              'capture-oauth-reference.py', 'testing/oauth-reference.py', 'testing/oauth-seed.ts', 'source.json', 'owned-cli-exec.py', 'acceptance_plan.py', 'live-tests.py']
 
 
 def read_json(path): return json.loads(pathlib.Path(path).read_text())
@@ -68,6 +68,27 @@ def inspect(plan, root, run_id):
     if (plan.get('console') != 'https://opencode.ai/console'
             or plan.get('inference') != 'https://opencode.ai/inference/openai/v1/chat/completions'):
         blockers.append('unreviewed_native_destination')
+    blockers.extend(inspect_runtime_binding(plan, root))
+    if 'startup_evidence' in plan:
+        try:
+            proof = plan['startup_evidence']
+            if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,79}', proof['run_id']): raise ValueError('Invalid startup ID')
+            file = root / 'live-reports' / (proof['run_id'] + '.json')
+            result = read_json(file)
+            if (sha(file) != proof['sha256'] or result.get('plan_sha256') != proof['plan_sha256']
+                    or result.get('startup_only') is not True or result.get('startup_passed') is not True
+                    or result.get('requests') != 0 or result.get('reserved_output_tokens') != 0
+                    or result.get('reason') or result.get('error_type') or result.get('upstream_status') is not None):
+                raise ValueError('Startup did not qualify')
+        except (OSError, ValueError, KeyError, TypeError): blockers.append('startup_evidence_not_qualified')
+    blockers.extend(inspect_ledger(root, run_id, window))
+    return list(dict.fromkeys(blockers))
+
+
+def inspect_runtime_binding(plan, root):
+    """Shared read-only snapshot/credential/worker verification, without run admission."""
+    blockers = []
+    source = root / 'runtime/opencode'
     if not isinstance(plan.get('code_sha256'), dict) or not isinstance(plan.get('source_sha256'), dict):
         return blockers + ['missing_runtime_hashes']
     for name in CODE_FILES:
@@ -121,7 +142,8 @@ def inspect(plan, root, run_id):
                 or gateway_env.get('OPENCODE_NATIVE_URL') != 'http://127.0.0.1:4187/v1'
                 or not worker_env.get('OPENCODE_NATIVE_KEY')
                 or worker_env.get('OPENCODE_NATIVE_KEY') != gateway_env.get('OPENCODE_NATIVE_KEY')
-                or worker_env.get('OPENCODE_NATIVE_AUTH_MODE', 'oauth') != 'oauth'):
+                or worker_env.get('OPENCODE_NATIVE_AUTH_MODE', 'oauth') != 'oauth'
+                or worker_env.get('OPENCODE_NATIVE_COOLDOWN_FILE') != str(root / 'live-probe-ledger.json')):
             blockers.append('native_gateway_configuration_mismatch')
         database = root / 'state/opencode.db'
         try: assert_no_recoverable_work(database)
@@ -133,19 +155,6 @@ def inspect(plan, root, run_id):
             blockers.append('staging_credential_identity_changed')
     except (OSError, ValueError, KeyError, sqlite3.Error, subprocess.SubprocessError):
         blockers.append('oauth_runtime_or_evidence_unavailable')
-    if 'startup_evidence' in plan:
-        try:
-            proof = plan['startup_evidence']
-            if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,79}', proof['run_id']): raise ValueError('Invalid startup ID')
-            file = root / 'live-reports' / (proof['run_id'] + '.json')
-            result = read_json(file)
-            if (sha(file) != proof['sha256'] or result.get('plan_sha256') != proof['plan_sha256']
-                    or result.get('startup_only') is not True or result.get('startup_passed') is not True
-                    or result.get('requests') != 0 or result.get('reserved_output_tokens') != 0
-                    or result.get('reason') or result.get('error_type') or result.get('upstream_status') is not None):
-                raise ValueError('Startup did not qualify')
-        except (OSError, ValueError, KeyError, TypeError): blockers.append('startup_evidence_not_qualified')
-    blockers.extend(inspect_ledger(root, run_id, window))
     try:
         effective_xdg = effective_worker_xdg(root)
         if 'effective_xdg' in plan and plan['effective_xdg'] != effective_xdg:
@@ -251,7 +260,7 @@ def main():
         print(json.dumps({'status': 'not_ready', 'inference_performed': False, 'blockers': ['worker_effective_xdg_plan_mismatch']}))
         return 2
     report = {'scope': 'bounded same-version OAuth basic comparison; not full live acceptance', 'run_id': args.run_id,
-              'plan_sha256': sha(args.plan), 'reference_passed': False, 'gateway_passed': False, 'startup_passed': False, 'startup_only': args.startup_only, 'coverage_incomplete': True}
+              'plan_sha256': sha(args.plan), 'staging_root': str(root), 'reference_passed': False, 'gateway_passed': False, 'startup_passed': False, 'startup_only': args.startup_only, 'coverage_incomplete': True}
     guard = LiveGuard(root, args.run_id, 2, 2048, window=plan['window'])
     server = client = None
     logs = []

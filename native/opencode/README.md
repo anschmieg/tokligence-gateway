@@ -56,7 +56,7 @@ Supported scope: text, function tools, textual reasoning, Chat Completions and g
 
 ## Staging handoff, October 26, 2026
 
-Branch: `feat/opencode-native-bridge`. Production remains on `main`; no feature deployment was made there.
+Branch: `fix/opencode-native-review` (isolated native integration worktree). Production remains on `main`; no feature deployment was made there.
 
 SSH: `ssh -F /home/t3/.ssh/fra-agent.conf fra-agent`. Staging root: `/home/agent/tokligence-staging`. Worker: `127.0.0.1:4187`; gateway: `127.0.0.1:4190`. These are private VPS processes, not public endpoints. Runtime source/Bun/Node live in `runtime/`; private `worker-env.json` and `gateway-env.json` contain service keys. Never print these files. Startup scripts and PID/log files are in the staging root. The processes survive SSH disconnects but are not registered as boot-time services; check health before the scheduled run. Never start a second worker before stopping the recorded owner.
 
@@ -64,20 +64,17 @@ Account ownership: **primary remains production; secondary belongs exclusively t
 
 Synthetic runtime tests passed locally and on the VPS. Live direct-VPS native probes of `beam-free`, `glm-5.3-flash-free`, `deepseek-v4.1-flash-free`, and `mimo-v2.6-flash-free` all returned **429 FreeUsageLimitError** with a reset of **October 27, 00:00 UTC**. This does not prove the quota's exact account/IP scope or a punitive malformed-request policy.
 
-A T3 task titled **Run OpenCode staging tests after quota reset** is scheduled for **October 27, 00:05 UTC** in this thread. The timer uses the daily fixed-time scheduler; its first action must disable itself, making this a single intended test round. Run a bounded sequential live matrix after reset: actual Claude Code, long prompts/responses, textual reasoning replay, caller-owned tools, parallel calls, and tool-result continuation across the configured free models. Stop requests for an account if a fresh quota response persists. Report blocked cases separately from successful validation. Do not change egress/accounts to circumvent limits.
+The old daily timers and three-minute watch are disabled. The latest actual OpenCode2.1.4 OAuth CLI request returned429 FreeUsageLimitError on October31, with provider reset November1 00:00UTC; the gateway comparison did not run. This is not proof of a gateway formatting problem or the quota bucket's account/IP scope. Preserve all consumed IDs/windows and reports; no automatic retry or matrix expansion follows from reset expiry. See AUTONOMOUS.md for current evidence.
 
 Claude Code is installed privately as `runtime/claude`. Run it directly on the VPS: SSH TCP forwarding is **administratively prohibited** for this account. The CLI reached the native model and surfaced `api_error_status: 429` / `FreeUsageLimitError` before reset. Use the guarded `native/opencode/live-tests.py` rather than the older `claude-check.py`/ad hoc probes for future inference. It requires a unique `--run-id`, obeys persistent cooldowns and explicit budgets, saves a private per-run JSON report, marks missing reasoning as untested (exit2 for incomplete coverage), and supports long input/output, parallel tools, reasoning replay, and actual Claude Code Read-tool continuations across the four allowlisted free models. The old local tunnel-based probe is obsolete. Do not use production credentials to make staging tests pass. Cline testing needs its own refresh-ownership check before importing any existing account.
 
 ## Guarded live probes
 
-The default is **one GLM basic request with at most1024 output tokens**, not the whole matrix. After the recorded reset, a preflight can use:
+`live-tests.py` now requires an explicit `--plan`; there is no executable default or multi-model/phase batch. A prepared `native-acceptance-case-v1` plan admits exactly one allowed free model and one phase, binds the complete tested runtime/source snapshot and existing credential identity, and requires a hash-bound successful real CLI/gateway foundation report and its finished ledger entry. Startup-only, synthetic, partial or rejected reports do not qualify. Runtime and plan inputs are rechecked under the owned live lease before any dispatch. No such live case is currently armed because the foundation comparison was rejected upstream.
 
-```sh
-python3 /home/agent/tokligence-staging/gateway/native/opencode/live-tests.py \
-  --run-id glm-preflight-20261029 --not-before 2026-10-29T01:03:00+00:00
-```
+Fixed case limits are basic1request/1024reserved output tokens, tools2/2048, long1/8192 and Claude4/32768 (each actual CLI request capped8192). The immutable window must match the case and selected run ID. Requests are paced120–600seconds apart, including prior runs' reservation history; stop/cancellation interrupts the wait, and a Claude client disconnected during pacing reserves/sends nothing. Test-only fixture admission is monkeypatched in the test process; the product exposes no bypass flag.
 
-This does not change the staging worker's authentication mode. `--models` accepts only the four free IDs; `--phases` selects `basic,tools,long,claude`. Requests and reserved output tokens must fit explicit `--request-budget`/`--output-budget` values; a CLI request is capped at8192. Run small selected phases after a successful preflight, not repeated full matrices. The complete20-check coverage plan remains visible: omitted phases/models are untested, never passed.
+The complete20-check coverage remains visible: omitted phases/models and missing reasoning are untested, never passed. Per-case success does not imply the full matrix passed. Old commands without a reviewed plan fail before credential/state access or run reservation.
 
 `live_safety.py` holds an OS lock, reserves each run ID and each actual request before network I/O, and persists counts without credentials. Reused/crashed run IDs cannot be replayed. Existing historical quota reports seed the cooldown;401/403/429 persist a new cooldown (unknown resets conservatively stop for24h). Other upstream errors/redirects/transport failures stop that run. Historical reports are preserved; new evidence is `live-reports/<run-id>.json`, with accounting in `live-probe-ledger.json`. Do not delete these files to bypass a refusal. Ledger reservations are conservative requested limits, not measured billed usage.
 
@@ -178,3 +175,5 @@ Discovery is now a separate executable phase: a hash-bound plan with phase start
 Native workers persist upstream 401/403/429 cooldowns in their owned native-quota.json. Admission refuses locally until reset, including after restart; local refusals do not extend that reset. OPENCODE_NATIVE_COOLDOWN_FILE can point to a diagnostic ledger for read-only shared cooldown enforcement. An unavailable/malformed configured ledger fails closed; the worker never writes it. Discovery/credential background HTTP remains native and separate from inference. Requests already dispatched before a rejection may still finish.
 
 The native CLI dispatch meter also persists a SHA-256 of the outgoing JSON body, output cap and boolean OAuth/cookie/org/session/User-Agent evidence before forwarding. It stores no Authorization value, token, message content or raw body. Interrupted quota writes retain a .pending journal: startup honors a valid future journal and fails closed on a partial/corrupt journal.
+
+Diagnostic admission and reservation also read native-owned cooldown files/journals without modifying them. A gateway-side provider rejection therefore blocks later diagnostic CLI calls, and diagnostic rejections block normal gateway inference through the read-only shared ledger.

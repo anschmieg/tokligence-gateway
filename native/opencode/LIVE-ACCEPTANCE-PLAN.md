@@ -1,4 +1,10 @@
-# Reviewed live acceptance plan — October 28, 2026
+# Reviewed live acceptance plan — current architecture and historical evidence
+
+## October31 architecture and upstream blocker
+
+Zero-inference native discovery passed. The subsequent actual2.1.4 OAuth CLI control returned429 FreeUsageLimitError on its one actual model request, resetNovember1 00:00UTC; no gateway comparison followed. All consumed windows/reports remain immutable. Native/gateway persistent cooldown protection is deployed; no automatic reset retry is armed. Live acceptance remains incomplete.
+
+Future live acceptance now requires --plan with kind native-acceptance-case-v1: exactly one model/phase, fixed per-phase aggregate window, >=120s cancellable pacing across runs, successful same-owner/source real CLI+gateway foundation report AND finished ledger entry. Shared runtime bindings are checked read-only and again under the live lease; failed/synthetic/startup-only foundations refuse. Native and diagnostic cooldown evidence is read in both directions, including incomplete quota journals; known limits are rechecked before every reservation. No ready case plan exists while the foundational model request is rejected. This supersedes all earlier broad matrix commands below.
 
 ## Implemented matched OAuth replacement — latest
 
