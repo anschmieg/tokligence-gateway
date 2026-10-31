@@ -141,6 +141,27 @@ print('owned-descendants-reaped')
                     import fcntl
                     fcntl.flock(released, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
+    @unittest.skipUnless(os.environ.get('OPENCODE_NATIVE_BUN'), 'Pinned Bun required')
+    def test_native_default_catalog_is_background_and_unknown_destinations_keep_safe_metadata(self):
+        for name, url in [('catalog', 'https://models.opencode.ai/api.json'), ('unknown', 'https://unreviewed.invalid/private-path?secret=never-retain')]:
+            root = self.root / name; root.mkdir()
+            with LiveGuard(root, name, 1, 1024) as guard:
+                with native_meter(guard, 'glm-5.3-flash-free') as config:
+                    config.update(console='https://opencode.ai/console', inference='https://opencode.ai/inference/openai/v1/chat/completions')
+                    (root / 'meter.json').write_text(json.dumps(config))
+                    script = root / 'catalog.mjs'
+                    script.write_text("const real=fetch;let physical=0;globalThis.fetch=async(u,i)=>String(u).startsWith('http://127.0.0.1:')?real(u,i):(physical++,new Response('{}'));await import(process.env.PRELOAD);try{await fetch(process.env.TARGET)}catch{}console.log(JSON.stringify({physical}));")
+                    result = subprocess.run([os.environ['OPENCODE_NATIVE_BUN'], str(script)], capture_output=True, text=True, timeout=3,
+                        env={'OPENCODE_PROBE_METER_FILE': str(root / 'meter.json'), 'TARGET': url, 'PRELOAD': (HERE / 'metered-native-fetch.mjs').as_uri()})
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(json.loads(result.stdout)['physical'], int(name == 'catalog'))
+                    self.assertEqual(guard.count, 0)
+                    self.assertEqual(bool(guard.blocked), name == 'unknown')
+                    if name == 'unknown':
+                        self.assertEqual(guard.entry['blocked_destination']['hostname'], 'unreviewed.invalid')
+                        self.assertNotIn('never-retain', json.dumps(guard.ledger))
+                        self.assertNotIn('private-path', json.dumps(guard.ledger))
+
     def test_effective_worker_xdg_uses_owned_process_and_rejects_missing_or_external_paths(self):
         root = self.root; (root / 'worker.pid').write_text('123')
         proc = root / 'proc'; process = proc / '123'; process.mkdir(parents=True)

@@ -4,6 +4,7 @@ import hmac
 import http.server
 import json
 import secrets
+import re
 import threading
 from live_safety import ProbeStopped
 from official_control import public_failure
@@ -82,6 +83,14 @@ def native_meter(guard, model, max_tokens=1024, allow_tools=False, max_calls=1, 
                     elif self.path != '/background':
                         reason = value.get('reason')
                         safe = reason if reason in {'unsupported_native_websocket', 'unexpected_native_destination', 'invalid_native_request_body', 'native_transport_failed', 'invalid_native_control_response'} else 'invalid_protocol_action'
+                        if safe == 'unexpected_native_destination':
+                            destination = value.get('destination', {})
+                            if isinstance(destination, dict):
+                                patterns = {'protocol': r'https?:', 'hostname': r'[A-Za-z0-9.:-]{1,253}', 'port': r'[0-9]{0,5}',
+                                            'method': r'[A-Z]{1,12}', 'path_sha256': r'[0-9a-f]{64}'}
+                                with guard.mutex:
+                                    guard.entry['blocked_destination'] = {key: destination[key] for key, pattern in patterns.items()
+                                        if isinstance(destination.get(key), str) and re.fullmatch(pattern, destination[key])}
                         guard.stop('Native meter refused: ' + safe)
             except ProbeStopped: code = 200 if self.path in ('/outcome', '/observed-rejection') else 429
             except (ValueError, TypeError, OSError):

@@ -1,6 +1,7 @@
 // Native-source CLI preload. Counts calls; forwards the original request through
 // the original Bun fetch/TLS implementation. No HTTP relay or token copying.
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 const config = JSON.parse(readFileSync(process.env.OPENCODE_PROBE_METER_FILE, 'utf8'));
 const meter = new URL(config.meter);
 if (meter.protocol !== 'http:' || meter.hostname !== '127.0.0.1') throw new Error('Loopback probe meter required');
@@ -35,9 +36,12 @@ globalThis.fetch = async (input, init) => {
   const consoleCall = (url.href === config.console + '/api/v2/config' && method === 'GET') ||
     (url.href === config.console + '/auth/device/token' && method === 'POST');
   const discovery = method === 'GET' && ['http://127.0.0.1:1234/api/v1/models', 'http://127.0.0.1:11434/api/tags', 'http://127.0.0.1:8000/health'].includes(url.href);
-  const catalog = url.href === 'https://models.dev/api.json' && method === 'GET';
+  const catalog = ['https://models.opencode.ai/api.json', 'https://models.dev/api.json'].includes(url.href) && method === 'GET';
   if (!inference && !consoleCall && !catalog && !discovery) {
-    await notify('/invalid', { reason: 'unexpected_native_destination' });
+    await notify('/invalid', { reason: 'unexpected_native_destination', destination: {
+      protocol: url.protocol, hostname: url.hostname, port: url.port, method,
+      path_sha256: createHash('sha256').update(url.pathname).digest('hex'),
+    } });
     throw new Error('Unexpected native probe destination');
   }
   if (inference) {

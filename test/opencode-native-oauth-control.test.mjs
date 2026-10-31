@@ -14,6 +14,7 @@ test('native OAuth admission and quota persistence reject changed identity, auth
 });
 test('actual native fetch accounting withholds tools and malformed control streams', { skip: !process.env.OPENCODE_NATIVE_BUN, timeout: 20000 }, async () => {
   await run('python3', ['test/opencode_oauth_comparison.py',
+    'OAuthComparisonTests.test_native_default_catalog_is_background_and_unknown_destinations_keep_safe_metadata',
     'OAuthComparisonTests.test_native_fetch_preserves_requests_and_withholds_tool_or_invalid_control_responses',
     'OAuthComparisonTests.test_source_cli_recipe_disables_dotenv_and_bunfig_autoload',
     'OAuthComparisonTests.test_native_reference_inherits_lease_and_dies_with_driver'], { timeout: 18000 });
