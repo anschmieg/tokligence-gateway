@@ -53,7 +53,7 @@ print('owned-descendants-reaped')
         self.assertEqual(result.stdout.strip(), 'owned-descendants-reaped')
 
     def test_live_transaction_serializes_ownership_and_stops_before_second_request_on_failure(self):
-        for mode in ['success', 'reference-quota', 'missing-marker', 'gateway-quota', 'priced-model', 'pending-recovery']:
+        for mode in ['success', 'reference-quota', 'missing-marker', 'gateway-quota', 'priced-model', 'pending-recovery', 'startup-only']:
             with self.subTest(mode=mode):
                 root = self.root / mode; root.mkdir()
                 state = root / 'state'; state.mkdir(); (state / 'workspace').mkdir()
@@ -122,7 +122,7 @@ print('owned-descendants-reaped')
                     if str(path) == '/data/tokligence/zen/secondary-oauth.json': raise FileNotFoundError()
                     return original_lstat(path, *args, **kwargs)
                 output = io.StringIO()
-                with mock.patch.object(sys, 'argv', ['oauth-comparison', '--root', str(root), '--plan', str(plan_path), '--run-id', 'synthetic-transaction', '--execute']), \
+                with mock.patch.object(sys, 'argv', ['oauth-comparison', '--root', str(root), '--plan', str(plan_path), '--run-id', 'synthetic-transaction', '--startup-only' if mode == 'startup-only' else '--execute']), \
                      mock.patch.object(driver, 'inspect', return_value=[]), mock.patch.object(driver, 'effective_worker_xdg', side_effect=ValueError('Invalid effective XDG') if mode == 'outside-xdg' else None, return_value=values), mock.patch.object(driver, 'load_staging_control', return_value=staging), \
                      mock.patch.object(driver, 'native_meter', side_effect=meter), mock.patch.object(driver.subprocess, 'Popen', side_effect=popen), \
                      mock.patch.object(driver, 'verify_free_model', return_value='glm-5.3-flash-free', side_effect=ValueError('Synthetic priced model') if mode == 'priced-model' else None), \
@@ -130,12 +130,12 @@ print('owned-descendants-reaped')
                      mock.patch.object(driver.time, 'sleep'), mock.patch.object(driver.os, 'lstat', side_effect=lstat), \
                      mock.patch.dict(os.environ, {}, clear=True), contextlib.redirect_stdout(output):
                     result = driver.main()
-                self.assertEqual(result, 0 if mode == 'success' else 1)
+                self.assertEqual(result, 0 if mode in ['success', 'startup-only'] else 1)
                 self.assertFalse(ownership['paused'])
                 self.assertEqual(ownership['restored'], 1)
                 self.assertEqual(ownership['gateway_calls'], int(mode in ['success', 'gateway-quota']))
                 report = json.loads((root / 'live-reports/synthetic-transaction.json').read_text())
-                self.assertEqual(report['requests'], 0 if mode in ['outside-xdg', 'priced-model', 'pending-recovery'] else 2 if mode in ['success', 'gateway-quota'] else 1)
+                self.assertEqual(report['requests'], 0 if mode in ['outside-xdg', 'priced-model', 'pending-recovery', 'startup-only'] else 2 if mode in ['success', 'gateway-quota'] else 1)
                 self.assertNotIn('synthetic-private', output.getvalue())
                 with (state / 'worker.lock').open('a+') as released:
                     import fcntl
@@ -301,12 +301,12 @@ print('owned-lease-released')
                     ('embedded-hanging-quota', 'data: {"error":{"code":"FreeUsageLimitError"}}\n\n', 200, 1, True),
                     ('embedded-quota', 'data: {"error":{"type":"FreeUsageLimitError"}}\n\n', 200, 1, True),
                     ('public-auth', good, 200, 0, True), ('over-budget', good, 200, 0, True),
-                    ('websocket', good, 200, 0, True), ('wrong-model', good, 200, 0, True), ('cookie', good, 200, 0, True)]
+                    ('startup-only', good, 200, 0, True), ('websocket', good, 200, 0, True), ('wrong-model', good, 200, 0, True), ('cookie', good, 200, 0, True)]
         for name, payload, status, physical, blocked in variants:
             root = self.root / name; root.mkdir()
             with self.subTest(name=name), LiveGuard(root, name, 2, 2048) as guard:
                 with native_meter(guard, 'glm-5.3-flash-free') as config:
-                    config.update(inference='http://127.0.0.1:9/v1/chat/completions', console='http://127.0.0.1:9/console', controlMarker='CONTROL_OK')
+                    config.update(inference='http://127.0.0.1:9/v1/chat/completions', console='http://127.0.0.1:9/console', controlMarker='CONTROL_OK', inferenceAllowed=name != 'startup-only')
                     meter_file = root / 'meter.json'; meter_file.write_text(json.dumps(config)); meter_file.chmod(0o600)
                     script = root / 'fetch.mjs'
                     script.write_text('''
@@ -334,6 +334,7 @@ console.log(JSON.stringify({physical,passed}));
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(json.loads(result.stdout), {'physical': physical, 'passed': not blocked})
                     self.assertEqual(bool(guard.blocked), blocked)
+                    if name == 'startup-only': self.assertEqual(guard.count, 0)
                     if 'quota' in name:
                         self.assertEqual(guard.status, 429)
                         self.assertIn('cooldown_until', guard.ledger)
@@ -374,6 +375,7 @@ console.log(JSON.stringify({physical,passed}));
                 'credential_id_sha256': driver.hashlib.sha256(b'synthetic-credential').hexdigest(), 'classified_body_differences': []}
         with mock.patch.object(driver.subprocess, 'check_output', return_value='1.4.4\n'), mock.patch.object(driver, 'inspect_ledger', return_value=[]), mock.patch.object(driver, 'inspect_worker', return_value=[]), mock.patch.object(driver, 'effective_worker_xdg', return_value={}):
             self.assertEqual(driver.inspect(plan, self.root, 'comparison'), [])
+            self.assertIn('startup_evidence_not_qualified', driver.inspect({**plan, 'startup_evidence': {}}, self.root, 'comparison'))
             self.assertIn('worker_effective_xdg_plan_mismatch', driver.inspect({**plan, 'effective_xdg': {'changed': 'path'}}, self.root, 'comparison'))
             for field, value in [('authentication', 'public'), ('version', '1.18.32'), ('status', 'draft'),
                                  ('minimum_gap_seconds', 0), ('credential_id_sha256', 'changed'), ('evidence_sha256', 'changed'), ('node_sha256', 'changed'), ('gateway_sha256', {})]:

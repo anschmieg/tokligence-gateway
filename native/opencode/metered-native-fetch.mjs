@@ -44,6 +44,10 @@ globalThis.fetch = async (input, init) => {
     } });
     throw new Error('Unexpected native probe destination');
   }
+  if (inference && config.inferenceAllowed === false) {
+    await notify('/invalid', { reason: 'startup_inference_forbidden' });
+    throw new Error('Startup mode forbids inference');
+  }
   if (inference) {
     let body = init?.body;
     if (body === undefined && input instanceof Request) body = await input.clone().text();

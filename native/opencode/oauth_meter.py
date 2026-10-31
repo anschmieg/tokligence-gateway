@@ -82,7 +82,7 @@ def native_meter(guard, model, max_tokens=1024, allow_tools=False, max_calls=1, 
                             guard.stop('Native OAuth control rejected; no further traffic', status, failure)
                     elif self.path != '/background':
                         reason = value.get('reason')
-                        safe = reason if reason in {'unsupported_native_websocket', 'unexpected_native_destination', 'invalid_native_request_body', 'native_transport_failed', 'invalid_native_control_response'} else 'invalid_protocol_action'
+                        safe = reason if reason in {'startup_inference_forbidden', 'unsupported_native_websocket', 'unexpected_native_destination', 'invalid_native_request_body', 'native_transport_failed', 'invalid_native_control_response'} else 'invalid_protocol_action'
                         if safe == 'unexpected_native_destination':
                             destination = value.get('destination', {})
                             if isinstance(destination, dict):

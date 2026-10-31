@@ -133,6 +133,18 @@ def inspect(plan, root, run_id):
             blockers.append('staging_credential_identity_changed')
     except (OSError, ValueError, KeyError, sqlite3.Error, subprocess.SubprocessError):
         blockers.append('oauth_runtime_or_evidence_unavailable')
+    if 'startup_evidence' in plan:
+        try:
+            proof = plan['startup_evidence']
+            if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,79}', proof['run_id']): raise ValueError('Invalid startup ID')
+            file = root / 'live-reports' / (proof['run_id'] + '.json')
+            result = read_json(file)
+            if (sha(file) != proof['sha256'] or result.get('plan_sha256') != proof['plan_sha256']
+                    or result.get('startup_only') is not True or result.get('startup_passed') is not True
+                    or result.get('requests') != 0 or result.get('reserved_output_tokens') != 0
+                    or result.get('reason') or result.get('error_type') or result.get('upstream_status') is not None):
+                raise ValueError('Startup did not qualify')
+        except (OSError, ValueError, KeyError, TypeError): blockers.append('startup_evidence_not_qualified')
     blockers.extend(inspect_ledger(root, run_id, window))
     try:
         effective_xdg = effective_worker_xdg(root)
@@ -209,6 +221,7 @@ def main():
     parser.add_argument('--plan', required=True)
     parser.add_argument('--run-id', required=True)
     mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--startup-only', action='store_true', help='Execute discovery with inference physically forbidden')
     mode.add_argument('--execute', action='store_true', help='Explicitly execute only after all admission gates pass')
     mode.add_argument('--check-only', action='store_true', help='Read-only admission (also the default)')
     args = parser.parse_args()
@@ -228,7 +241,9 @@ def main():
         blockers.append('production_secondary_path_present')
     except FileNotFoundError: pass
     except OSError: blockers.append('production_secondary_absence_unverified')
-    if blockers or not args.execute:
+    if plan.get('phase') is not None and plan['phase'] != ('startup_only' if args.startup_only else 'comparison') and (args.execute or args.startup_only):
+        blockers.append('plan_phase_mismatch')
+    if blockers or not (args.execute or args.startup_only):
         print(json.dumps({'status': 'not_ready' if blockers else 'ready', 'inference_performed': False, 'blockers': blockers}))
         return 2 if blockers else 0
     reference_xdg = effective_worker_xdg(root)
@@ -236,7 +251,7 @@ def main():
         print(json.dumps({'status': 'not_ready', 'inference_performed': False, 'blockers': ['worker_effective_xdg_plan_mismatch']}))
         return 2
     report = {'scope': 'bounded same-version OAuth basic comparison; not full live acceptance', 'run_id': args.run_id,
-              'reference_passed': False, 'gateway_passed': False, 'coverage_incomplete': True}
+              'plan_sha256': sha(args.plan), 'reference_passed': False, 'gateway_passed': False, 'startup_passed': False, 'startup_only': args.startup_only, 'coverage_incomplete': True}
     guard = LiveGuard(root, args.run_id, 2, 2048, window=plan['window'])
     server = client = None
     logs = []
@@ -268,10 +283,10 @@ def main():
                                'OPENCODE_PASSWORD': os.urandom(32).hex(), 'DO_NOT_TRACK': '1'}
                         env.update(reference_xdg)
                         api_identity = {'model': None}
-                        with native_meter(guard, lambda: api_identity['model'], max_calls=1, capture_requests=True, allowed_request_fields=MATCHED_FIELDS) as meter:
+                        with native_meter(guard, lambda: api_identity['model'], max_calls=0 if args.startup_only else 1, capture_requests=True, allowed_request_fields=MATCHED_FIELDS) as meter:
                             config_path = root / 'live-reports' / (args.run_id + '.meter.json')
                             with os.fdopen(os.open(config_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as out:
-                                json.dump({**meter, 'console': plan['console'], 'inference': plan['inference'], 'controlMarker': 'NATIVE_OAUTH_CONTROL_OK'}, out)
+                                json.dump({**meter, 'console': plan['console'], 'inference': plan['inference'], 'controlMarker': 'NATIVE_OAUTH_CONTROL_OK', 'inferenceAllowed': not args.startup_only}, out)
                             cli = cli_command(root / 'runtime/opencode', root / 'runtime/bun')
                             metered = cli[:1] + ['--preload', str(HERE / 'metered-native-fetch.mjs')] + cli[1:]
                             try:
@@ -288,55 +303,58 @@ def main():
                                 if not endpoint: raise TimeoutError('Native server readiness deadline')
                                 api_identity['model'] = verify_free_model(endpoint, env['OPENCODE_PASSWORD'], state / 'workspace', plan['model'])
                                 if guard.blocked: raise ProbeStopped(guard.blocked)
-                                print(json.dumps({'phase': 'native_oauth_reference_started', 'run_id': args.run_id}), flush=True)
-                                client, stdout = launch(cli + ['run', '--server', endpoint, '--model', 'opencode/' + plan['model'],
-                                    '--format', 'json', '--title', 'Bounded OAuth control', 'Reply exactly NATIVE_OAUTH_CONTROL_OK.'], env, 'client')
-                                deadline = time.monotonic() + 120
-                                while client.poll() is None and time.monotonic() < deadline:
-                                    if guard.blocked and not getattr(guard, 'pending_error_body', False): raise ProbeStopped(guard.blocked)
-                                    time.sleep(.05)
-                                if client.poll() is None: raise TimeoutError('Native control deadline')
-                                events = [json.loads(line) for line in stdout.read_text().splitlines() if line.startswith('{')]
-                                text = ''.join(event.get('part', {}).get('text', '') for event in events if event.get('type') == 'text')
-                                if client.returncode or 'NATIVE_OAUTH_CONTROL_OK' not in text or guard.count != 1 or guard.blocked:
-                                    guard.stop('Native OAuth reference incomplete; no gateway dispatch')
-                                reference_request = guard.native_requests[0]
-                                if set(reference_request) - MATCHED_FIELDS: guard.stop('Native reference contains unreviewed body fields')
-                                report['reference_passed'] = True
+                                report['startup_passed'] = True
+                                if not args.startup_only:
+                                    print(json.dumps({'phase': 'native_oauth_reference_started', 'run_id': args.run_id}), flush=True)
+                                    client, stdout = launch(cli + ['run', '--server', endpoint, '--model', 'opencode/' + plan['model'],
+                                        '--format', 'json', '--title', 'Bounded OAuth control', 'Reply exactly NATIVE_OAUTH_CONTROL_OK.'], env, 'client')
+                                    deadline = time.monotonic() + 120
+                                    while client.poll() is None and time.monotonic() < deadline:
+                                        if guard.blocked and not getattr(guard, 'pending_error_body', False): raise ProbeStopped(guard.blocked)
+                                        time.sleep(.05)
+                                    if client.poll() is None: raise TimeoutError('Native control deadline')
+                                    events = [json.loads(line) for line in stdout.read_text().splitlines() if line.startswith('{')]
+                                    text = ''.join(event.get('part', {}).get('text', '') for event in events if event.get('type') == 'text')
+                                    if client.returncode or 'NATIVE_OAUTH_CONTROL_OK' not in text or guard.count != 1 or guard.blocked:
+                                        guard.stop('Native OAuth reference incomplete; no gateway dispatch')
+                                    reference_request = guard.native_requests[0]
+                                    if set(reference_request) - MATCHED_FIELDS: guard.stop('Native reference contains unreviewed body fields')
+                                    report['reference_passed'] = True
                             finally:
                                 stop(client); stop(server); client = server = None
                                 config_path.unlink(missing_ok=True)
                 staging.verify_staging(root)
-                print(json.dumps({'phase': 'reference_passed_pacing_before_gateway', 'run_id': args.run_id}), flush=True)
-                time.sleep(plan['minimum_gap_seconds'])
-                # One explicit gateway call, no redirects/retries or legacy fallback.
-                gateway_env = read_json(root / 'gateway-env.json')
-                guard.reserve(1024)
-                paired = {key:reference_request[key] for key in ['messages', 'tools', 'tool_choice', 'temperature', 'top_p', 'stop', 'reasoning_effort', 'parallel_tool_calls'] if key in reference_request}
-                paired.update(model='opencode-native/' + plan['model'], stream=False, max_tokens=1024)
-                request = Request('http://127.0.0.1:4190/v1/chat/completions', data=json.dumps(paired).encode(),
-                    headers={'Authorization': 'Bearer ' + gateway_env['TOKLIGENCE_AUTH_SECRET'], 'Content-Type': 'application/json',
-                             'x-session-id': args.run_id})
-                report['matched_reference_history'] = True
-                try: response = open_gateway(request, timeout=690)
-                except urllib.error.HTTPError as error: response = error
-                with response:
-                    try: raw = response.read(16384 if response.status >= 300 else 1024 * 1024 + 1)
-                    except (OSError, http.client.HTTPException):
-                        if response.status < 300: raise
-                        raw = b''
-                    if response.status >= 300:
-                        failure = read_json_error(raw)
-                        headers = public_failure(raw, response.headers)
-                        failure.update({key:value for key,value in headers.items() if key != 'code' or value != 'upstream_http_error'})
-                        guard.stop('Native gateway rejected comparison', response.status, failure)
-                if len(raw) > 1024 * 1024: guard.stop('Native gateway response limit exceeded')
-                result = json.loads(raw)
-                choice = result.get('choices', [{}])[0]
-                if (choice.get('finish_reason') != 'stop' or choice.get('message', {}).get('tool_calls')
-                        or choice.get('message', {}).get('content', '').strip() != 'NATIVE_OAUTH_CONTROL_OK'):
-                    guard.stop('Native gateway comparison incomplete')
-                report['gateway_passed'] = True
+                if not args.startup_only:
+                    print(json.dumps({'phase': 'reference_passed_pacing_before_gateway', 'run_id': args.run_id}), flush=True)
+                    time.sleep(plan['minimum_gap_seconds'])
+                    # One explicit gateway call, no redirects/retries or legacy fallback.
+                    gateway_env = read_json(root / 'gateway-env.json')
+                    guard.reserve(1024)
+                    paired = {key:reference_request[key] for key in ['messages', 'tools', 'tool_choice', 'temperature', 'top_p', 'stop', 'reasoning_effort', 'parallel_tool_calls'] if key in reference_request}
+                    paired.update(model='opencode-native/' + plan['model'], stream=False, max_tokens=1024)
+                    request = Request('http://127.0.0.1:4190/v1/chat/completions', data=json.dumps(paired).encode(),
+                        headers={'Authorization': 'Bearer ' + gateway_env['TOKLIGENCE_AUTH_SECRET'], 'Content-Type': 'application/json',
+                                 'x-session-id': args.run_id})
+                    report['matched_reference_history'] = True
+                    try: response = open_gateway(request, timeout=690)
+                    except urllib.error.HTTPError as error: response = error
+                    with response:
+                        try: raw = response.read(16384 if response.status >= 300 else 1024 * 1024 + 1)
+                        except (OSError, http.client.HTTPException):
+                            if response.status < 300: raise
+                            raw = b''
+                        if response.status >= 300:
+                            failure = read_json_error(raw)
+                            headers = public_failure(raw, response.headers)
+                            failure.update({key:value for key,value in headers.items() if key != 'code' or value != 'upstream_http_error'})
+                            guard.stop('Native gateway rejected comparison', response.status, failure)
+                    if len(raw) > 1024 * 1024: guard.stop('Native gateway response limit exceeded')
+                    result = json.loads(raw)
+                    choice = result.get('choices', [{}])[0]
+                    if (choice.get('finish_reason') != 'stop' or choice.get('message', {}).get('tool_calls')
+                            or choice.get('message', {}).get('content', '').strip() != 'NATIVE_OAUTH_CONTROL_OK'):
+                        guard.stop('Native gateway comparison incomplete')
+                    report['gateway_passed'] = True
             except Exception as error:
                 report['error_type'] = type(error).__name__
                 if not guard.blocked:
@@ -355,7 +373,7 @@ def main():
     except (ProbeStopped, BlockingIOError):
         print(json.dumps({'status': 'not_started', 'inference_performed': False, 'reason': 'Live lease, cooldown or replay refused'}))
         return 2
-    return 0 if report['reference_passed'] and report['gateway_passed'] else 1
+    return 0 if (report['startup_passed'] and not guard.blocked if args.startup_only else report['reference_passed'] and report['gateway_passed']) else 1
 
 
 def read_json_error(raw):

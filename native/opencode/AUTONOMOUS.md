@@ -1,5 +1,9 @@
 # OpenCode Zen completion checkpoint
 
+## User requested autonomous architecture completion beyond basic checks
+
+Latest user explicitly authorizes continued implementation/staging verification beyond the basic pair, with no429retry storms. Added dedicated discovery-only mode (--startup-only): no CLI inferenceclient, no gatewaydispatch; max_calls0 meter and independent finalfetch inferenceAllowed:false each block before network/reservation. Modebound startupplan cannot execute comparison; successful discovery then permits separatelybudgeted comparison only after assessment. Native auth/config/catalog startup remains real (may refresh the single stagingcredential), inference is forbidden. Same existing DB under ownedservicepause/exclusivelock/parentdeathwrapper, no token/DBcopy or new owner. Historical IDs/windows remain consumed, no automatic reset. Priorcatalogfixe03f265 is baseline. Tests and staging evidence follow.
+
 ## October31 replacement attempt stopped before inference — timer disabled
 
 Offlinefixe03f265 pushed/deployedstaging helper-only; all11PythonOAuth methods pass onVPS, bothservices200, productionsecondarypathabsent and ledger bytehashunchanged bydeployment/tests. Nativeworker/coreoverlayunchanged/no restart required. Timerhandoff updated and confirmeddisabled/no nextRunAt. PrivateVPS log catalogue-fix-offline.log. No furtherlivecall/newrun/window.
