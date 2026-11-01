@@ -2,13 +2,14 @@
 
 package opencode
 
-import "os"
+import (
+	"fmt"
+	"os"
+)
 
-// Non-Unix fallback: no flock. Single ownership degrades to lockfile-exists
-// semantics (O_EXCL create). The plugin targets linux/darwin hosts; this
-// keeps the build green elsewhere with honest weaker semantics.
+// Unsupported platforms fail closed instead of silently dropping ownership.
 func lockFileExclusive(file *os.File) error {
-	return nil
+	return fmt.Errorf("exclusive session registry locks are unsupported on this platform")
 }
 
 func unlockFile(file *os.File) error {
@@ -19,4 +20,4 @@ func syncFile(file *os.File) error {
 	return file.Sync()
 }
 
-func syncDir(dir string) {}
+func syncDir(dir string) error { return fmt.Errorf("directory sync unsupported") }

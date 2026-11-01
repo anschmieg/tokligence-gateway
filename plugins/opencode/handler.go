@@ -486,6 +486,12 @@ func (h *Handler) handleExecute(request []byte, stream bool) ([]byte, error) {
 	}
 	metadataSessionID := sessionIDFromMetadata(req.Headers, req.Metadata)
 	var sessionID, affinity string
+	var release func()
+	defer func() {
+		if release != nil {
+			release()
+		}
+	}()
 	if metadataSessionID != "" || sessionIDFromHeaders(req.Headers) != "" {
 		sessionID, affinity = SessionIdentity(sessionIDFromHeaders(req.Headers), metadataSessionID)
 	} else {
@@ -497,6 +503,9 @@ func (h *Handler) handleExecute(request []byte, stream bool) ([]byte, error) {
 			return nil, withStatus(422, errResolve)
 		}
 		sessionID, affinity = resolved, resolved
+		registry := h.registry
+		principal, conversation := principalDigest(req), conversationID(req.Metadata)
+		release = func() { _ = registry.Release(principal, conversation) }
 	}
 	if !ValidSessionID(sessionID) {
 		return nil, withStatus(422, fmt.Errorf("opencode dispatch session identity %q is not a native OpenCode session id; only caller-supplied native ids or registry-minted ids are forwarded", sessionID))
@@ -509,14 +518,11 @@ func (h *Handler) handleExecute(request []byte, stream bool) ([]byte, error) {
 		return nil, withStatus(400, fmt.Errorf("opencode streaming execution requires the host stream id"))
 	}
 	if h.transport == nil {
-		// Build-only mode: tests and offline verification stop here with the
-		// exact request that would be dispatched.
-		return okEnvelope(ExecutorResponse{Payload: payload})
+		return nil, withStatus(503, fmt.Errorf("opencode host transport is unavailable"))
 	}
 	headers := InferenceHeaders(h.cfg.App(), sessionID, affinity, h.cfg.ProjectID, credential.Authorization())
 	if !stream {
 		result, errDo := h.transport.Do(context.Background(), "POST", endpoint, headers, payload)
-		h.releaseSessionLease(req)
 		if errDo != nil {
 			return nil, withStatus(502, fmt.Errorf("opencode upstream transport failed: %v", errDo))
 		}
@@ -532,26 +538,32 @@ func (h *Handler) handleExecute(request []byte, stream bool) ([]byte, error) {
 			Headers: map[string][]string{"content-type": {"text/event-stream"}},
 		})
 	}
-	return h.handleExecuteStream(req, endpoint, headers, payload)
+	response, err := h.handleExecuteStream(req, endpoint, headers, payload, release)
+	if err == nil {
+		release = nil
+	} // async pump owns this exact registry lease
+	return response, err
 }
 
 // handleExecuteStream relays an upstream SSE stream into the host plugin
 // stream bridge. Rejection statuses and relay failures close the plugin
 // stream with a structured error_detail (status + retry-after) so streamed
 // and buffered requests record cooldown identically.
-func (h *Handler) handleExecuteStream(req ExecutorRequest, endpoint string, headers map[string][]string, payload []byte) ([]byte, error) {
+func (h *Handler) handleExecuteStream(req ExecutorRequest, endpoint string, headers map[string][]string, payload []byte, release func()) ([]byte, error) {
 	result, err := h.transport.DoStream(context.Background(), "POST", endpoint, headers, payload)
 	if err != nil {
 		closeStreamWithError(req.StreamID, err)
 		return nil, withStatus(502, fmt.Errorf("opencode upstream stream transport failed: %v", err))
 	}
 	if IsTerminalStatus(result.StatusCode) {
+		defer h.transport.CloseStream(result)
 		rejection := ClassifyRejection(result.StatusCode, result.Headers, nil)
 		rejection.RequestID = "" // headers only; body was not buffered
 		closeStreamWithRejection(req.StreamID, rejection)
 		return nil, rejection.statusError()
 	}
 	if result.StatusCode < 200 || result.StatusCode >= 300 {
+		defer h.transport.CloseStream(result)
 		errUpstream := fmt.Errorf("opencode upstream returned HTTP %d", result.StatusCode)
 		closeStreamWithError(req.StreamID, errUpstream)
 		return nil, withStatus(502, errUpstream)
@@ -564,7 +576,9 @@ func (h *Handler) handleExecuteStream(req ExecutorRequest, endpoint string, head
 			if recovered := recover(); recovered != nil {
 				closeStreamWithError(req.StreamID, fmt.Errorf("opencode stream relay panic: %v", recovered))
 			}
-			h.releaseSessionLease(req)
+			if release != nil {
+				release()
+			}
 		}()
 		for chunk := range result.Chunks {
 			if chunk.Err != nil {
@@ -665,14 +679,7 @@ func (h *Handler) sessionForRequest(req ExecutorRequest) (string, error) {
 	if h.registry == nil {
 		return "", fmt.Errorf("opencode session registry is unavailable")
 	}
-	sessionID, err := h.registry.Create(principal, conversation)
-	if err != nil {
-		return "", err
-	}
-	if err := h.registry.Reference(principal, conversation); err != nil {
-		return "", err
-	}
-	return sessionID, nil
+	return h.registry.Acquire(principal, conversation)
 }
 
 // releaseSessionLease releases the dispatch lease after the upstream call

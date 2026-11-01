@@ -23,13 +23,12 @@ func syncFile(file *os.File) error {
 	return file.Sync()
 }
 
-// syncDir fsyncs the directory so a rename is durable. Best effort: some
-// filesystems refuse directory fsync.
-func syncDir(dir string) {
+// Durability errors are fatal; never acknowledge an uncertain state write.
+func syncDir(dir string) error {
 	handle, err := os.Open(dir)
 	if err != nil {
-		return
+		return err
 	}
 	defer handle.Close()
-	_ = handle.Sync()
+	return handle.Sync()
 }
