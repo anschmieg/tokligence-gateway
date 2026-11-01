@@ -16,7 +16,7 @@ involved.
 | Model provider | `model.static`, `model.for_auth` | Implemented (per-credential publication) |
 | Executor (chat, non-stream) | `executor.identifier`, `executor.execute` | Implemented |
 | Device login | `auth.login.start`, `auth.login.poll` | **Not implemented** (explicit 501) |
-| Streaming inference | `executor.execute_stream` | **Not implemented** (explicit 501) |
+| Streaming inference | `executor.execute_stream` | Implemented (wired, unit-tested; not yet live-host verified) |
 | Token counting | `executor.count_tokens` | **Not implemented** (explicit 501) |
 | HTTP passthrough | `executor.http_request` | **Not implemented** (explicit 501) |
 
@@ -136,8 +136,14 @@ performs any client-protocol translation itself.
 
 1. No device login: `auth.login.start`/`poll` return 501; credentials come from
    the existing gateway OAuth flow.
-2. Non-streaming chat only. `executor.execute_stream` returns 501 — no SSE
-   bridging via `host.stream.emit` yet.
+2. Streaming chat: `executor.execute_stream` is wired end-to-end in-process —
+   upstream SSE via `host.http.do_stream`/`stream_read`/`stream_close`, frame
+   validation through the bounded SSE parser, delivery via
+   `host.stream.emit`/`host.stream.close` with the host-allocated `stream_id`.
+   Tool-bearing frames are withheld until a successful terminal
+   (`stop`/`tool_calls`); `length`/`content_filter`, malformed SSE, upstream
+   errors, and truncation close the host stream with an error and never
+   release withheld calls. Not yet exercised on a live host.
 3. No token counting or HTTP passthrough.
 4. Per-credential proxy (`AuthData.ProxyURL`) is not yet applied to upstream
    calls; the host transport already honors its own proxy policy.
