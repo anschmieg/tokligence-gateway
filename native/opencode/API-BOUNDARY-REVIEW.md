@@ -1,5 +1,7 @@
 # API-boundary review: native OpenCode 2.1.4
 
+November1 evidence correction: the demonstrated working ubuntu CLI session uses2.0.32, not2.1.4 or1.18.32. Its standard resolver prefers the active savedOAuth credential over environmentkeys. The2.1.4 reference below remains a same-source fixture/control, not a matched working-profile comparison. Account/organization and executable/profile equivalence remain unresolved. See [the working-profile investigation](WORKING-PROFILE-20261101.md).
+
 Primary reference: pinned OpenCode2.1.4 / Bun1.4.4, using its actual SDK host, provider plugin, credential resolver and SessionModelRequest. The1.18 CLI captures remain secondary regressions. The user normally uses OAuth. Earlier current-profile inspections do NOT establish the Authorization header used by a historical successful request; do not generalize those inspections into “manual OpenCode uses public access.” Public controls have an explicitly narrower diagnostic scope.
 
 This is an audit of the pinned source and declared integration surface, not a claim about every OpenCode release, plugin, configuration, TLS endpoint or possible future API action. “All actions identical under any circumstances” cannot follow from a finite test matrix. No version, account, organization, device or session identity is fabricated to disguise differences.

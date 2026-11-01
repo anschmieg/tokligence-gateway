@@ -1,5 +1,11 @@
 # OpenCode Zen completion checkpoint
 
+## November1 corrected working-profile evidence
+
+User supplied corrected inspection twice: successful Beam session ses_e69be2426ffemndjU4cCW5nKtB is version2.0.32, created08:37:40UTC today, provideropencode/beam-free/stop/noerror. One of two savedOAuth credentials is active. Examined upstream2.0.32 credential/integration/model-resolver source: active savedOAuth precedes environmentkeys in standard resolution. APIkey presence is NOT explanation for success. Wrapper target remains unverified (OPENCODE2_BINARY reference; homeELF versionunrecognized); account/organization equality withstaging remainsunknown. See WORKING-PROFILE-20261101.md for exact evidence/sourcehashes/versiondifferences. Do NOT repeat outdated helper requests or claim genericCLI/provideroutage. OldOct31reset isexpired, notcurrentunavailability. No newinference/plan/accountchange authorized by cooldownexpiry.
+
+Bothownedstagingservices were down withstalePIDfiles; no diagnosticrunner/inprogressledgerentry, liveprobelease acquired and workerlock available. Restoredexistinglaunchersonly; bothhealth200/workerlockheld/productionsecondaryabsent/ledgerbytesunchanged. Native startup canperformnormaldiscovery/refresh; no diagnosticinference. Timerremainsdisabled; no newplan/ID reserved. User asked whichselectedaccount matchesstaging via safeaccountlabel only, no credentials requested. Workingubuntu0750permissionbarrier remains.
+
 ## November1 working manual reference — auth/profile mismatch under investigation
 
 User demonstrated successful opencode run sayhi --model opencode/beam-free on personal asubuntu, and confirms normalagent CLI fails. fra-agent SSH reaches SAMEhost personal (enp0s6 10.0.1.205, tailscale100.74.55.86). Runningubuntu CLI argv0=/home/ubuntu/.opencode/bin/opencode, shellPATH selects/home/ubuntu/.local/bin/opencode wrapper. Agentprofile is separate1.18.32binary with0credentials/accounts and onlyOct28GLM/bigpickle sessions. Agent cannotread/home/ubuntu (0750); sudo-ubuntu denied. Do NOT conflateagentversion/profile withworkingubuntuinstallation.
