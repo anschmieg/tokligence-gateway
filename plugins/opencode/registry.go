@@ -24,9 +24,9 @@ import (
 // metadata only:
 //   - conversation: canonical_session_id (the host's unified session
 //     identity, stamped by the host's own session-identity reconciliation)
-//   - principal: the caller authorization digest (sha256 of the bearer,
-//     the same convention the gateway uses for principal-scoped keys;
-//     the raw secret is never stored or logged)
+//   - principal: validated host caller_scope (the pinned SDK's irreversible
+//     authenticated downstream credential scope); headers/upstream AuthID are
+//     not substitutes. The raw secret is never stored or logged.
 //
 // The minted id is produced by the exact native SessionID.create algorithm
 // (sessionid.go). The mapping is persistent (atomic+durable JSON state with

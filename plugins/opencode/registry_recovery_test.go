@@ -20,7 +20,7 @@ func TestHandlerReleasesSessionOnEverySynchronousExit(t *testing.T) {
 			h := newTestHandler(t, transport)
 			req := map[string]any{
 				"Model": "beam-free", "AuthID": "fixture-owner", "StorageJSON": []byte(validCredential),
-				"Metadata": map[string]any{"canonical_session_id": "fixture-conversation"},
+				"Metadata": map[string]any{"caller_scope": fixtureCallerScope, "canonical_session_id": "fixture-conversation"},
 				"Payload":  []byte(`{"messages":[{"role":"user","content":"fixture"}]}`),
 			}
 			method := "executor.execute"

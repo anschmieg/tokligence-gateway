@@ -70,7 +70,7 @@ func configLifecycleRequest(stream bool) []byte {
 		"AuthID": "fixture-owner", "AuthProvider": ProviderKey, "Model": "beam-free",
 		"StorageJSON": []byte(validCredential), "Stream": stream, "stream_id": "fixture-stream",
 		"Payload":  []byte(`{"messages":[{"role":"user","content":"fixture"}]}`),
-		"Metadata": map[string]any{"canonical_session_id": "fixture-conversation"},
+		"Metadata": map[string]any{"caller_scope": fixtureCallerScope, "canonical_session_id": "fixture-conversation"},
 	}
 	raw, _ := json.Marshal(req)
 	return raw

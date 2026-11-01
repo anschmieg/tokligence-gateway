@@ -2,8 +2,7 @@
 
 **Parent review: experimental candidate, NOT admitted for deployment.**
 Component tests/build do not establish working host dispatch. Blocking findings:
-trusted caller principal scope must be
-proven through the host (auth-ID fallback is credential scope only). Console GET
+caller-scope/session behavior must still be verified through the real host. Console GET
 passthrough now admits only the parsed same-origin native config path and never
 copies caller authentication headers. Actual-host reasoning/tool continuation
 fixtures remain required. Pinned stock host HTTP bridge follows redirects (http_bridge.go:
@@ -70,7 +69,12 @@ the host HTTP bridge (`host.http.do` / `host.http.do_stream`).
   to a native-shaped ID using the pinned identifier algorithm. This is a local
   plugin mapping, not native database/event-bus lifecycle parity. No evidence
   establishes that the remote API requires native local session creation.
-  Trusted principal/conversation binding still needs actual host verification.
+  Registry ownership uses only the host's authenticated `caller_scope` SHA256
+  metadata (sdk/api/handlers requestCallerScope), never raw headers or upstream
+  AuthID. Every dispatch, including native-looking conversation IDs, acquires a
+  scoped registry lease. Different callers cannot bypass the registry with an
+  identical header ID; changing upstream credentials does not change ownership.
+  Focused tests pass; actual-host verification remains required.
 - **Org identity is never injected.** `x-org-id` comes only from the
   credential's recorded metadata and is sent only on Console API calls
   (config discovery, the bounded GET passthrough), matching the native

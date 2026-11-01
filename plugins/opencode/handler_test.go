@@ -73,6 +73,7 @@ const validCredential = `{
 
 // testNow is the fixed clock for handler tests.
 const testNow = 1000000000000
+const fixtureCallerScope = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 func newTestHandler(t *testing.T, transport Transport) *Handler {
 	t.Helper()
@@ -394,7 +395,7 @@ func TestExecuteFailsClosedBeforeDispatch(t *testing.T) {
 			"Stream":       false,
 			"Payload":      []byte(`{"model":"beam-free","messages":[{"role":"user","content":"hi"}]}`),
 			"StorageJSON":  []byte(validCredential),
-			"Metadata":     map[string]any{"canonical_session_id": "ses_e6983cfa5ffejQiSHP0zl9KfzV"},
+			"Metadata":     map[string]any{"caller_scope": fixtureCallerScope, "canonical_session_id": "ses_e6983cfa5ffejQiSHP0zl9KfzV"},
 			"Headers":      map[string]any{},
 		}
 		if modifier != nil {
@@ -464,7 +465,7 @@ func TestExecuteFailsClosedBeforeDispatch(t *testing.T) {
 	doResult := transport.doResult
 	transport.doResult = HTTPResult{StatusCode: 200, Body: []byte(fixtureTextSSE)}
 	if _, err := h.HandleMethod("executor.execute", executorRequest(func(p map[string]any) {
-		p["Metadata"] = map[string]any{"canonical_session_id": "0f4a6f1a-2b3c-4d5e-8f9a-1a2b3c4d5e6f"}
+		p["Metadata"] = map[string]any{"caller_scope": fixtureCallerScope, "canonical_session_id": "0f4a6f1a-2b3c-4d5e-8f9a-1a2b3c4d5e6f"}
 	})); err != nil {
 		t.Errorf("registry-backed dispatch = %v, want success via a minted session id", err)
 	}
@@ -507,7 +508,7 @@ func TestExecuteDispatchesWithNativeHeaders(t *testing.T) {
 		"Stream":       false,
 		"Payload":      []byte(`{"model":"beam-free","messages":[{"role":"user","content":"hi"}],"max_tokens":64}`),
 		"StorageJSON":  []byte(validCredential),
-		"Metadata":     map[string]any{"canonical_session_id": "ses_e6983cfa5ffejQiSHP0zl9KfzV"},
+		"Metadata":     map[string]any{"caller_scope": fixtureCallerScope, "canonical_session_id": "ses_e6983cfa5ffejQiSHP0zl9KfzV"},
 	})
 	result, err := h.HandleMethod("executor.execute", request)
 	if err != nil {
@@ -523,10 +524,11 @@ func TestExecuteDispatchesWithNativeHeaders(t *testing.T) {
 	if call.Headers["authorization"][0] != "Bearer live-access-token" {
 		t.Errorf("authorization = %v, want the OAuth bearer", call.Headers["authorization"])
 	}
-	if call.Headers["x-opencode-session-id"][0] != "ses_e6983cfa5ffejQiSHP0zl9KfzV" {
-		t.Errorf("x-opencode-session-id = %v, want the caller's native session id", call.Headers["x-opencode-session-id"])
+	sessionID := call.Headers["x-opencode-session-id"][0]
+	if !ValidSessionID(sessionID) || sessionID == "ses_e6983cfa5ffejQiSHP0zl9KfzV" {
+		t.Errorf("x-opencode-session-id = %v, want the registry's scoped native identity", call.Headers["x-opencode-session-id"])
 	}
-	if call.Headers["x-session-affinity"][0] != "ses_e6983cfa5ffejQiSHP0zl9KfzV" {
+	if call.Headers["x-session-affinity"][0] != sessionID {
 		t.Errorf("x-session-affinity = %v, want the native affinity", call.Headers["x-session-affinity"])
 	}
 	if _, exists := call.Headers["x-org-id"]; exists {
@@ -573,7 +575,7 @@ func TestExecutePreservesRejection(t *testing.T) {
 		"Model":        "beam-free",
 		"Payload":      []byte(`{"model":"beam-free","messages":[{"role":"user","content":"hi"}]}`),
 		"StorageJSON":  []byte(validCredential),
-		"Metadata":     map[string]any{"canonical_session_id": "ses_e6983cfa5ffejQiSHP0zl9KfzV"},
+		"Metadata":     map[string]any{"caller_scope": fixtureCallerScope, "canonical_session_id": "ses_e6983cfa5ffejQiSHP0zl9KfzV"},
 	})
 	_, err := h.HandleMethod("executor.execute", request)
 	if err == nil {
@@ -639,7 +641,7 @@ func TestExecuteStreamRelaysAndClosesOnError(t *testing.T) {
 		"Stream":       true,
 		"Payload":      []byte(`{"model":"beam-free","messages":[{"role":"user","content":"hi"}]}`),
 		"StorageJSON":  []byte(validCredential),
-		"Metadata":     map[string]any{"canonical_session_id": "ses_e6983cfa5ffejQiSHP0zl9KfzV"},
+		"Metadata":     map[string]any{"caller_scope": fixtureCallerScope, "canonical_session_id": "ses_e6983cfa5ffejQiSHP0zl9KfzV"},
 		"stream_id":    "stream-1",
 	})
 	if _, err := h.HandleMethod("executor.execute_stream", request); err != nil {

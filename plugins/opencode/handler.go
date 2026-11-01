@@ -2,7 +2,6 @@ package opencode
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"path/filepath"
@@ -543,32 +542,22 @@ func (h *Handler) handleExecute(request []byte, stream bool) ([]byte, error) {
 		// the upstream. The error names the actual state and the owner.
 		return nil, withStatus(401, fmt.Errorf("opencode access token is expired (expires %d, now %d); the credential must be refreshed by its single sequential refresh owner (the host auto-refresh loop drives auth.refresh; if it is not scheduled, seed a valid credential or arrange the refresh-owner handoff)", credential.Expiry(), nowMs))
 	}
-	metadataSessionID := sessionIDFromMetadata(req.Headers, req.Metadata)
-	var sessionID, affinity string
-	var release func()
+	// Session ownership comes from authenticated host metadata, never caller
+	// headers or the selected upstream credential. Even native-looking input
+	// IDs are conversation references, not permission to bypass partitioning.
+	sessionID, err := h.sessionForRequest(req)
+	if err != nil {
+		return nil, withStatus(422, err)
+	}
+	affinity := sessionID
+	registry := h.registry
+	principal, conversation := principalDigest(req), conversationID(req.Metadata)
+	var release func() = func() { _ = registry.Release(principal, conversation) }
 	defer func() {
 		if release != nil {
 			release()
 		}
 	}()
-	if metadataSessionID != "" || sessionIDFromHeaders(req.Headers) != "" {
-		sessionID, affinity = SessionIdentity(sessionIDFromHeaders(req.Headers), metadataSessionID)
-	} else {
-		// No caller-supplied native identity: resolve (or mint) the
-		// conversation's persistent provider session from the registry,
-		// keyed by principal digest + host conversation identity.
-		resolved, errResolve := h.sessionForRequest(req)
-		if errResolve != nil {
-			return nil, withStatus(422, errResolve)
-		}
-		sessionID, affinity = resolved, resolved
-		registry := h.registry
-		principal, conversation := principalDigest(req), conversationID(req.Metadata)
-		release = func() { _ = registry.Release(principal, conversation) }
-	}
-	if !ValidSessionID(sessionID) {
-		return nil, withStatus(422, fmt.Errorf("opencode dispatch session identity %q is not a native OpenCode session id; only caller-supplied native ids or registry-minted ids are forwarded", sessionID))
-	}
 	payload, err := shapeInferenceRequest(req.Payload.bytes(), upstreamModel)
 	if err != nil {
 		return nil, withStatus(400, err)
@@ -696,26 +685,20 @@ func conversationID(metadata map[string]any) string {
 	return ""
 }
 
-// principalDigest derives the registry principal from the executor request:
-// a sha256 digest over the caller's authorization value (the same convention
-// the gateway uses for principal-scoped keys). The raw secret is never
-// stored, logged or persisted. An empty authorization yields an empty
-// digest, which the registry rejects.
+// Pinned sdk/api/handlers/handlers.go requestCallerScope stamps the SHA256
+// scope of authenticated gin userApiKey, carried by buildExecutorRequest.
+// Headers/AuthID are deliberately not fallbacks: they are not the same
+// downstream ownership boundary and would change when credentials rotate.
 func principalDigest(req ExecutorRequest) string {
-	authorization := ""
-	if values := req.Headers["authorization"]; len(values) > 0 {
-		authorization = strings.TrimSpace(values[0])
-	}
-	if authorization == "" {
-		// The host stores the caller credential in StorageJSON metadata in
-		// some lanes; the auth id is the stable per-credential identity.
-		authorization = strings.TrimSpace(req.AuthID)
-	}
-	if authorization == "" {
+	scope, _ := req.Metadata["caller_scope"].(string)
+	if len(scope) != 64 || scope != strings.ToLower(scope) {
 		return ""
 	}
-	sum := sha256.Sum256([]byte(authorization))
-	return "sha256-" + hex.EncodeToString(sum[:])
+	decoded, err := hex.DecodeString(scope)
+	if err != nil || len(decoded) != 32 {
+		return ""
+	}
+	return "caller:" + scope
 }
 
 // sessionForRequest resolves the persistent provider session for a request
@@ -729,7 +712,7 @@ func (h *Handler) sessionForRequest(req ExecutorRequest) (string, error) {
 	}
 	principal := principalDigest(req)
 	if principal == "" {
-		return "", fmt.Errorf("opencode dispatch requires a caller principal (authorization header or auth id) to bind the provider session to its owner; the request carries none")
+		return "", fmt.Errorf("opencode dispatch requires authenticated host caller_scope metadata; headers and upstream credential IDs are not ownership proofs")
 	}
 	if h.registry == nil {
 		return "", fmt.Errorf("opencode session registry is unavailable")
