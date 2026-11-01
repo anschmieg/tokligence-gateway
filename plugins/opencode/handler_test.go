@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -458,22 +459,35 @@ func TestExecuteFailsClosedBeforeDispatch(t *testing.T) {
 		t.Errorf("expired-token message does not name the refresh owner requirement: %q", err.Error())
 	}
 
-	// Missing session identity: the precise gap, never a minted id.
+	// A host canonical conversation id (foreign to the ses_ namespace) is
+	// the registry's key: the request resolves a persistent provider session
+	// and dispatches with the minted identity.
+	doResult := transport.doResult
+	transport.doResult = HTTPResult{StatusCode: 200, Body: []byte("data: {}\n\n")}
 	if _, err := h.HandleMethod("executor.execute", executorRequest(func(p map[string]any) {
 		p["Metadata"] = map[string]any{"canonical_session_id": "0f4a6f1a-2b3c-4d5e-8f9a-1a2b3c4d5e6f"}
-	})); err == nil || statusOf(err) != 428 {
-		t.Errorf("foreign session identity = %v status %d, want the session gap (428)", err, statusOf(err))
+	})); err != nil {
+		t.Errorf("registry-backed dispatch = %v, want success via a minted session id", err)
 	}
-	if len(transport.doCalls) != 0 {
-		t.Errorf("request with foreign identity dispatched upstream")
+	if len(transport.doCalls) != 1 {
+		t.Errorf("registry-backed dispatch calls = %d, want one", len(transport.doCalls))
+	} else {
+		sent := transport.doCalls[0].Headers["x-opencode-session-id"][0]
+		if !ValidSessionID(sent) {
+			t.Errorf("registry-backed dispatch sent session id %q, want a native-shaped minted id", sent)
+		}
 	}
+	transport.doResult = doResult
+
+	// No conversation identity at all: the precise resolution gap, never a
+	// guessed conversation key, and never an upstream call.
 	if _, err := h.HandleMethod("executor.execute", executorRequest(func(p map[string]any) {
 		p["Metadata"] = map[string]any{}
-	})); err == nil || statusOf(err) != 428 {
-		t.Errorf("no identity = %v status %d, want the session gap (428)", err, statusOf(err))
+	})); err == nil || statusOf(err) != 422 {
+		t.Errorf("no identity = %v status %d, want the conversation-identity gap (422)", err, statusOf(err))
 	}
-	if len(transport.doCalls) != 0 {
-		t.Errorf("request with no identity dispatched upstream")
+	if len(transport.doCalls) != 1 {
+		t.Errorf("request with no identity dispatched upstream: %d calls", len(transport.doCalls))
 	}
 }
 
@@ -582,17 +596,22 @@ func TestExecutePreservesRejection(t *testing.T) {
 // relay through the emitter, a rejection closes the plugin stream with the
 // structured error detail, and the host is acknowledged immediately.
 func TestExecuteStreamRelaysAndClosesOnError(t *testing.T) {
+	var relayMu sync.Mutex
 	var emitted [][]byte
 	var closed []error
 	StreamEmitter = func(streamID string, payload []byte) error {
 		if streamID != "stream-1" {
 			t.Errorf("emit stream id = %q, want stream-1", streamID)
 		}
+		relayMu.Lock()
 		emitted = append(emitted, payload)
+		relayMu.Unlock()
 		return nil
 	}
 	StreamCloser = func(streamID string, err error) {
+		relayMu.Lock()
 		closed = append(closed, err)
+		relayMu.Unlock()
 	}
 	t.Cleanup(func() {
 		StreamEmitter = nil
@@ -624,12 +643,22 @@ func TestExecuteStreamRelaysAndClosesOnError(t *testing.T) {
 	}
 	// The relay runs asynchronously; wait for it to drain with a bounded
 	// deadline.
-	waitFor(t, func() bool { return len(emitted) == 2 })
-	if len(emitted) != 2 {
-		t.Fatalf("emitted chunks = %d, want 2 relayed frames (got %v)", len(emitted), emitted)
+	relayMu.Lock()
+	emittedCount, closedCount := len(emitted), len(closed)
+	relayMu.Unlock()
+	waitFor(t, func() bool {
+		relayMu.Lock()
+		defer relayMu.Unlock()
+		return len(emitted) == 2
+	})
+	relayMu.Lock()
+	emittedCount, closedCount = len(emitted), len(closed)
+	relayMu.Unlock()
+	if emittedCount != 2 {
+		t.Fatalf("emitted chunks = %d, want 2 relayed frames", emittedCount)
 	}
-	if len(closed) != 0 {
-		t.Errorf("stream closed with error on success: %v", closed)
+	if closedCount != 0 {
+		t.Errorf("stream closed with error on success: %d closes", closedCount)
 	}
 
 	// Upstream stream failure closes the plugin stream with the error.
@@ -638,14 +667,23 @@ func TestExecuteStreamRelaysAndClosesOnError(t *testing.T) {
 	close(chunks)
 	transport = &fakeTransport{streamResult: StreamResult{StatusCode: 200, Chunks: chunks}}
 	h = newTestHandler(t, transport)
+	relayMu.Lock()
 	emitted = nil
 	closed = nil
+	relayMu.Unlock()
 	if _, err := h.HandleMethod("executor.execute_stream", request); err != nil {
 		t.Fatalf("executor.execute_stream(open failure) error = %v", err)
 	}
-	waitFor(t, func() bool { return len(closed) == 1 })
-	if len(closed) != 1 || closed[0] == nil {
-		t.Fatalf("stream error close = %v, want one error close", closed)
+	waitFor(t, func() bool {
+		relayMu.Lock()
+		defer relayMu.Unlock()
+		return len(closed) == 1
+	})
+	relayMu.Lock()
+	closedCount = len(closed)
+	relayMu.Unlock()
+	if closedCount != 1 {
+		t.Fatalf("stream error close count = %d, want one error close", closedCount)
 	}
 
 	// Rejection status closes with the structured detail.
@@ -654,8 +692,10 @@ func TestExecuteStreamRelaysAndClosesOnError(t *testing.T) {
 		Headers:    map[string][]string{"retry-after": {"600"}},
 	}}
 	h = newTestHandler(t, transport)
+	relayMu.Lock()
 	emitted = nil
 	closed = nil
+	relayMu.Unlock()
 	_, err := h.HandleMethod("executor.execute_stream", request)
 	if err == nil {
 		t.Fatalf("execute_stream(429) succeeded, want the rejection error")

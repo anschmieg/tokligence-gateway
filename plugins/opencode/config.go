@@ -35,6 +35,16 @@ type PluginConfig struct {
 	// conversation carries no project identity. The native default project
 	// identity is "global".
 	ProjectID string `yaml:"project_id"`
+
+	// SessionStatePath is the plugin-owned persistent session registry file
+	// (see registry.go). Empty keeps the registry in memory only (mappings
+	// lost on restart). The registry holds an exclusive OS lock on the file.
+	SessionStatePath string `yaml:"session_state_path"`
+}
+
+// registryStatePath returns the configured persistent state path.
+func (c PluginConfig) registryStatePath() string {
+	return strings.TrimSpace(c.SessionStatePath)
 }
 
 // DefaultAppInfo returns the default App.Info matching the pinned working
