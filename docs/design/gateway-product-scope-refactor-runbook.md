@@ -37,57 +37,24 @@ Use public source browsing or read-only archives at the selected tag/commit. Do 
 
 **Stop conditions:** no pinned compatible pair; unclear license/provenance; Plus code/fork required; extension ordering cannot enforce a required invariant; dashboard can send upstream credentials or inference outside guarded server dispatch; unknown management semantics; or evidence would require reading a secret/live state. Record the exact blocker and stop for parent review.
 
-## Milestone 3 — Discover and freeze the real T3 hub contract (read-only)
+## Remaining implementation sequence (supersedes the former milestones3–6)
 
-**Files/artifacts:** add `docs/design/t3-code-hub-contract-inventory.md` and sanitized fixtures under `docs/design/fixtures/t3-hub/`. Include the actual hub implementation/docs version, path+method, auth, request/response fields, API version, streaming/cancel, timeouts, reconnect behavior, native discovery, config writes, credential operations if actually used, errors, and unused operations explicitly. Remove bearer values, provider prompts, and user data from fixtures.
+The inventory and public source evaluation are complete. Do not repeat them or build a broad synthetic platform fixture. Existing source evidence is in `cli-proxyapi-upstream-evaluation.md`; parent validation qualifies its management bypass and dispatch-limit claims.
 
-**Commands:**
+### Next child: staging foundation implementation
 
-```sh
-rg -n 'CLIProxyAPI|hub|/v1/models|/v1/providers|management' <read-only-hub-source-root>
-```
+Scope: add an isolated deployment/config example and operational instructions under `staging/cli-proxy-api/`. Use mainline8.0.49 and native dashboard1.27.0, reverify the actual target-architecture artifact before execution. No Plus, custom UI, wrapper proxy or general test framework. Existing OpenCode staging at `/home/agent/tokligence-staging` and its state/ports are reserved; use separate project/root/ports/storage. Never import production or OpenCode credentials.
 
-`<read-only-hub-source-root>` must be supplied by the parent or found via approved repository/source discovery. Do not guess a hub implementation path or access another system using credentials. Read only tracked source and public documentation.
+Deliver: reproducible pinned staging deployment, bootstrap-only native config, documented management/network protection, disabled unwanted updates and documented retry defaults. Run credential-free startup/dashboard/API-auth/persistence smoke checks; no provider inference. Parent may authorize the concrete staging deployment within the existing user scope after inspecting its manifests. Use public source/documentation for ordinary upstream behavior. Do not modify production artifacts or make live credentials a prerequisite to the empty staging setup.
 
-**Acceptance:** each contract row has a source permalink and sanitized fixture or an explicit “not used/not found”; API version and native management operations are evidenced. Tests are only planned here; this milestone does not assert compatibility or write to a hub.
+Review: exact diff, artifact provenance, isolated paths/ports/volumes, credential ownership, smoke record and stop/restart/rollback commands. If a required host/deployment detail cannot be discovered safely, finish the local deployable artifact and name only that blocker.
 
-**Rollback:** revert the docs/fixture commit. No hub state is touched.
+### Following child: provider configuration and first useful route
 
-**Stop conditions:** no authoritative source/docs, unclear permission boundary, requirement to call the hub or access private data, or an operation that would mutate remote state. Record discovery as blocked/unknown for parent review; do not infer a contract from a sample chat request.
+Map all existing routes to built-in, generic compatible, custom-required or retained legacy. Implement documented native provider configuration first. Select one useful supported route with an available isolated credential; parent handles credential delivery/ownership without dumping values. Live checks need a bounded admitted case and must honor existing cooldowns. T3 native-hub connection is tested through its actual setup/discovery, not an invented conformance suite. Missing access blocks that connection, not all provider work.
 
-## Milestone 4 — Select the isolated staging shape (proposal, no deployment)
+### Following children: one custom provider at a time
 
-**Files/artifacts:** add a sanitized proposed layout under `docs/design/staging-layout-proposal.md` (or update the inventory); list existing Compose/Coolify/build mechanisms, isolated project/network/volume names, ingress boundary, secret-manager reference names only, image digests, initial-config bootstrap rule, persistence/redeployment behavior, and rollback snapshots. Do not add executable deployment manifests in this milestone.
+Implement only the selected provider/plugin and its focused tests, using the platform's documented extension points. No helpers unless a demonstrated limitation justifies one. OpenCode retains explicit OAuth/session/reasoning/tool/quota requirements and existing evidence; fake-upstream tests target our custom changes only. Parent validates every major commit before staging integration. No production promotion without a concrete reviewed packet. Preserve all existing reports, cooldowns and single-refresh ownership.
 
-**Commands:**
-
-```sh
-rg --files -g 'docker-compose*.yml' -g 'compose*.yml' -g 'Dockerfile*' -g '.github/workflows/**' -g '*coolify*'
-git status --short
-```
-
-Ask the parent to arrange read-only confirmation of current staging ownership/topology if it is not in source. No SSH, host API, secret manager, deployment UI, or mounted volume access.
-
-**Acceptance:** staging is distinct from production at source, persistent volume, network, hostname, and credentials; backend/dashboard artifacts are immutably pinned; native APIs remain reachable to approved hubs without mandatory custom façade; dashboard management stays authenticated and network protected; no live configuration is initialized from production. Staging topology is a proposal until a later explicit authorization.
-
-**Rollback:** revert the proposal. No infrastructure has been created.
-
-**Stop conditions:** cannot establish isolated storage/network/credentials, existing provider cooldown or owner conflict would be touched, management must become public/anonymous, or source state implies a production mutation. Stop and report; do not “test” by deploying.
-
-## Milestone 5 — Offline contract fixtures and source-level extension decision
-
-**Files/artifacts:** only after parent approval, add sanitized request/response fixtures and an architecture decision record naming the first ordinary provider slice, exact extension hook and owner. Implementation may touch only the selected provider/executor/plugin package and required fixture/test files. Any helper exception must include the required evidence. Do not edit existing Tokligence routes until an explicit migration slice is authorized.
-
-**Commands:** select exact repository scripts after inspecting `package.json`; expected checks are `npm run lint`, focused `node --test <selected-fixture-test>`, and `git diff --check`. Never run live-provider tests. Inspect test discovery and network behavior before selecting a broad suite; do not assume tests are live or safe from their names. Run verified offline suites when appropriate without asking the user routine permission.
-
-**Acceptance:** offline contract and fault tests prove direct native API availability, exact model selection, no hidden fallback/retry, credential ownership labels only, safe config revision/write behavior, streaming cancellation if in-scope, and the inventoried T3 contract. Physical dispatch count is asserted only against a synthetic upstream. Full test command/output and commit are reviewable.
-
-**Rollback:** revert only this milestone commit. Keep staging empty and old runtime unchanged. Re-run only offline focused checks after revert if requested.
-
-**Stop conditions:** any fixture needs real credentials/prompts; extension hook cannot enforce invariants; unexplained dispatch amplification; synthetic run reaches external network; no rollback from a config/schema migration; or any provider rejection/uncertain outcome. Stop for parent review.
-
-## Milestone 6 — First isolated platform slice (future authorization required)
-
-This milestone is deliberately not executable from the current authorization. It requires a reviewed source pin, T3 contract, staging proposal, synthetic acceptance plan, and a scoped parent implementation brief under the existing user authorization. The future artifacts should include a versioned staging deployment packet, sanitized effective config, native dashboard workflow evidence, hub integration fixture results, restart/redeploy persistence and rollback evidence. No production promotion is included. Any later production promotion requires its own approval after a concrete packet exists.
-
-**Stop conditions:** any production credential/data, provider inference/quota call, OAuth lifecycle action, account/IP change, timer, public admin exposure, native API incompatibility, unbounded retry/fallback, or uncertainty about credential ownership. Do not proceed to OpenCode adapter work or resolve the existing 429 as part of this slice.
+Each child brief must name exact files/artifacts, acceptance commands, allowed environment actions and rollback. Broaden tests only for changed behavior, failures or an unresolved integration risk. Do not seek routine user approval between reversible authorized steps.

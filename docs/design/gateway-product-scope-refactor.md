@@ -104,20 +104,19 @@ Provider discovery backlog:
 
 Deliverables: architecture decision record pinning backend/panel artifacts, extension lifecycle and write-path map, T3 Code contract inventory, and ownership boundaries. Exit gate: the first migration route, all management writers and every dispatch path satisfy the invariants through verified extension points. If that requires a core change, assess a small upstreamable patch explicitly rather than silently accepting a permanent fork. No platform slice begins while these boundaries remain unknown.
 
-## Phase2 — Build the minimum platform slice
+## Phase2 — Deliver the staging foundation
 
-Implement only a single ordinary supported provider first:
+Use the pinned mainline release and native dashboard. Do not create a synthetic platform or custom launcher/framework merely to test upstream functionality.
 
-1. Start the pinned mainline CLIProxyAPI backend and the native admin dashboard in staging with explicit configuration and no unused providers/plugins. Expose native APIs through protected ingress without a mandatory custom inference façade.
-2. Implement identity, exact model selection, stable conversation scope and correlation IDs within the supported CLIProxyAPI boundary. Never trust a client-supplied internal principal header. Verify T3 Code can connect directly as a CLIProxyAPI hub.
-3. Bootstrap the authoritative native configuration store once, implement validated/revisioned writes and verify persistence across UI edits, T3 Code writes, reload and redeployment. Expose a sanitized effective revision and component versions; reject stale/conflicting writes without losing accepted changes.
-4. Disable unsafe defaults explicitly: automatic credential/tier fallback, quota retries, background inference checks and unbounded bootstrap attempts. Verify behavior by physical outbound request counts, not configuration inspection alone.
-5. Preserve existing public/admin authorization and rate/budget boundaries. Separate management credentials from inference credentials; protect management endpoints with their native authentication and network access policy.
-6. Add diagnostics for provider status/error type, reset, request ID, route/backend version, physical dispatch count and local versus upstream rejection. Redact credentials, prompts and raw reasoning by default.
+1. Add an isolated staging deployment definition under `staging/cli-proxy-api/`, with pinned artifacts, persistent native configuration/auth storage, protected management access, and direct native inference/management API access. Reuse the existing deployment mechanism where practical. Do not alter the production Dockerfile or migrate production credentials.
+2. Bootstrap native configuration once; preserve accepted dashboard/API edits on restart. Use documented native settings for retry/fallback, updates and background behavior. Document settings that cannot meet a route requirement; avoid speculative enforcement code.
+3. Deploy empty/credential-free first and perform only a startup smoke check: process health, dashboard loads, native API authentication and persistence across one restart. No model calls are needed for this step. Reuse upstream tests/docs for standard streaming, tools, configuration and auth behavior.
+4. Obtain the actual T3 hub endpoint/version requirements through a bounded read-only lookup, then connect T3 directly to staging. Check its real setup/discovery workflow. Missing hub source does not block staging deployment; leave hub compatibility unverified until exercised. Do not invent a full hub conformance suite.
+5. Map existing providers to documented built-in or generic compatible configurations. Add supported routes incrementally through native configuration. Secrets come from the existing secret-management path; no new credential owner or production credential copy. Test each configured route with one bounded task only when an isolated credential and live request are admitted. Do not replay a provider's entire feature suite.
 
-Choose extension placement here: a supported provider/executor/plugin is the default. Implement native OAuth and compatibility behavior in the provider/plugin where feasible. Native-runtime reuse does not automatically authorize a helper: first demonstrate why an in-process provider/plugin cannot reasonably meet the requirement. Any helper or separate proxy then needs a documented exception. Avoid maintaining a CLIProxyAPI fork merely to add one provider.
+Deliverable: working staging instance with the native dashboard/API, configuration instructions, an explicit provider migration table and a short smoke-check record. Native supported routes need configuration, not custom executors. Keep unavailable credentials and unresolved provider restrictions as per-route blockers.
 
-Exit gate: synthetic tests exercise the full client-to-provider path, native panel management workflows, the inventoried direct T3 Code hub operations, conflicting configuration writes, reload/redeployment, process restart and rollback with no production changes. Prove forbidden dispatch remains blocked after UI/API edits and restart. Verify required native API paths, authentication, discovery, configuration and streaming remain compatible; do not infer hub compatibility from a successful chat request.
+Review gate: parent inspects only new deployment/configuration artifacts, version compatibility, credential ownership and smoke evidence. Proceed to custom providers without waiting for unrelated routes or exhaustive core testing.
 
 ## Phase3 — OpenCode adapter selection and implementation
 
@@ -149,27 +148,17 @@ Do not promise cache preservation based on equivalent JSON. Establish a stable-p
 
 Exit gate: each retained patch fixes a demonstrated issue and does not cause a second schema translation or hidden prompt mutation.
 
-## Phase5 — Independent acceptance layers
+## Phase5 — Targeted acceptance of our changes
 
-### Verification scope
+Use upstream documentation and upstream tests for unchanged core features. Do not build a generic CLIProxyAPI test harness or run manual matrices to re-establish standard streaming/tools/auth/config behavior.
 
-Rely on pinned upstream documentation and upstream tests for ordinary CLIProxyAPI core features. Do not build a parallel core conformance suite or manually repeat generic streaming/tools/auth/config tests. Our tests cover custom provider/plugin behavior, transformations we add, deployment/configuration boundaries we change, and concrete unresolved risks that upstream evidence cannot answer. Begin with a minimal startup/API smoke check, then target the changed paths. Synthetic fixtures are justified for custom OpenCode requests, reasoning/session handling and dispatch-policy changes, not as a prerequisite to revalidate the entire upstream server.
+1. **Deployment:** the Phase2 smoke check and actual native dashboard/T3 connection establish that our configuration and ingress work. Verify only persistence, permissions or migration behavior we change.
+2. **Custom providers/plugins:** focused offline tests for the code we add: authentication selection/refresh ownership, request generation, session mapping, reasoning preservation, tool conversion and quota/error policy as applicable. Use a fake upstream only where it isolates one of these changes; reuse existing qualified fixtures instead of building another framework.
+3. **Real clients:** after a custom route passes focused tests, run one representative actual client workflow. Broaden only when a changed behavior or observed failure warrants it. For OpenCode, preserve the original long/tools/reasoning/Claude acceptance requirements, distribute them across independently budgeted cases and reuse successes; do not repeat all basics for every model or run three live matrices.
+4. **Live admission:** existing cooldowns, credential ownership and consumed IDs remain binding. Each permitted case has an exact model/auth/runtime, hypothesis, stable ID, request/output ceilings and pacing. No background inference, repeated timer probes, account/IP/auth-lane fallback or retry after401/403/429 or uncertain outcome. Expiry alone does not admit another probe.
+5. **Truthful coverage:** distinguish pass/fail/blocked/untested per custom capability and provider. Missing reasoning is untested; placeholders and token counts do not prove replay. Synthetic success does not resolve the OpenCode429.
 
-### Layer1: offline contracts and faults
-
-For custom or modified components, run targeted protocol fixtures, provider-reference differential tests and applicable credential/session/stream/fault regressions. Reuse upstream coverage for unchanged core behavior. Assert physical dispatch counts for redirects, retries and nested fallbacks. Test image/document/redacted reasoning rejection where unsupported. Verify configuration and management isolation. Pin dependency/source hashes and keep sanitized evidence.
-
-### Layer2: actual clients with synthetic upstreams
-
-Run real Claude Code and other required clients through the complete staging architecture. Cover long input/output, parallel tools, denied/failed tools, reasoning-bearing continuation, partial streams, cancellation and process restart. Use scoped fixture tools and explicit noninteractive permissions. Synthetic success never counts as live provider acceptance.
-
-### Layer3: bounded live acceptance
-
-Prepare a reviewed per-case plan only after layers1/2 pass: exact model/auth owner/runtime, hypothesis, eligible time with a meaningful reset margin, request/output ceilings, pacing, stable run ID and stop conditions. Enforce a single-owner lease and durable no-replay ledger at the physical dispatch boundary. Existing active cooldowns and consumed IDs remain binding.
-
-Begin with one matched successful reference/integration pair, then independently budget tools, reasoning, long response and actual Claude cases across the four allowed OpenCode models. Do not repeat passed basics each scheduler tick. No full matrix after a rejection. On401/403/429, malformed stream, timeout or uncertain outcome, stop further inference and retain evidence. No account/IP/model rotation to compensate. Expiry alone does not authorize another run.
-
-Acceptance reports separate pass, fail, blocked and untested for each model/capability. Token counts alone are not reasoning replay proof. No numerical confidence or universal parity claim.
+Review gate: changed-path test evidence, one representative integration result where admitted, known limitations and rollback. Do not demand unrelated upstream feature coverage before accepting a narrowly scoped change.
 
 ## Phase6 — Incremental migration and rollback
 
@@ -190,10 +179,16 @@ Phase0 records a measured baseline: custom runtime services, authoritative store
 
 Completion requires a report showing which old services/modules/stores were removed, which remain for specialist routes, how many patches remain and who owns upgrades. Retaining the old general gateway indefinitely alongside mainline CLIProxyAPI does not count as completing the shift. Record external provider blockers separately from platform migration completion and from provider live acceptance.
 
-## Execution order and stopping rules
+## Execution order and delegation
 
-Implement Phase0 inventory and Phase1 evaluation first, then the single-provider platform slice. Run the OpenCode prototype comparison after the extension boundary is known. Migrate low-risk supported routes before unresolved OAuth integrations; keep specialist routes explicit. Do not delay all useful migration work on the OpenCode429 investigation.
+1. **Foundation implementation:** deploy the pinned mainline backend/native dashboard to isolated staging, credential-free initially. Only bounded deployment/configuration work and startup smoke checks.
+2. **Configure existing support:** create the provider migration table and move supported routes through native configuration. Prioritize one useful route, then independent providers; avoid writing plugins for documented compatible APIs.
+3. **Custom provider implementation:** one provider/executor/plugin per scoped child, starting with the highest-value unsupported route. OpenCode work uses the audited upstream/opencode2api logic and existing evidence, with a short seam investigation only where the implementation requires it. No new general architecture study or automatic helper deployment.
+4. **Focused verification and staging integration:** review the diff and test only changed behavior; integrate accepted commits. Preserve native APIs and management workflows.
+5. **Promotion and retirement:** present exact staging results and migration/rollback packet before production promotion. Remove legacy code only after its replacement is accepted.
 
-Each phase ends with a reviewable artifact and evidence, not an open-ended adversarial-review loop. Escalate only material product choices (dropping an endpoint, accepting a core fork, paid access, changing client semantics) or a concrete production promotion. Routine staging implementation and reversible fixes can proceed autonomously when authorized.
+Use Mistral GLM-5.3-Flash for bounded implementation tasks; no Codex implementation children while the user conserves that quota. Each child receives only the relevant requirements, files, constraints and completion checks, works on an isolated branch, commits, and stops for parent validation. Parent reviews source/diff and relevant evidence, fixes small issues directly and assigns the next concrete implementation slice. Do not replace implementation with repeated planning, adversarial reviews or upstream core validation.
 
-The refactor is complete when the required capability matrix is accepted, credential/retry/session ownership is singular, live coverage is truthful, rollback is demonstrated and custom maintenance scope is measurably reduced. An external provider rejection remains a documented blocker for that route, not a reason to claim completion or repeatedly probe it.
+The earlier inventory and source evaluation are sufficient to start foundation implementation. Resolve remaining unknowns just in time; document and block only the affected operation. Stop for a material architectural change, irreducible safety/ownership conflict, paid access or production promotion—not routine reversible staging choices.
+
+Completion means the required routes/client workflows are accepted, native management and T3 access work, ownership is singular and the custom maintenance surface is reduced. The unresolved OpenCode provider restriction remains separate from platform migration progress and cannot be declared fixed from documentation or fixtures.
