@@ -128,3 +128,7 @@ Concurrent lifecycle commands serialize on an OS-held lock
 Bootstrap holds an OS descriptor lock and publishes configuration after private key files. Interrupted initialization may leave partial private files and fails closed on retry; inspect only this new, unused staging root before manually removing it and reinstalling. Never apply cleanup to a root that has accepted credentials or configuration edits. Protected production/OpenCode trees and repository descendants are rejected.
 
 The pinned panel asset prevents the normal missing-asset fetch while present; it is not a blanket network isolation guarantee. Native background behavior is reviewed separately before adding credentials.
+
+## Deployed foundation checkpoint — 2026-11-01
+
+Parent integrated lifecycle commit d966978 and deployed scripts to `/home/agent/cliproxy-staging` on the VPS. Pinned backend8.0.49/native dashboard1.27.0 are running loopback-only at127.0.0.1:4195. Minimal smoke passed: health, served dashboard digest, management/client authentication separation and one-restart config/key persistence. Auth storage is empty; no providers configured and no inference performed. Existing OpenCode staging and production were not changed. Native T3 hub connection and provider routes remain unverified.
