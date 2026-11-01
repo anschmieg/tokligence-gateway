@@ -80,6 +80,8 @@ type SessionRegistry struct {
 	entries  map[string]*RegistryEntry // key: principal + "\x00" + conversation
 	order    []string                  // LRU order, oldest first
 	lockFile *os.File                  // held OS lock (single registry owner)
+	closed   bool
+	failure  error // uncertain persistence is terminal until a fresh locked open
 }
 
 // RegistryOptions configures a SessionRegistry.
@@ -141,6 +143,7 @@ func NewSessionRegistry(opts RegistryOptions) (*SessionRegistry, error) {
 func (r *SessionRegistry) Close() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.closed = true
 	r.releaseLock()
 }
 
@@ -170,7 +173,17 @@ func (r *SessionRegistry) releaseLock() {
 }
 
 func (r *SessionRegistry) key(principal, conversation string) string {
-	return principal + "\x00" + conversation
+	return strings.TrimSpace(principal) + "\x00" + strings.TrimSpace(conversation)
+}
+
+func (r *SessionRegistry) readyLocked() error {
+	if r.closed {
+		return fmt.Errorf("opencode session registry is closed")
+	}
+	if r.failure != nil {
+		return fmt.Errorf("opencode session registry requires recovery after persistence failure: %w", r.failure)
+	}
+	return nil
 }
 
 // load reads the state file. Absent file = fresh registry.
@@ -183,7 +196,7 @@ func (r *SessionRegistry) load() error {
 		return fmt.Errorf("opencode session registry state unreadable: %w", err)
 	}
 	if len(strings.TrimSpace(string(raw))) == 0 {
-		return nil
+		return fmt.Errorf("opencode session registry state is empty/corrupt")
 	}
 	var state struct {
 		Version int             `json:"version"`
@@ -196,10 +209,36 @@ func (r *SessionRegistry) load() error {
 		return fmt.Errorf("opencode session registry state version %d is unsupported", state.Version)
 	}
 	now := r.nowMs()
+	ids := map[string]bool{}
+	recovered := false
 	for i := range state.Entries {
 		entry := state.Entries[i]
-		if entry.SessionID == "" || entry.Principal == "" || entry.Conversation == "" {
-			continue
+		if !ValidSessionID(entry.SessionID) || entry.SessionID != strings.TrimSpace(entry.SessionID) ||
+			strings.TrimSpace(entry.Principal) == "" || strings.TrimSpace(entry.Conversation) == "" ||
+			strings.ContainsRune(entry.Principal, '\x00') || strings.ContainsRune(entry.Conversation, '\x00') ||
+			entry.CreatedMs <= 0 || entry.LastUsedMs < entry.CreatedMs || entry.Leases < 0 {
+			return fmt.Errorf("opencode session registry contains invalid entry")
+		}
+		key := r.key(entry.Principal, entry.Conversation)
+		if _, duplicate := r.entries[key]; duplicate || ids[entry.SessionID] {
+			return fmt.Errorf("opencode session registry contains duplicate identity")
+		}
+		ids[entry.SessionID] = true
+		switch entry.State {
+		case RegistryStateActive:
+			if entry.Leases == 0 {
+				return fmt.Errorf("opencode active registry entry has no lease")
+			}
+			// The OS lock proves the old owner is gone. Its dispatch leases
+			// cannot survive process death; retain identity, start a new idle TTL.
+			entry.Leases, entry.State, entry.LastUsedMs = 0, RegistryStateIdle, now
+			recovered = true
+		case RegistryStateIdle, RegistryStateTerminated:
+			if entry.Leases != 0 {
+				return fmt.Errorf("opencode inactive registry entry has leases")
+			}
+		default:
+			return fmt.Errorf("opencode session registry contains invalid state")
 		}
 		// A terminated entry older than the TTL has no remaining purpose.
 		if entry.State == RegistryStateTerminated && now-entry.LastUsedMs > r.ttlMs {
@@ -208,12 +247,26 @@ func (r *SessionRegistry) load() error {
 		r.entries[r.key(entry.Principal, entry.Conversation)] = &entry
 		r.order = append(r.order, r.key(entry.Principal, entry.Conversation))
 	}
+	if r.evictLocked() > 0 {
+		recovered = true
+	}
+	if recovered {
+		return r.persistLocked()
+	}
 	return nil
 }
 
 // persist writes the state atomically (temp file + rename) and durably
 // (fsync on the file and the directory). Caller holds r.mu.
-func (r *SessionRegistry) persistLocked() error {
+func (r *SessionRegistry) persistLocked() (err error) {
+	if err = r.readyLocked(); err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			r.failure = err
+		}
+	}()
 	if r.path == "" {
 		return nil
 	}
@@ -253,8 +306,7 @@ func (r *SessionRegistry) persistLocked() error {
 		os.Remove(tmp)
 		return fmt.Errorf("opencode session registry rename failed: %w", err)
 	}
-	syncDir(dirOf(r.path))
-	return nil
+	return syncDir(dirOf(r.path))
 }
 
 func dirOf(path string) string {
@@ -325,19 +377,37 @@ func (r *SessionRegistry) evictLocked() int {
 // explicitly terminated is never silently resurrected: it returns an error
 // naming the termination.
 func (r *SessionRegistry) Create(principal, conversation string) (string, error) {
+	return r.resolve(principal, conversation, false)
+}
+
+// Acquire resolves and leases under one mutex: eviction cannot intervene
+// between creation and dispatch ownership.
+func (r *SessionRegistry) Acquire(principal, conversation string) (string, error) {
+	return r.resolve(principal, conversation, true)
+}
+
+func (r *SessionRegistry) resolve(principal, conversation string, lease bool) (string, error) {
 	principal = strings.TrimSpace(principal)
 	conversation = strings.TrimSpace(conversation)
-	if principal == "" || conversation == "" {
+	if principal == "" || conversation == "" || strings.ContainsRune(principal, '\x00') || strings.ContainsRune(conversation, '\x00') {
 		return "", fmt.Errorf("opencode session registry requires both principal and conversation identities")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := r.readyLocked(); err != nil {
+		return "", err
+	}
+	r.evictLocked()
 	key := r.key(principal, conversation)
 	if entry, ok := r.entries[key]; ok {
 		if entry.State == RegistryStateTerminated {
 			return "", fmt.Errorf("opencode session %s for conversation %q was explicitly terminated; create a new conversation identity instead of reusing it", entry.SessionID, conversation)
 		}
 		entry.LastUsedMs = r.nowMs()
+		if lease {
+			entry.Leases++
+			entry.State = RegistryStateActive
+		}
 		r.touchLocked(key)
 		if err := r.persistLocked(); err != nil {
 			return "", err
@@ -358,9 +428,12 @@ func (r *SessionRegistry) Create(principal, conversation string) (string, error)
 		LastUsedMs:   now,
 	}
 	r.touchLocked(key)
+	if lease {
+		r.entries[key].Leases = 1
+		r.entries[key].State = RegistryStateActive
+	}
 	r.evictLocked()
 	if err := r.persistLocked(); err != nil {
-		delete(r.entries, key)
 		return "", err
 	}
 	return sessionID, nil
@@ -372,9 +445,12 @@ func (r *SessionRegistry) Create(principal, conversation string) (string, error)
 func (r *SessionRegistry) Reference(principal, conversation string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := r.readyLocked(); err != nil {
+		return err
+	}
 	key := r.key(principal, conversation)
 	entry, ok := r.entries[key]
-	if !ok || entry.State == RegistryStateTerminated {
+	if !ok || entry.State == RegistryStateTerminated || (entry.State == RegistryStateIdle && r.nowMs()-entry.LastUsedMs > r.ttlMs) {
 		return fmt.Errorf("opencode session registry has no live session for conversation %q", conversation)
 	}
 	entry.Leases++
@@ -388,6 +464,9 @@ func (r *SessionRegistry) Reference(principal, conversation string) error {
 func (r *SessionRegistry) Release(principal, conversation string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := r.readyLocked(); err != nil {
+		return err
+	}
 	key := r.key(principal, conversation)
 	entry, ok := r.entries[key]
 	if !ok || entry.State == RegistryStateTerminated || entry.Leases <= 0 {
@@ -397,7 +476,9 @@ func (r *SessionRegistry) Release(principal, conversation string) error {
 	if entry.Leases == 0 {
 		entry.State = RegistryStateIdle
 		entry.LastUsedMs = r.nowMs()
+		r.touchLocked(key)
 	}
+	r.evictLocked()
 	return r.persistLocked()
 }
 
@@ -408,6 +489,9 @@ func (r *SessionRegistry) Release(principal, conversation string) error {
 func (r *SessionRegistry) Terminate(principal, conversation string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := r.readyLocked(); err != nil {
+		return err
+	}
 	key := r.key(principal, conversation)
 	entry, ok := r.entries[key]
 	if !ok {
@@ -426,8 +510,11 @@ func (r *SessionRegistry) Terminate(principal, conversation string) error {
 func (r *SessionRegistry) Lookup(principal, conversation string) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.readyLocked() != nil {
+		return ""
+	}
 	entry, ok := r.entries[r.key(principal, conversation)]
-	if !ok || entry.State == RegistryStateTerminated {
+	if !ok || entry.State == RegistryStateTerminated || (entry.State == RegistryStateIdle && r.nowMs()-entry.LastUsedMs > r.ttlMs) {
 		return ""
 	}
 	return entry.SessionID

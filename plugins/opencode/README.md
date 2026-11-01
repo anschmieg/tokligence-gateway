@@ -1,5 +1,24 @@
 # OpenCode Console plugin (CLIProxyAPI v8.0.49)
 
+**Parent review: experimental candidate, NOT admitted for deployment.**
+Component tests/build do not establish working host dispatch. Blocking findings:
+host callbacks omit per-request callback IDs; the cgo shim/bridge envelope
+contract needs reconciliation; stream close/cancellation and successful terminal
+validation are incomplete; buffered execution returns SSE rather than a validated
+completed response. Reconfigure must become atomic/concurrency-safe and reuse
+the existing lock for an unchanged path. Trusted caller principal scope must be
+proven through the host (auth-ID fallback is credential scope only). Console GET
+passthrough currently uses unsafe URL-prefix validation and must be fixed or
+removed before activation. Reasoning/tool continuation fixtures remain required.
+
+Parent lifecycle fixes: atomic registry acquire, idle TTL/LRU on reuse/release,
+crash recovery clearing dead leases without changing IDs, strict persisted-state
+validation, descriptor ownership, directory-sync error propagation, and refusal
+after close/uncertain writes. Synchronous handler exits release leases and rejected
+stream handles close. Missing transport returns503, never fake success.
+Focused race tests include concurrent eviction, SIGKILL/reopen, persistence
+failure and handler error exits. No real credentials or inference were used.
+
 Corrected implementation slice for the OpenCode Zen provider at the
 provider/executor level of the pinned mainline
 [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)
@@ -27,17 +46,11 @@ the host HTTP bridge (`host.http.do` / `host.http.do_stream`).
 
 ## Honest boundaries (not gaps that silently fall back)
 
-- **Session identity is required and never minted.** The OpenCode free tier
-  serves a request whose `x-opencode-session-id` / `x-session-affinity`
-  headers name a session a real OpenCode runtime created. A native session is
-  created by the native runtime's `Session.create` (project resolver, event
-  bus, session store) — none of which a CLIProxyAPI dynamic plugin can host.
-  This plugin therefore does NOT generate `ses_` ids. It accepts only a
-  caller-supplied native-shaped identity (the conversation's actual OpenCode
-  session id via host metadata or request headers) and otherwise fails the
-  dispatch with HTTP 428 and the exact gap instead of fabricating a
-  client-looking identity. Minting one was the rejected candidate's central
-  defect.
+- **Plugin-owned persistent sessions.** The registry maps a host conversation
+  to a native-shaped ID using the pinned identifier algorithm. This is a local
+  plugin mapping, not native database/event-bus lifecycle parity. No evidence
+  establishes that the remote API requires native local session creation.
+  Trusted principal/conversation binding still needs actual host verification.
 - **Org identity is never injected.** `x-org-id` comes only from the
   credential's recorded metadata and is sent only on Console API calls
   (config discovery, the bounded GET passthrough), matching the native
@@ -82,7 +95,7 @@ The output `opencode.so` exports `cliproxy_plugin_init`, `cliproxyPluginCall`,
 
 ## Register and configure
 
-Place the built `.so` in the host's plugin directory and configure it under
+Example only; do not activate this candidate yet. The eventual plugin goes under
 `plugins.configs.opencode`:
 
 ```yaml
@@ -102,21 +115,19 @@ plugins:
       project_id: global
 ```
 
-Credential seeding is an operator action: place the OpenCode OAuth credential
-JSON (the native `Credential.OAuth` shape — `type: "oauth"`,
-`methodID: "device"`, `access`, `refresh`, `expires` ms epoch, `metadata`
-with `server`/`orgID`) in the host auth dir. This plugin parses it and never
-writes, copies or rotates it outside the host-owned refresh flow.
+Real credential activation requires a sequential verified refresh-owner handoff.
+Never copy/reseed a live OAuth database or create a second owner for testing.
+The parsed shape is native `Credential.OAuth`: type/methodID/access/refresh/
+expires/metadata. Fake credentials only until integration blockers are fixed.
 
 ## Exact remaining blockers
 
 1. **Live acceptance** — the provider's quota restriction (the recorded
    FreeUsageLimitError 429s and cooldowns) is external and unresolved. This
    plugin does not claim any live inference works.
-2. **Native session lifecycle** — requests must arrive naming an
-   actually-created OpenCode session. Until a native OpenCode runtime creates
-   and forwards session ids (or the gateway sends the conversation's real
-   session id), dispatches fail closed with the 428 gap error by design.
+2. **Host/session/stream integration** — resolve the blocking parent findings
+   at the top of this file. The persistent registry is implemented, but this
+   does not establish native harness or host integration parity.
 3. **Refresh-owner handoff** — activating the existing credential's refresh
    ownership into this host is a separate staged procedure (stop/lock
    verification, rollback, explicit labels). This plugin implements the
