@@ -40,3 +40,5 @@ Use full-access runtimeMode where the tool permits (never broader than parent). 
 ## Automation and stopping
 
 Recurring supervisor every15min in parent thread; not a model-inference timer, not a delegate poller. Update this checkpoint after meaningful integration/outcome and preserve reports. Disable the supervisor on fullcompletion or precise external blocker with no useful authorized work left. At08:00UTC produce a truthful morning report: available endpoints/routes, changed commits, live results, blockers and remaining custom gaps. If incomplete and useful safe work remains, continue within user authorization; deadline isn't permission to overclaim or risk accounts. No unchanged-status spam or generic repeated adversarial reviews.
+
+Supervisor task: `scheduled-task:a9167950-84a6-47cf-89d6-f17c08b176c0`, interval900000ms, next initial run2026-11-01T20:49:18.969UTC. Historical four project schedules confirmed disabled. Use schedule_task(scheduledTaskId=..., enabled=false) to stop this supervisor at completion/blocker; do not create duplicate schedules.
