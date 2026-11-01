@@ -48,6 +48,11 @@ Parent evidence November1:
   This is an integration blocker, not a live/provider result. The stock host
   translator's default Claude->OpenAI path filters thinking; its compatibility
   variant preserves it. A provider-level fix and rerun are required.
+- `/tmp/opencode-host-smoke-20261101-d`: same failure using the EXACT returned
+  assistant blocks reconstructed from SSE (no invented/replaced signature).
+  The emitted thinking block is unsigned; the pinned normal request translator
+  filters it, while its existing compatibility variant preserves it. Evidence
+  includes the private stream response. Fix task is active; do not rerun unchanged.
 
 No actual Claude Code client, tools, long response, live quota or universal
 native-harness parity is claimed from these cases. Incoming session headers are

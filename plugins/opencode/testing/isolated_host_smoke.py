@@ -9,6 +9,7 @@ egress, a loopback-only mock inference provider, and drives:
   1. plugin registration + auth.parse / provider publication,
   2. one buffered /v1/chat/completions call,
   3. one streaming /v1/messages (Anthropic) call,
+  4. one continuation using the actual returned assistant thinking blocks,
 and verifies the raw callback envelope, the normalized JSON / data:-prefix
 translation, and the physical mock dispatch count (exactly one physical mock
 POST /chat/completions per caller call; the plugin forces stream:true upstream
@@ -34,7 +35,7 @@ Usage:
       --output <fresh empty directory>
 
 Exit code 0 requires ALL of: proven network-namespace isolation, the enveloped
-profile publishing the model, both calls reaching the mock exactly once each
+    profile publishing the model, three calls reaching the mock exactly once each
 with the fake bearer, and the raw-native profile staying blocked. Any other
 outcome exits nonzero with a sanitized failure list in verdict.json; the
 parent decides what the evidence means. This script never claims a pass it
@@ -398,6 +399,22 @@ def sanitize_error(body_bytes, limit=300):
         text = text.replace(secret, "[redacted]")
     return text[:limit]
 
+def assistant_blocks_from_sse(text):
+    blocks = {}
+    for line in text.splitlines():
+        if not line.startswith("data: "):
+            continue
+        event = json.loads(line[6:])
+        if event.get("type") == "content_block_start":
+            blocks[event["index"]] = dict(event["content_block"])
+        elif event.get("type") == "content_block_delta":
+            block = blocks[event["index"]]
+            delta = event["delta"]
+            for kind, field in (("thinking_delta", "thinking"), ("text_delta", "text"), ("signature_delta", "signature")):
+                if delta.get("type") == kind:
+                    block[field] = block.get(field, "") + delta[field]
+    return [blocks[index] for index in sorted(blocks)]
+
 
 def run_profile(work, profile, shape):
     summary["profile"] = profile
@@ -502,6 +519,7 @@ def run_profile(work, profile, shape):
         }, {**chat_headers, "Accept": "text/event-stream", "anthropic-version": "2023-06-01"})
         summary["stream"]["status"] = status
         text = body.decode("utf-8", "replace")
+        (work / ("stream-response-" + profile + ".sse")).write_bytes(body)
         stream_ok = (
             status == 200
             and "smoke-text" in text
@@ -522,9 +540,7 @@ def run_profile(work, profile, shape):
                 "model": MODEL_ID, "max_tokens": 64, "stream": False,
                 "messages": [
                     {"role": "user", "content": "smoke stream"},
-                    {"role": "assistant", "content": [
-                        {"type": "thinking", "thinking": "smoke-reasoning", "signature": ""},
-                        {"type": "text", "text": "smoke-text"}]},
+                    {"role": "assistant", "content": assistant_blocks_from_sse(text)},
                     {"role": "user", "content": "continue"}],
             }, chat_headers)
             replay = json.loads(replay_body) if replay_status == 200 else {}
