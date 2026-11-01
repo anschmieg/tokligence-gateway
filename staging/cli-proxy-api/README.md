@@ -15,6 +15,8 @@ Two Python tools, no third-party dependencies (stdlib only):
   `--local-model` launch instruction.
 - `staging/cli-proxy-api/cliproxy_lifecycle.py start|stop|status|smoke` —
   start, stop, inspect, and smoke-check the installed server (below).
+- `staging/cli-proxy-api/providers.yaml` — native v8 provider configuration
+  template for the generic-compatible chat routes (placeholder keys only).
 
 Pins are from `docs/design/upstream-artifact-pins.md`:
 
@@ -128,6 +130,79 @@ Concurrent lifecycle commands serialize on an OS-held lock
 Bootstrap holds an OS descriptor lock and publishes configuration after private key files. Interrupted initialization may leave partial private files and fails closed on retry; inspect only this new, unused staging root before manually removing it and reinstalling. Never apply cleanup to a root that has accepted credentials or configuration edits. Protected production/OpenCode trees and repository descendants are rejected.
 
 The pinned panel asset prevents the normal missing-asset fetch while present; it is not a blanket network isolation guarantee. Native background behavior is reviewed separately before adding credentials.
+
+## Native provider configuration — 2026-11-01
+
+`providers.yaml` in this directory is the native v8 template for the
+generic-compatible chat routes. Entries use the exact `api-keys.openai-compatibility`
+shape the pinned backend stores and validates (source: upstream `config.example.yaml`
+at `v8.0.49`, "OpenAI compatibility providers" section; v8 management API
+`/v8/management/config/api-keys/openai-compatibility`). Every `api-key:` value in
+the template is a `REPLACE_WITH_*` placeholder — real keys are typed only into
+the native dashboard form, never into this tracked file.
+
+### Applying entries (native dashboard only)
+
+The pinned backend8.0.49 serves the native dashboard at
+`http://127.0.0.1:4195/management.html`. Use it directly; no helper tool:
+
+1. Providers → OpenAI Compatible → add provider. Fill `name`, `base-url`,
+   model list (`name` = upstream id, `alias` = client-visible id) exactly as
+   documented in `providers.yaml`; set per-provider retry to `0`.
+2. Paste the real API key into the key field of the form. The dashboard sends
+   the write through the backend's validated management API, which re-validates
+   the whole config, persists it atomically and hot-reloads — accepted edits
+   survive restart and are never overwritten by bootstrap.
+3. Do NOT use the dashboard's connectivity "Test" buttons or quota panels for
+   now: those issue server-side provider calls outside the guarded dispatch
+   path (documented in the upstream evaluation §Dashboard behavior). Adding
+   entries and editing config is non-inference and safe.
+
+Keys remain where bootstrap put them (`<root>/secrets/`, never printed).
+The operator supplies each provider key through the existing secret path;
+nothing here reads, copies or prints credentials.
+
+### Route migration table (old gateway → native target)
+
+Concise per-lane decision, from `gateway.routes.yaml` + the pinned-source
+evaluation (`docs/design/cli-proxyapi-upstream-evaluation.md`):
+
+| Old lane | Migration class | Native target |
+| --- | --- | --- |
+| mistral (chat) | **Generic compatible** | `openai-compatibility` entry (template §mistral) |
+| mistral specialist APIs (audio/speech/embeddings/OCR/FIM/moderation/realtime) | **Retained specialist** | stay on existing gateway; NOT covered by compat chat entries |
+| openrouter | **Generic compatible** | compat entry; free tier = explicit `:free` model ids, paid = per-model uncommented admissions |
+| cerebras / groq / nvidia / together / nous | **Generic compatible** | compat entries, exact old model ids preserved |
+| google-ai-studio | **Built-in native** | native `gemini-api-key` provider (upstream built-in aistudio executor) — needs its own config work, not in template yet |
+| codex-oauth (gpt-6 lane) | **Built-in native** | native codex executor + OAuth login via dashboard; separate credential work |
+| claude/tokligence (minimax anthropic) | **Custom required** | no native MiniMax provider; needs custom compat/executor later |
+| copilot-auto | **Custom required** | no native GitHub Copilot executor |
+| cline-oauth | **Custom required** | Cline OAuth unsupported natively; custom future |
+| opencode-zen (chat + SystemOne) | **Custom required** | no native OpenCode provider; own milestone, 429 unresolved |
+| opencode-native | **Custom required** | same |
+| chatgpt-specialist | **Retained specialist** | custom service, keep until replaced |
+| modal (GLM) | **Custom required, unverified** | reasoning_content preservation under compat executor unverified; commented-out template entry only |
+
+Old aliases/prefix routes map to explicit per-model `alias` fields in the
+template (e.g. `mistral/` prefix → `mistral/mistral-large-latest` alias).
+Exact-model requests stay exact: no wildcard or "*" catch-all route exists in
+the native template, and OpenRouter's old `prefixes: ["*"]` default route is
+deliberately NOT reproduced.
+
+Free/paid policy is explicit per model entry: `:free` ids for OpenRouter free
+tier, paid ids commented out with their old allowlist names. No automatic
+paid fallback exists in the native config (per-provider `request-retry: 0`,
+no fallback alias chains in the template).
+
+### Lifecycle note
+
+`cliproxy_lifecycle.py start` currently refuses configs containing
+`openai-compatibility:`/`base-url:`/provider `api-key:` entries (the
+credential-free staging gate, see "Lifecycle behavior" above). Adding
+providers through the dashboard will therefore block `start` after a stop
+until that gate is adjusted. Parent is handling that lifecycle adjustment
+separately; until then, `status`/`stop` still work and the running server
+hot-applies dashboard writes without a restart.
 
 ## Deployed foundation checkpoint — 2026-11-01
 
