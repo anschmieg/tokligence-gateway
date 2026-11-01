@@ -16,6 +16,37 @@ def key_kind(value):
     return 'unset' if not value else 'public_literal' if value == 'public' else 'nonpublic'
 
 
+def plugin_name(value):
+    # Emit package coordinates only. Never echo file/URL references or plugin options.
+    if not isinstance(value, str): return 'non_package_reference'
+    package = r'(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*'
+    if re.fullmatch(package + r'(?:@[0-9]+(?:\.[0-9]+){0,2}(?:[-+][a-z0-9.-]+)?)?', value):
+        return value
+    return 'non_package_reference'
+
+
+def service_metadata(home, environ):
+    state = pathlib.Path(environ.get('XDG_STATE_HOME') or home / '.local/state') / 'opencode'
+    entries = []
+    for file in sorted(state.glob('service*.json')):
+        if not re.fullmatch(r'service(?:-[A-Za-z0-9._-]+)?\.json', file.name): continue
+        item = {'registration_file': file.name}
+        try:
+            value = json.loads(file.read_text())
+            version = value.get('version')
+            item['version'] = version if isinstance(version, str) and re.fullmatch(r'\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?', version) else 'unknown'
+            pid = value.get('pid')
+            if type(pid) is int and pid > 0:
+                item['pid'] = pid
+                try: os.kill(pid, 0); item['pid_exists'] = True
+                except ProcessLookupError: item['pid_exists'] = False
+                except PermissionError: item['pid_exists'] = 'permission_denied'
+            # password, URL, service ID and environment values are deliberately excluded.
+        except (OSError, ValueError, AttributeError): item['parse'] = 'unreadable_schema'
+        entries.append(item)
+    return entries
+
+
 def binary_metadata(binary):
     file = pathlib.Path(binary).resolve()
     digest = hashlib.sha256()
@@ -25,7 +56,8 @@ def binary_metadata(binary):
     result = {'path': str(file), 'sha256': digest.hexdigest()}
     if prefix.startswith(b'\x7fELF'):
         version = subprocess.check_output([str(file), '--version'], stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True, timeout=15).strip()
-        result.update(kind='elf', version=version if re.fullmatch(r'\d+\.\d+\.(?:\d+|fixture)(?:[-+][A-Za-z0-9.-]+)?', version) else 'unrecognized_version_output')
+        match = re.fullmatch(r'(?:opencode v)?(\d+\.\d+\.(?:\d+|fixture)(?:[-+][A-Za-z0-9.-]+)?)', version)
+        result.update(kind='elf', version=match.group(1) if match else 'unrecognized_version_output')
     elif prefix.startswith(b'#!'):
         text = prefix.decode('utf-8', errors='replace')
         result.update(kind='script_not_executed',
@@ -50,7 +82,8 @@ def inspect_profile(home, binary=None, environ=None):
     result['environment_present'] = {key: bool(environ.get(key)) for key in [
         'OPENCODE_API_KEY', 'OPENCODE_AUTH_CONTENT', 'OPENCODE_DB', 'OPENCODE_CONFIG_DIR',
         'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy',
-        'XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'OPENCODE_CONFIG', 'OPENCODE_TEST_HOME']}
+        'XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME', 'OPENCODE_CONFIG', 'OPENCODE_TEST_HOME']}
+    result['saved_service_registrations'] = service_metadata(home, environ)
     data_dir = pathlib.Path(environ.get('XDG_DATA_HOME') or home / '.local/share') / 'opencode'
     auth_files = [data_dir / 'auth.json']
     for file in auth_files:
@@ -74,6 +107,8 @@ def inspect_profile(home, binary=None, environ=None):
             item['opencode_provider_configured'] = isinstance(providers, dict) and 'opencode' in providers
             item['provider_count'] = len(providers) if isinstance(providers, dict) else None
             item['plugin_count'] = len(value.get('plugin', value.get('plugins', [])))
+            plugins = value.get('plugin', value.get('plugins', []))
+            item['plugin_packages'] = [plugin_name(plugin) for plugin in plugins] if isinstance(plugins, list) else ['unsupported_schema']
             provider = providers.get('opencode', {}) if isinstance(providers, dict) else {}
             item['opencode_key_configured'] = any(bool(container.get('apiKey')) for container in [provider, provider.get('options', {}), provider.get('settings', {})] if isinstance(container, dict))
             for container in [provider.get('options', {}), provider.get('settings', {})]:

@@ -3,6 +3,18 @@ from unittest import mock
 spec=importlib.util.spec_from_file_location('profile_inspector',pathlib.Path(__file__).resolve().parents[1]/'native/opencode/inspect-installed-profile.py')
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 class ProfileTests(unittest.TestCase):
+ def test_plugin_coordinates_and_service_version_exclude_secrets(self):
+  with tempfile.TemporaryDirectory() as folder:
+   h=pathlib.Path(folder);c=h/'.config/opencode';c.mkdir(parents=True)
+   (c/'opencode.json').write_text(json.dumps({'plugin':['@scope/auth-plugin@1.2.3','opencode-auth-plugin','https://user:PLUGIN_SECRET@example.test/plugin?key=SECRET',{'name':'OPTIONS_SECRET'}]}))
+   s=h/'.local/state/opencode';s.mkdir(parents=True)
+   (s/'service.json').write_text(json.dumps({'version':'2.0.32','pid':123456789,'password':'PASSWORD_SECRET','url':'https://URL_SECRET','id':'ID_SECRET','env':{'KEY':'ENV_SECRET'}}))
+   before=(s/'service.json').read_bytes()
+   with mock.patch.object(m.shutil,'which',return_value=None):r=m.inspect_profile(h,None,{})
+   self.assertEqual(r['configs'][0]['plugin_packages'],['@scope/auth-plugin@1.2.3','opencode-auth-plugin','non_package_reference','non_package_reference'])
+   self.assertEqual(r['saved_service_registrations'][0]['version'],'2.0.32')
+   self.assertEqual((s/'service.json').read_bytes(),before)
+   self.assertNotIn('SECRET',json.dumps(r))
  def test_metadata_only_and_version_flag_only(self):
   with tempfile.TemporaryDirectory() as folder:
    h=pathlib.Path(folder);b=h/'opencode';b.write_bytes(b'\x7fELFsynthetic-not-executed');b.chmod(0o700)
@@ -19,6 +31,11 @@ class ProfileTests(unittest.TestCase):
    text=json.dumps(r)
    for secret in ['TOKEN_PRIVATE','REFRESH_PRIVATE','KEY_PRIVATE','URL_PRIVATE','QUERY_PRIVATE','PLUGIN_PRIVATE','DB_PRIVATE','MESSAGE_PRIVATE','ENV_PRIVATE']:self.assertNotIn(secret,text)
    self.assertEqual(r['binary']['version'],'1.18.fixture');self.assertEqual(r['opencode_credential_types'],['oauth']);self.assertEqual(r['recent_sessions'][0]['assistant_metadata'][0]['model'],'beam-free');self.assertEqual((d/'opencode.db').read_bytes(),before)
+ def test_official_native_version_prefix(self):
+  with tempfile.TemporaryDirectory() as folder:
+   b=pathlib.Path(folder)/'cli';b.write_bytes(b'\x7fELFsynthetic')
+   with mock.patch.object(m.subprocess,'check_output',return_value='opencode v2.2.5'):
+    self.assertEqual(m.binary_metadata(b)['version'],'2.2.5')
  def test_empty_profile_does_not_create_state(self):
   with tempfile.TemporaryDirectory() as folder:
    h=pathlib.Path(folder)
