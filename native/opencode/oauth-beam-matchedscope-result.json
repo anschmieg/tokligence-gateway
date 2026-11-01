@@ -1,0 +1,21 @@
+{
+  "scope": "bounded same-version OAuth basic comparison; not full live acceptance",
+  "run_id": "native-beam-matchedscope-20261101",
+  "plan_sha256": "32d7883f90544f5f1d86462c189729c37a73d5ddc1b546104c14337e070a02e8",
+  "staging_root": "/home/agent/tokligence-staging",
+  "reference_passed": false,
+  "gateway_passed": false,
+  "startup_passed": true,
+  "startup_only": false,
+  "coverage_incomplete": true,
+  "error_type": "ProbeStopped",
+  "requests": 1,
+  "reserved_output_tokens": 1024,
+  "upstream_status": 429,
+  "upstream_code": "FreeUsageLimitError",
+  "upstream_request_id": "01a19696-b57a-7399-bbb8-67cd26f7721d",
+  "cooldown_until": "2026-11-02T00:00:00.756366+00:00",
+  "upstream_retry_at": "2026-11-02T00:00:00.763647+00:00",
+  "retry_at_source": "provider",
+  "reason": "Native OAuth control rejected; no further traffic"
+}

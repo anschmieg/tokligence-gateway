@@ -1,6 +1,16 @@
 # Reviewed live acceptance plan — current architecture and historical evidence
 
-## November1 Beam comparison (supersedes historical windows below)
+## November1 result: rejected, window closed
+
+The native2.1.4 CLI's first Beam request returned429 `FreeUsageLimitError` at10:10UTC.
+One dispatch/1024 reserved output; the conditional gateway request was not sent.
+Provider request ID `01a19696-b57a-7399-bbb8-67cd26f7721d`, reset November2
+00:00:00.756366UTC. Both staging services were restored. The stable ID/window is
+consumed and must not be replayed. No compensating model/account/IP/credential
+changes or further diagnostic inference. Current live acceptance is incomplete;
+matching metadata/body compiler results did not prevent this rejection.
+
+## November1 Beam comparison (historical executed plan)
 
 `oauth-beam-matchedscope-plan.json` fixes run `native-beam-matchedscope-20261101`
 and window `native-beam-matchedscope-window-20261101`, not before10:10UTC.
