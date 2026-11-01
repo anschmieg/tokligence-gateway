@@ -5,7 +5,7 @@ Date: 2026-11-01.
 
 ## Product decision
 
-Reposition the gateway as a small policy, discovery and compatibility product built on maintained provider infrastructure. CLIProxyAPI becomes the preferred inference foundation where its support is verified. Provider-specific native runtimes or isolated adapters cover remaining gaps. The current Tokligence backend becomes a migration backend rather than the mandatory foundation.
+Reposition the gateway as a small policy, discovery and compatibility product built on maintained provider infrastructure. CLIProxyAPI becomes the primary API and provider foundation, with CLIProxyAPI Plus as the management interface. Customizations belong in supported providers, executors or plugins wherever reasonable. A separate service is an exception requiring a demonstrated extension/runtime limitation. The current Tokligence backend becomes a migration backend rather than the mandatory foundation.
 
 Success means fewer independently maintained authentication flows, serializers, retry loops and session stores, while preserving the client workflows and specialist APIs users need. Merely replacing one large custom implementation with a fork of another does not satisfy the goal.
 
@@ -15,31 +15,31 @@ The plan does not assume that CLIProxyAPI supports every provider, that opencode
 
 ```mermaid
 flowchart LR
-    C[Claude Code / Codex / other clients] --> E[Public edge: client auth and policy]
-    E --> Q[CLIProxyAPI: supported provider routes]
-    E --> S[Isolated specialist adapters]
-    Q --> P[Supported upstream providers]
-    Q --> O[OpenCode adapter if custom executor is suitable]
-    S --> O
-    O --> N[One native OAuth and session owner]
+    C[Claude Code / Codex / other clients] --> Q[CLIProxyAPI native API]
+    T[T3 Code hub integration] --> Q
+    M[CLIProxyAPI Plus management interface] --> A[CLIProxyAPI management API]
+    A --> Q
+    Q --> P[Maintained provider integrations]
+    Q --> X[Custom providers / executors / plugins]
+    X --> N[Native runtime helper only where necessary]
     N --> Z[OpenCode]
 ```
 
-The two possible connections to the OpenCode adapter are alternatives. A route selects exactly one; it must not traverse both. Phase2 chooses the supported extension boundary.
+Keep CLIProxyAPI's native API available as a first-class integration surface, including the management/discovery operations required by T3 Code hubs. A custom façade must not become mandatory for T3 Code or ordinary clients. Network ingress/TLS and administrative access controls may protect these APIs without changing their contracts. Management access remains authenticated and scoped; availability does not mean anonymous public exposure.
 
 | Concern | Single owner / rule |
 | --- | --- |
-| Public authentication, admin authorization, tenant identity | Slim public edge; private backend listeners remain inaccessible to clients |
+| Public authentication, admin authorization, tenant identity | CLIProxyAPI native controls and protected ingress; provider runtimes remain private |
 | Model catalog, aliases, free/paid eligibility, route configuration | One versioned policy compiled into backend configuration |
 | Protocol conversion | CLIProxyAPI for its routes; the selected adapter for other routes; no chained conversion |
 | Upstream credentials and refresh | Provider backend/native runtime, never the public edge; one refresh owner per credential |
-| Session affinity | Selected backend, using a principal-scoped stable conversation identity supplied by the edge |
+| Session affinity | Selected backend, using a principal-scoped stable conversation identity resolved at the CLIProxyAPI boundary |
 | Retry and failover | One explicit route policy enforced at the dispatch owner; no hidden nested loops |
 | Compatibility patches | Small named transforms at a documented boundary with evidence and regression fixtures |
-| Quota state | Dispatch owner persists provider rejection/reset; edge surfaces sanitized state without extending it |
+| Quota state | Dispatch owner persists provider rejection/reset; native management/API surfaces sanitized state without extending it |
 | Streaming and cancellation | End-to-end propagation; client disconnect cancels active upstream work |
 
-The edge may authenticate, resolve aliases, enforce policy and apply a necessary boundary transform. It should not own provider OAuth, construct native client identities, execute an agent loop, or retain a second full conversation history.
+Use CLIProxyAPI's configuration and extension mechanisms for policy, authentication and transformations before adding a custom process. Retain a separate compatibility proxy only for a specific unsupported contract that cannot reasonably be implemented in an extension, with an explicit retirement condition. Do not maintain a competing dashboard or management API. Native runtime helpers may own provider-specific state, but are private implementation details of the provider integration.
 
 ## Scope and non-goals
 
@@ -61,7 +61,7 @@ Deliverables: requirements matrix, route inventory, current contract fixtures an
 
 ## Phase1 — Evaluate and pin the foundation
 
-Inspect a pinned CLIProxyAPI release and each proposed extension before executing it with credentials. The repository currently embeds v7.3.20 for Codex; this is a starting fact, not an instruction to retain or upgrade it blindly.
+Inspect pinned CLIProxyAPI and CLIProxyAPI Plus versions, their compatibility, and each proposed extension before executing it with credentials. The repository currently embeds v7.3.20 for Codex; this is a starting fact, not an instruction to retain or upgrade it blindly.
 
 Verify against source and isolated tests:
 
@@ -88,16 +88,16 @@ Deliverable: short architecture decision record selecting release, extensions, o
 
 Implement only a single ordinary supported provider first:
 
-1. Start CLIProxyAPI on a private listener with explicit configuration and no unused providers/plugins.
-2. Add a narrow edge-to-backend contract carrying principal identity, exact selected model, stable conversation key and correlation ID. Never trust a client-supplied internal principal header.
-3. Compile one policy revision into edge/backend configuration; validate the resulting route table before startup. Expose a sanitized effective configuration and component versions.
+1. Start CLIProxyAPI and the CLIProxyAPI Plus management interface in staging with explicit configuration and no unused providers/plugins. Expose native APIs through protected ingress without a mandatory custom inference façade.
+2. Implement identity, exact model selection, stable conversation scope and correlation IDs within the supported CLIProxyAPI boundary. Never trust a client-supplied internal principal header. Verify T3 Code can connect directly as a CLIProxyAPI hub.
+3. Compile one policy revision into native configuration and extension configuration; validate the resulting route table before startup. Expose a sanitized effective configuration and component versions.
 4. Disable unsafe defaults explicitly: automatic credential/tier fallback, quota retries, background inference checks and unbounded bootstrap attempts. Verify behavior by physical outbound request counts, not configuration inspection alone.
-5. Preserve existing public/admin authorization and rate/budget boundaries. Separate management credentials from inference credentials; never expose backend management ports.
+5. Preserve existing public/admin authorization and rate/budget boundaries. Separate management credentials from inference credentials; protect management endpoints with their native authentication and network access policy.
 6. Add diagnostics for provider status/error type, reset, request ID, route/backend version, physical dispatch count and local versus upstream rejection. Redact credentials, prompts and raw reasoning by default.
 
-Choose extension placement here: a stable custom executor/plugin if sufficient; otherwise a private adapter service behind an explicit route. Avoid maintaining a CLIProxyAPI fork merely to add one provider.
+Choose extension placement here: a supported provider/executor/plugin is the default. A private runtime helper is allowed when native OAuth or runtime reuse requires it; a separate general proxy requires a documented exception. Avoid maintaining a CLIProxyAPI fork merely to add one provider.
 
-Exit gate: synthetic tests exercise the full public-client-to-backend path, process restart and rollback with no production changes.
+Exit gate: synthetic tests exercise the full client-to-provider path, Plus management workflows, direct T3 Code hub connectivity, process restart and rollback with no production changes. Verify required native API paths, authentication, discovery, configuration and streaming remain compatible; do not infer hub compatibility from a successful chat request.
 
 ## Phase3 — OpenCode adapter selection and implementation
 
@@ -119,7 +119,7 @@ Exit gate: pinned native reference and adapter pass differential API/body tests 
 
 ## Phase4 — Compatibility patches and cache preservation
 
-Create a small patch registry: affected provider/protocol/version, concrete incompatibility, transform location, fixture, owner and retirement condition. Patches are opt-in per route and visible in diagnostics. No catch-all rewriting pipeline.
+Implement patches within CLIProxyAPI providers/plugins where possible. Create a small patch registry: affected provider/protocol/version, concrete incompatibility, transform location, fixture, owner and retirement condition. Patches are opt-in per route and visible in diagnostics. No catch-all rewriting pipeline.
 
 For each transform verify system/message ordering, tool schema serialization, reasoning/signatures, cache-control fields, prompt cache keys, usage attribution and truncation/compaction behavior. Preserve unknown fields only where the upstream contract allows them; reject unsupported semantics explicitly.
 
