@@ -1,6 +1,6 @@
 # CLIProxyAPI staging install/bootstrap tool
 
-One Python tool, no third-party dependencies (stdlib only):
+Two Python tools, no third-party dependencies (stdlib only):
 
 - `staging/cli-proxy-api/cliproxy_staging.py install` — downloads the two
   pinned public release artifacts, verifies SHA-256 **against the downloaded
@@ -13,6 +13,8 @@ One Python tool, no third-party dependencies (stdlib only):
   auth state**, privately generated management + client keys (mode `0600`,
   values never printed), no providers, asset auto-update disabled, and the
   `--local-model` launch instruction.
+- `staging/cli-proxy-api/cliproxy_lifecycle.py start|stop|status|smoke` —
+  start, stop, inspect, and smoke-check the installed server (below).
 
 Pins are from `docs/design/upstream-artifact-pins.md`:
 
@@ -37,6 +39,9 @@ refuses truncated digests.
 <root>/secrets/management.key             # 0600, never printed
 <root>/secrets/client-api-key             # 0600, never printed
 <root>/manifest.json                      # pin + path record
+<root>/.lifecycle.json                    # private pid record, 0600 (start)
+<root>/.lifecycle.lock                    # OS held lock, never unlinked
+<root>/lifecycle.log                      # server stdout/stderr, 0600
 ```
 
 The server resolves the control panel as `<config-dir>/static/management.html`
@@ -54,29 +59,69 @@ python3 staging/cli-proxy-api/cliproxy_staging.py install \
 # 2. Bootstrap once (idempotent: an existing config is never overwritten)
 python3 staging/cli-proxy-api/cliproxy_staging.py bootstrap \
   --root /home/agent/cliproxy-staging
+
+# 3. Lifecycle (start/stop/status/smoke)
+python3 staging/cli-proxy-api/cliproxy_lifecycle.py start  \
+  --root /home/agent/cliproxy-staging
+python3 staging/cli-proxy-api/cliproxy_lifecycle.py smoke  \
+  --root /home/agent/cliproxy-staging
+python3 staging/cli-proxy-api/cliproxy_lifecycle.py status \
+  --root /home/agent/cliproxy-staging
+python3 staging/cli-proxy-api/cliproxy_lifecycle.py stop   \
+  --root /home/agent/cliproxy-staging
 ```
 
-The tool refuses roots that collide with production locations
+Both tools refuse roots that collide with production locations
 (`/home/agent/tokligence-staging`, `/data`, `/etc`, …) or the repository
-itself. It never starts the server and never prints key values.
+itself. The installer never starts the server; neither tool prints key
+values, raw config, or server log content.
 
-## Launch (manual, by the parent/lifecycle stage)
+## Lifecycle behavior (`cliproxy_lifecycle.py`)
 
-```sh
-/home/agent/cliproxy-staging/bin/cli-proxy-api \
-  --config /home/agent/cliproxy-staging/config/config.yaml --local-model
-```
+`start` launches the pinned binary directly
+(`<root>/bin/cli-proxy-api --config <root>/config/config.yaml --local-model`,
+working dir `<root>`) with stdout/stderr to the private `<root>/lifecycle.log`,
+then polls `GET /healthz` (bounded 20 s) and records the child's
+PID, kernel start time, UID, and full command line in a private
+`<root>/.lifecycle.json`. Before launching it refuses when:
 
-`--local-model` uses embedded model catalogs; `models.catalog: ""` in the
-config keeps explicit sources empty. The management panel is at
-`http://127.0.0.1:4195/management.html`; both keys are under
-`<root>/secrets/`.
+- an owned process is already running (duplicate start),
+- the loopback port `127.0.0.1:4195` is occupied (checked with
+  `SO_REUSEADDR`, so stale TIME_WAIT sockets do not cause false refusals —
+  the pinned binary itself exits 0 on a bind conflict, so the tool cannot
+  rely on the child's exit status),
+- the config does not match the credential-free loopback staging shape
+  (bind host/port, `allow-remote: false`, empty catalogs, plugins off,
+  auto-update off) or contains provider/upstream credential groups
+  (`api-keys:` root, `openai-compatibility:`, `base-url:`, provider
+  `api-key:`, or `allow-remote: true`).
 
-## Not in scope (by design)
+`stop` signals **only a process it can re-verify**: the recorded PID must be
+alive with the same kernel start time (defeats PID recycling), same UID,
+executable, and full command line, and the record's own stored fields must
+match. A stale or foreign record is never signalled; it is kept for
+inspection. SIGTERM (10 s wait), `--force` escalates to SIGKILL. After a
+verified stop the record is removed.
 
-No wrapper proxy, no helper service, no custom/patched dashboard, no Plus
-fork, no lifecycle scripts (start/stop are assigned separately). The tool
-downloads public releases to verify hashes; it does not execute the backend.
+`status` reports running (with PID/UID/start time) or stopped, without
+signalling anything.
+
+`smoke` runs against the live owned server, without printing key values:
+
+1. `GET /healthz` → 200.
+2. `GET /management.html` → 200 and bytes hash to the pinned v1.27.0 digest.
+3. Auth boundary: `/v8/management/config` → 401 without a key, 200 with the
+   management key, rejected with the client key; `/v1/models` → 200 with the
+   client key, rejected with the management key.
+4. Config/key persistence across one restart: stop the owned process, start
+   again, and check the config is byte-stable and both keys still
+   authenticate. (The backend rewrites `config.yaml` on first launch — keys
+   are hashed in place — so stability is only asserted after the first
+   start, never against the bootstrap plaintext.)
+
+Concurrent lifecycle commands serialize on an OS-held lock
+(`<root>/.lifecycle.lock`, never unlinked). Verified against the pinned
+`8.0.49` linux-aarch64 binary and `1.27.0` dashboard on 2026-11-01.
 
 ## Bootstrap recovery
 
