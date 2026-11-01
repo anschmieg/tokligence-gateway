@@ -10,9 +10,10 @@ import { createHash } from 'node:crypto';
 
 const source = process.env.OPENCODE_NATIVE_SOURCE, bun = process.env.OPENCODE_NATIVE_BUN;
 const reference = process.env.OPENCODE_2X_REFERENCE_SOURCE, referenceBun = process.env.OPENCODE_2X_REFERENCE_BUN;
-test('pinned native 2.0.32 compiler matches actual 2.1 bridge with matched explicit controls and no external networking', { skip: !source || !bun || !reference || !referenceBun, timeout: 90000 }, async (t) => {
-  const pin = JSON.parse(await readFile('native/opencode/reference-2x-source.json'));
-  assert.equal(JSON.parse(await readFile(path.join(reference, 'packages/ai/package.json'))).version, pin.version);
+test('pinned working-version 2.x compiler matches actual bridge with matched explicit controls and no external networking', { skip: !source || !bun || !reference || !referenceBun, timeout: 90000 }, async (t) => {
+  const version = JSON.parse(await readFile(path.join(reference, 'packages/ai/package.json'))).version;
+  const pin = JSON.parse(await readFile('native/opencode/reference-2x-source.json')).references.find(item => item.version === version);
+  assert.ok(pin, 'reference must be one of the pinned working releases');
   assert.equal(execFileSync(referenceBun, ['--version'], { encoding: 'utf8' }).trim(), pin.bun);
   assert.equal(createHash('sha256').update(await readFile(path.join(reference, 'packages/ai/src/protocols/openai-chat.ts'))).digest('hex'), pin.compilerSha256);
   assert.equal(JSON.parse(await readFile(path.join(reference, 'packages/ai/node_modules/effect/package.json'))).version, pin.effectVersion);
@@ -49,8 +50,9 @@ with tarfile.open(a) as archive:
     const report = JSON.parse(await readFile(path.join(output, 'parity.json')));
     assert.equal(report.external_network_blocked, true);
     assert.equal(report.cases.length, 80);
+    assert.equal(report.reference_version, pin.version);
     assert.deepEqual(report.cases.filter(item => item.differences.length), [], 'unapproved compiler differences; report at ' + output);
-    t.diagnostic('Synthetic 2.x compiler evidence: ' + output);
+    t.diagnostic('Synthetic ' + pin.version + ' compiler evidence: ' + output);
   } finally {
     clearTimeout(timer);
     try { process.kill(-child.pid, 'SIGKILL'); } catch {}

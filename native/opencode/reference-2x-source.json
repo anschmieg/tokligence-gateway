@@ -1,8 +1,20 @@
 {
-  "version": "2.0.32",
-  "archive": "https://codeload.github.com/anomalyco/opencode/tar.gz/refs/tags/v2.0.32",
-  "sha256": "d9e080eae0965104dfe3857aabbc8ce976e9aeaa62110ce101bc1a107d243d97",
-  "bun": "1.4.2",
-  "compilerSha256": "5c2fa03e0878fdb3a9c72b0dc2bd13b5a224db138c543802fa06792bc936e87e",
-  "effectVersion": "4.0.1"
+  "references": [
+    {
+      "version": "2.0.32",
+      "archive": "https://codeload.github.com/anomalyco/opencode/tar.gz/refs/tags/v2.0.32",
+      "sha256": "d9e080eae0965104dfe3857aabbc8ce976e9aeaa62110ce101bc1a107d243d97",
+      "bun": "1.4.2",
+      "compilerSha256": "5c2fa03e0878fdb3a9c72b0dc2bd13b5a224db138c543802fa06792bc936e87e",
+      "effectVersion": "4.0.1"
+    },
+    {
+      "version": "2.2.5",
+      "archive": "https://codeload.github.com/anomalyco/opencode/tar.gz/refs/tags/v2.2.5",
+      "sha256": "04621edf6c47c2c7a36982ef39914d482c16977708fbd7b779f49f928bdc4fba",
+      "bun": "1.4.4",
+      "compilerSha256": "a14f165a7d555a0630f493c146632e3d41c34fda5a104a611e5aca66aa983145",
+      "effectVersion": "4.0.6"
+    }
+  ]
 }

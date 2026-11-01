@@ -1,6 +1,7 @@
 // Independent pinned 2.x compiler. Runs only in the parity network namespace.
 import { Effect } from '/reference/packages/ai/node_modules/effect/dist/index.js'
-import { LLM, Message, LanguageModel, ToolDefinition } from '/reference/packages/ai/src/index.ts'
+import * as LLM from '/reference/packages/ai/src/llm.ts'
+import { Message, LanguageModel, ToolDefinition } from '/reference/packages/ai/src/schema/index.ts'
 import { OpenAIChat } from '/reference/packages/ai/src/protocols/openai-chat.ts'
 import { compileRequest } from '/reference/packages/ai/src/route/client.ts'
 const input = JSON.parse(await Bun.stdin.text())

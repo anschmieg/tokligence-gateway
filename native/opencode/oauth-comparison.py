@@ -32,6 +32,7 @@ MATCHED_FIELDS = {'model', 'messages', 'tools', 'tool_choice', 'stream', 'stream
 CODE_FILES = ['oauth-comparison.py', 'oauth_meter.py', 'oauth_profile.py', 'metered-native-fetch.mjs',
               'live_safety.py', 'official_control.py', 'official-public-probe.py', 'run_admission.py',
               'capture-oauth-reference.py', 'testing/oauth-reference.py', 'testing/oauth-seed.ts', 'source.json', 'owned-cli-exec.py', 'acceptance_plan.py', 'live-tests.py']
+FREE_COMPARISON_MODELS = ('beam-free', 'glm-5.3-flash-free', 'deepseek-v4.1-flash-free', 'mimo-v2.6-flash-free')
 
 
 def read_json(path): return json.loads(pathlib.Path(path).read_text())
@@ -51,7 +52,7 @@ def inspect(plan, root, run_id):
     source = root / 'runtime/opencode'
     if (plan.get('kind') != 'native-oauth-comparison-v1' or plan.get('status') != 'prepared'
             or plan.get('authentication') != 'oauth' or plan.get('version') != '2.1.4'
-            or plan.get('model') != 'glm-5.3-flash-free' or plan.get('run_id') != run_id
+            or not isinstance(plan.get('model'), str) or plan.get('model') not in FREE_COMPARISON_MODELS or plan.get('run_id') != run_id
             or plan.get('staging_root') != str(root.resolve())):
         blockers.append('oauth_plan_contract_mismatch')
     window = plan.get('window', {})

@@ -76,7 +76,7 @@ try {
     const diff = diffRequestJSON(reference, native);
     differences.push({ model, vector: name, differences: diff });
   }
-  await writeFile('/work/parity.json', JSON.stringify({ external_network_blocked: blocked, scope: 'pinned native2.0.32 compiler versus actual2.1 bridge with matched explicit output/reasoning/store controls; not full CLI/TLS/auth parity', cases: differences }, null, 2));
+  await writeFile('/work/parity.json', JSON.stringify({ external_network_blocked: blocked, reference_version: JSON.parse(await readFile('/reference/packages/ai/package.json')).version, scope: 'pinned working-version 2.x compiler versus actual2.1 bridge with matched explicit output/reasoning/store controls; not full CLI/TLS/auth parity', cases: differences }, null, 2));
   console.log(JSON.stringify({ cases: differences.length, differences: differences.filter(item => item.differences.length).map(item => ({ model: item.model, vector: item.vector, paths: item.differences.map(diff => diff.path) })) }));
 } finally {
   worker.kill('SIGTERM'); await workerExit;

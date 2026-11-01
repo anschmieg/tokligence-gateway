@@ -387,6 +387,10 @@ console.log(JSON.stringify({physical,passed}));
                 'credential_id_sha256': driver.hashlib.sha256(b'synthetic-credential').hexdigest(), 'classified_body_differences': []}
         with mock.patch.object(driver.subprocess, 'check_output', return_value='1.4.4\n'), mock.patch.object(driver, 'inspect_ledger', return_value=[]), mock.patch.object(driver, 'inspect_worker', return_value=[]), mock.patch.object(driver, 'effective_worker_xdg', return_value={}):
             self.assertEqual(driver.inspect(plan, self.root, 'comparison'), [])
+            for selected in driver.FREE_COMPARISON_MODELS:
+                self.assertEqual(driver.inspect({**plan, 'model': selected}, self.root, 'comparison'), [], selected)
+            for selected in ['paid-model', 'opencode/beam-free', '', None, ['beam-free']]:
+                self.assertIn('oauth_plan_contract_mismatch', driver.inspect({**plan, 'model': selected}, self.root, 'comparison'))
             self.assertIn('startup_evidence_not_qualified', driver.inspect({**plan, 'startup_evidence': {}}, self.root, 'comparison'))
             self.assertIn('worker_effective_xdg_plan_mismatch', driver.inspect({**plan, 'effective_xdg': {'changed': 'path'}}, self.root, 'comparison'))
             for field, value in [('authentication', 'public'), ('version', '1.18.32'), ('status', 'draft'),
