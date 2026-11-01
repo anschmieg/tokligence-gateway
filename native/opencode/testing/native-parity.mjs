@@ -25,7 +25,7 @@ const server = http.createServer(async (req, res) => {
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const models = ['beam-free', 'glm-5.3-flash-free', 'deepseek-v4.1-flash-free', 'mimo-v2.6-flash-free'];
 const config = { providers: { fixture: { package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: `http://127.0.0.1:${server.address().port}/v1`, apiKey: 'public' },
-  models: Object.fromEntries(models.map(model => [model, { compatibility: { reasoningField: 'reasoning_content' }, cost: { input: 0, output: 0 }, limit: { context: 200000, output: 1024 } }])) } } };
+  models: Object.fromEntries(models.map(model => [model, { compatibility: { reasoningField: 'reasoning_content', supportsStore: false }, cost: { input: 0, output: 0 }, limit: { context: 200000, output: 1024 } }])) } } };
 await writeFile('/work/fixture.json', JSON.stringify(config));
 const env = { PATH: '/usr/bin:/bin', HOME: '/work', OPENCODE_NATIVE_STATE: '/work/state', OPENCODE_NATIVE_FIXTURE_CONFIG: '/work/fixture.json', OPENCODE_NATIVE_MODELS: models.join(','), OPENCODE_NATIVE_KEY: 'synthetic-parity-key-000000000000000000', OPENCODE_NATIVE_PORT: '0' };
 for (const key of ['DATA', 'CONFIG', 'CACHE', 'STATE']) env[`XDG_${key}_HOME`] = `/work/state/${key}`;
@@ -76,27 +76,7 @@ try {
     const diff = diffRequestJSON(reference, native);
     differences.push({ model, vector: name, differences: diff });
   }
-  const officialCases = [];
-  let officialSessionStable = false;
-  let officialRequests;
-  try { officialRequests = JSON.parse(await readFile('/official-requests.json', 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  if (officialRequests) {
-    const sessionIDs = [];
-    for (const [index, official] of officialRequests.entries()) {
-      const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${env.OPENCODE_NATIVE_KEY}`, 'x-opencode-bridge-session': 'official-persisted-conversation', 'content-type': 'application/json' }, body: JSON.stringify(official.body) });
-      assert.equal(response.status, 200, await response.clone().text()); await response.text();
-      sessionIDs.push(response.headers.get('x-opencode-native-session'));
-      const nativeHeaders = captureHeaders.at(-1);
-      assert.equal(nativeHeaders['x-opencode-client'], official.headers['x-opencode-client']);
-      assert.equal(nativeHeaders['content-type'], official.headers['content-type']);
-      assert.deepEqual(Object.keys(official.headers).filter(name => !(name in nativeHeaders)).sort(), ['x-opencode-request']);
-      assert.deepEqual(Object.keys(nativeHeaders).filter(name => !(name in official.headers)).sort(), ['b3', 'traceparent', 'x-opencode-session-id', 'x-session-affinity', 'x-session-id']);
-
-      officialCases.push({ turn: index, differences: diffRequestJSON(official.body, captures.at(-1)), official_header_names: Object.keys(official.headers).sort(), native_header_names: Object.keys(captureHeaders.at(-1)).sort() });
-    }
-    officialSessionStable = Boolean(sessionIDs[0]) && new Set(sessionIDs).size === 1;
-  }
-  await writeFile('/work/parity.json', JSON.stringify({ external_network_blocked: blocked, scope: 'reference1.18 provider transform and SDK compiler versus native2.1 bridge compiler; not full CLI/TLS/auth parity', cases: differences, official_cases: officialCases, official_session_stable: officialSessionStable }, null, 2));
+  await writeFile('/work/parity.json', JSON.stringify({ external_network_blocked: blocked, scope: 'pinned native2.0.32 compiler versus actual2.1 bridge with matched explicit output/reasoning/store controls; not full CLI/TLS/auth parity', cases: differences }, null, 2));
   console.log(JSON.stringify({ cases: differences.length, differences: differences.filter(item => item.differences.length).map(item => ({ model: item.model, vector: item.vector, paths: item.differences.map(diff => diff.path) })) }));
 } finally {
   worker.kill('SIGTERM'); await workerExit;

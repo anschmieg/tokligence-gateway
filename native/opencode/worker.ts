@@ -5,7 +5,7 @@ import { Database as SqliteDatabase } from "bun:sqlite"
 import path from "node:path"
 import { createHash, timingSafeEqual, randomUUID } from "node:crypto"
 import { Effect, Stream, Layer, Schema, Cause, Exit } from "effect"
-import { LLMClient, LanguageModel, Message, ToolDefinition, type ToolChoice } from "@opencode/ai"
+import { LLMClient, Message, ToolDefinition, type ToolChoice } from "@opencode/ai"
 import { EmbeddedHost } from "./internal/host"
 import { LocationServiceMap } from "@opencode/core/location-services"
 import { Location } from "@opencode/core/location"
@@ -50,7 +50,6 @@ function nativeCauseError(cause: Cause.Cause<unknown>, signal: AbortSignal) {
 function errorCode(error: unknown) { return error && typeof error === "object" && "code" in error ? error.code : undefined }
 type BridgeInput = {
   model: string; stream: boolean; includeUsage: boolean; system: Array<{ text: string }>
-  leadingSystem: Array<ConstructorParameters<typeof Message>[0]>
   messages: Array<ConstructorParameters<typeof Message>[0]>
   tools: Array<ToolDefinition.Input>; toolChoice?: ToolChoice.Input; options: Readonly<Record<string, unknown>>
 }
@@ -255,11 +254,11 @@ async function inference(request: Request) {
         const prepare = yield* SessionModelRequest.Service
         const prepared = yield* prepare.external({
           session, agent: Agent.ID.make("build"),
-          // Match the working 1.18 OpenAI-compatible tool encoding through
-          // native model compatibility, without rewriting serialized HTTP.
-          model: { ...model, model: LanguageModel.update(model.model, { compatibility: { ...model.model.compatibility, supportsStrictMode: false, legacyMessageStructure: true } }) },
-          system: [],
-          messages: [...input.leadingSystem, ...input.messages].map((message) => Message.make(message)),
+          // Preserve the resolved native 2.x compiler and server compatibility.
+          // Caller-owned context does not require emulating the old 1.18 wire format.
+          model,
+          system: input.system.map((part) => ({ type: "text" as const, text: part.text })),
+          messages: input.messages.map((message) => Message.make(message)),
           tools: { definitions: input.tools.map((tool) => ToolDefinition.make(tool)), execute: () => Effect.die("External tools must never execute in the native worker") },
           toolChoice: input.toolChoice, options: input.options,
         })

@@ -144,6 +144,25 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
     assert.equal(captures[0].body.max_completion_tokens, undefined);
     assert.deepEqual(captures[0].body.messages, messages);
     assert.equal(captures[0].body.tools[0].function.name, 'read_file');
+    const nativeCases = [
+      {
+        messages: [{ role: 'system', content: 'native system' }, { role: 'user', content: [{ type: 'text', text: 'one' }, { type: 'text', text: 'two' }] }],
+        expected: [{ role: 'system', content: 'native system' }, { role: 'user', content: 'onetwo' }],
+      },
+      {
+        messages: [{ role: 'user', content: 'before' }, { role: 'assistant', content: '' }, { role: 'user', content: 'continue' }],
+        expected: [{ role: 'user', content: 'before' }, { role: 'user', content: 'continue' }],
+      },
+      {
+        messages: [{ role: 'user', content: 'before' }, { role: 'system', content: 'updated instruction' }, { role: 'user', content: 'continue' }],
+        expected: [{ role: 'user', content: 'before\n<system-update>\nupdated instruction\n</system-update>' }, { role: 'user', content: 'continue' }],
+      },
+    ];
+    for (const vector of nativeCases) {
+      const result = await call({ messages: vector.messages, tools: [] });
+      assert.equal(result.status, 200, await result.clone().text()); await result.text();
+      assert.deepEqual(captures.at(-1).body.messages, vector.expected, 'worker retains native 2.x message lowering');
+    }
     const existingRegistry = await readRegistry();
     const disabledAfterSuccess = await call({ model: 'disabled-model' });
     assert.equal(disabledAfterSuccess.status, 400);
@@ -165,6 +184,7 @@ test('pinned OpenCode runtime: exact prompts, native sessions, external tools an
     assert.match(stream, /native response/); assert.match(stream, /data: \[DONE\]/);
     assert.equal(captures.at(-1).body.messages.at(-1).content, 'second result');
     assert.equal(captures.at(-1).body.messages.find(message => message.role === 'assistant').reasoning_content, 'native reasoning to replay');
+    assert.equal(captures.at(-1).body.messages.find(message => message.role === 'assistant').content, null, 'native tool-only assistant has null content');
     for (const [failureMode, finish] of [['tools-length', 'length'], ['tools-filter', 'content_filter']]) {
       mode = failureMode;
       response = await call();

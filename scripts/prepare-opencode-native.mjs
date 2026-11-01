@@ -45,37 +45,12 @@ if (!requestSource.includes("readonly external:")) {
   await fs.writeFile(requestPath, requestSource);
 }
 
-// Bridge-only legacy Chat message structure. The opt-in compatibility flag
-// preserves caller roles/parts rather than changing the compiler's defaults.
-const optionsPath = path.join(destination, "packages/ai/src/schema/options.ts");
-let optionsSource = await fs.readFile(optionsPath, "utf8");
-if (!optionsSource.includes("legacyMessageStructure:")) {
-  const anchor = '  sanitizer: Schema.optional(LanguageModelSanitizerCompatibility),';
-  if (optionsSource.split(anchor).length !== 2) throw new Error("Pinned model compatibility schema changed");
-  optionsSource = optionsSource.replace(anchor, '  /** External bridge: preserve the 1.18 OpenAI-compatible message structure. */\n  legacyMessageStructure: Schema.optional(Schema.Boolean),\n' + anchor);
-  await fs.writeFile(optionsPath, optionsSource);
+// Keep the upstream 2.x compiler untouched. Re-preparing a prior bridge tree
+// also removes the retired 1.18 compatibility patch rather than retaining it.
+for (const relative of ["packages/ai/src/schema/options.ts", "packages/ai/src/protocols/openai-chat.ts"]) {
+  const original = execFileSync("tar", ["-xOf", archivePath, `opencode-${pin.version}/${relative}`]);
+  await fs.writeFile(path.join(destination, relative), original);
 }
-const chatPath = path.join(destination, "packages/ai/src/protocols/openai-chat.ts");
-let chatSource = await fs.readFile(chatPath, "utf8");
-const chatReplacements = [
-    ['    name: Schema.String,\n    description: Schema.String,\n    parameters: JsonObject,', '    name: Schema.String,\n    description: Schema.optional(Schema.String),\n    parameters: JsonObject,'],
-    ['interface LoweringOptions {', 'interface LoweringOptions {\n  readonly legacyMessageStructure?: boolean'],
-    ['    description: tool.description,', '    description: options.legacyMessageStructure && tool.metadata?.tokligenceOmitDescription === true ? undefined : tool.description,'],
-    ['  if (content.every((part) => part.type === "text" && part.cache_control === undefined))', '  if ((!options.legacyMessageStructure || content.length === 1) && content.every((part) => part.type === "text" && part.cache_control === undefined))'],
-    ['      if (content.length === 0 && toolCalls.length > 0) return null', '      if (!options.legacyMessageStructure && content.length === 0 && toolCalls.length > 0) return null'],
-    ['  const lowering = {\n    ...options,\n    providerMetadataKey: request.model.route.providerMetadataKey ?? request.model.provider,', '  const lowering = {\n    ...options,\n    legacyMessageStructure: request.model.compatibility?.legacyMessageStructure,\n    providerMetadataKey: request.model.route.providerMetadataKey ?? request.model.provider,'],
-    ['    if (message.role === "system") {\n      const part = yield* ProviderShared.wrappedSystemUpdate', '    if (message.role === "system" && request.model.compatibility?.legacyMessageStructure) {\n      const parts = yield* ProviderShared.systemUpdateText("OpenAI Chat", message)\n      messages.push({ role: "system", content: parts.map((part) => part.text).join("") })\n      continue\n    }\n    if (message.role === "system") {\n      const part = yield* ProviderShared.wrappedSystemUpdate'],
-    ['      message.role === "assistant" &&\n      message.content.every', '      !request.model.compatibility?.legacyMessageStructure &&\n      message.role === "assistant" &&\n      message.content.every'],
-    ['  const lowering = { ...options, cacheControl: options.cacheControl ?? declaredCacheControl(request) }', '  const lowering = { ...options, legacyMessageStructure: request.model.compatibility?.legacyMessageStructure, cacheControl: options.cacheControl ?? declaredCacheControl(request) }'],
-    ['        ? hasHistory\n          ? []', '        ? hasHistory && !request.model.compatibility?.legacyMessageStructure\n          ? []'],
-];
-for (const [before, after] of chatReplacements) {
-  if (chatSource.split(after).length === 2) continue;
-  if (chatSource.split(before).length !== 2) throw new Error("Pinned Chat structure seam changed: " + before.slice(0, 50));
-  chatSource = chatSource.replace(before, after);
-}
-for (const [, expected] of chatReplacements) if (chatSource.split(expected).length !== 2) throw new Error("Incomplete pinned Chat compatibility overlay");
-await fs.writeFile(chatPath, chatSource);
 for (const [source, target] of [["worker.ts", "tokligence-bridge.ts"], ["bridge-wire.mjs", "tokligence-bridge-wire.mjs"], ["state-store.mjs", "tokligence-state-store.mjs"], ["scoped-http.ts", "tokligence-scoped-http.ts"], ["source-overlay.mjs", "tokligence-source-overlay.mjs"]]) {
   await fs.copyFile(path.join(root, "native/opencode", source), path.join(destination, "packages/sdk/src", target));
 }

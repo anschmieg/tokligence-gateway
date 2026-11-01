@@ -20,7 +20,6 @@ test("native input preserves caller prompts, schemas, reasoning, call IDs and re
   assert.deepEqual(result.system.map((part) => part.text), ["First prompt", "Second prompt", "Third prompt"]);
   assert.deepEqual(result.tools[0].inputSchema, tool.function.parameters);
   assert.deepEqual(result.messages[1].content, [
-    { type: "text", text: "" },
     { type: "reasoning", text: "Returned reasoning" },
     { type: "tool-call", id: "caller_1", name: "lookup", input: { id: 7 } },
   ]);
@@ -206,4 +205,16 @@ test('final resolved authorization must match the declared native auth mode', ()
     assert.equal(wrapped.error.code, 'native_authorization_mode_mismatch');
     assert.doesNotMatch(JSON.stringify(wrapped), /synthetic-private|private-canary/);
   }
+});
+
+test('native history preserves JSON string code units for the native 2.x compiler', () => {
+  const result = decodeChatRequest({ model: 'beam-free', messages: [
+    { role: 'system', content: 'system\ud800' },
+    { role: 'user', content: 'hello\udfff 🌍' },
+    { role: 'assistant', content: 'answer\ud800', reasoning_content: 'thought\udfff' },
+    { role: 'user', content: 'continue' },
+  ] });
+  assert.equal(result.system[0].text, 'system\ud800');
+  assert.equal(result.messages[0].content[0].text, 'hello\udfff 🌍');
+  assert.equal(result.messages[1].content.find(part => part.type === 'reasoning').text, 'thought\udfff');
 });

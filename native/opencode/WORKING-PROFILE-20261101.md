@@ -101,3 +101,36 @@ Run Python with `-I` to prevent the old neighboring `inspect.py` helper from
 shadowing the standard-library module; the Python3.14 staging self-comparison
 passes in isolated mode. Regression tests include privacy, native ordering, scope
 mismatch, missing fields, database byte preservation and the shadowing case.
+
+## Scope confirmed and legacy compiler override removed
+
+The user ran the scope-only comparison: saved type OAuth, email/orgID/server all
+match staging. The user also upgraded2.0.32 to2.2.5 and successfully ran Beam again
+at09:41UTC. Neither a different saved organization nor a simple2.0-versus2.1
+version explanation is supported. Exact credential sessions and historical wire
+headers have not been compared; matching metadata does not prove token equality.
+
+Offline comparison found the bridge unnecessarily forced1.18 message structure
+and strict-tool behavior. Removed that compiler extension entirely: preparation
+restores the original pinned compiler/schema sources, including when upgrading
+an already prepared tree. Leading instructions now use native `system`; later
+system messages use native system-update handling. Removed the fabricated empty
+text part from tool-only assistant history. Native null content, tool schemas,
+empty historical tools list and blank-turn handling now apply. Removed the
+redundant bridge Unicode sanitizer; upstream `compileRequest` performs its own
+sanitization, including lone surrogate replacement.
+
+The replacement reference verifies the2.0.32 archive and imported AI/schema
+sources, frozen lock, effect version and Bun1.4.2. It uses actual upstream
+`compileRequest`, not direct `fromRequest` alone: the latter omits sanitization
+and schema projection. Eighty captured bridge bodies across four allowed model
+IDs match with explicit output-field/reasoning/store controls held equal. This
+is compiler evidence, not four live model successes or a complete2.2.5 harness
+comparison. The simple text case already matched under those controls before the
+fix, so these structural improvements do not establish the cause of its429.
+
+The same-version actual CLI OAuth fixture no longer normalizes away strict:false
+or tool-only null-versus-empty differences. These must now match directly.
+Explicit max_tokens budgeting and the external tool loop/context ownership are
+still declared integration differences. No live request was sent during this
+comparison, and no existing rejection/report/ledger/run ID was modified.

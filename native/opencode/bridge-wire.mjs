@@ -44,18 +44,15 @@ export function assertNativeAuthorization(mode, headers) {
 
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const fail = (message) => { throw new BridgeInputError(message); };
-// Match invalid-surrogate normalization observed in the working Bun1.3 JSON
-// input path. Valid Unicode, including surrogate pairs, is unchanged.
-const cleanText = value => value.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
 const textParts = (content) => {
   if (content == null) return [];
-  if (typeof content === "string") return [{ type: "text", text: cleanText(content) }];
+  if (typeof content === "string") return [{ type: "text", text: content }];
   if (!Array.isArray(content)) return fail("Message content must be text or an array of text parts");
   return content.map((part) => {
     if (!object(part) || part.type !== "text" || typeof part.text !== "string") {
       return fail("The experimental native bridge currently supports text and function tools only");
     }
-    return { type: "text", text: cleanText(part.text) };
+    return { type: "text", text: part.text };
   });
 };
 
@@ -138,7 +135,7 @@ export function decodeChatRequest(body) {
     const reasoning = message.reasoning_content ?? message.reasoning ?? undefined;
     if (reasoning !== undefined) {
       if (message.role !== "assistant" || typeof reasoning !== "string") return fail("reasoning_content is supported only as assistant text");
-      content.unshift({ type: "reasoning", text: cleanText(reasoning) });
+      content.unshift({ type: "reasoning", text: reasoning });
     }
     if (message.tool_calls !== undefined) {
       if (message.role !== "assistant" || !Array.isArray(message.tool_calls)) return fail("tool_calls must belong to an assistant message");
@@ -152,9 +149,6 @@ export function decodeChatRequest(body) {
         pending.add(call.id);
         content.push({ type: "tool-call", id: call.id, name: call.function.name, input });
       }
-      // The working 1.18 CLI's OpenAI-compatible compiler represents a
-      // tool-only assistant's visible content as "", rather than null.
-      if (message.tool_calls.length && !content.some(part => part.type === "text")) content.unshift({ type: "text", text: "" });
     }
     if (message.role === "tool") {
       const name = calls.get(message.tool_call_id);

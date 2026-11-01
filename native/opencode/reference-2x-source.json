@@ -1,0 +1,8 @@
+{
+  "version": "2.0.32",
+  "archive": "https://codeload.github.com/anomalyco/opencode/tar.gz/refs/tags/v2.0.32",
+  "sha256": "d9e080eae0965104dfe3857aabbc8ce976e9aeaa62110ce101bc1a107d243d97",
+  "bun": "1.4.2",
+  "compilerSha256": "5c2fa03e0878fdb3a9c72b0dc2bd13b5a224db138c543802fa06792bc936e87e",
+  "effectVersion": "4.0.1"
+}

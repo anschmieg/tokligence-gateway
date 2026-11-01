@@ -165,16 +165,6 @@ def compare(reference, candidate):
     if left.get('tools') == [] and 'tools' in left and 'tools' not in right:
         differences.append('intentional tool-free control override tools:[] versus native bridge omission')
         left.pop('tools')
-    assert len(left.get('tools', [])) == len(right.get('tools', []))
-    for a, b in zip(left.get('tools', []), right.get('tools', [])):
-        if a['function'].get('strict') is False and 'strict' not in b['function']:
-            a['function'].pop('strict')
-            if 'intentional bridge omission of native strict:false' not in differences:
-                differences.append('intentional bridge omission of native strict:false')
-    for a, b in zip(left['messages'], right['messages']):
-        if a.get('role') == b.get('role') == 'assistant' and a.get('tool_calls') and 'content' in a and a.get('content') is None and b.get('content') == '':
-            a['content'] = ''
-            differences.append('intentional legacy bridge empty text versus native null on tool-call assistant')
     assert left == right, 'Unclassified provider body difference: ' + str([key for key in set(left) | set(right) if left.get(key) != right.get(key)])
     volatile = {'b3', 'traceparent', 'x-opencode-session', 'x-opencode-session-id', 'x-session-affinity', 'x-session-id', 'content-length'}
     a, b = reference['headers'], candidate['headers']
