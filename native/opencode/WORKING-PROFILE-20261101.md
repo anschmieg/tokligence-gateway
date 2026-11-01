@@ -19,8 +19,9 @@ different Unix profile. No inference was requested by either inspection.
   `--version` output was not recognized. The successful session's version is
   evidence about that session, not proof of the current wrapper target's hash.
 - Staging has one active OAuth credential, with organization and Console-server
-  metadata present. The working profile's account/organization equality with
-  staging has not been established. Do not copy credentials to compare them.
+  metadata present. The user subsequently confirmed the working profile uses the same account
+  email as staging. Organization equality and specific Console credential
+  equivalence remain unverified. Do not copy credentials to compare them.
 
 ## Source-backed credential selection
 
@@ -87,3 +88,16 @@ identity before treating a rejection as evidence about gateway request parity.
 Do not solve this mismatch by importing the working user's credential or silently
 changing the staging auth mode. Existing offline/synthetic verification remains
 valid for its stated 2.1.4 scope; successful live acceptance remains incomplete.
+
+## Prepared scope-only comparison
+
+`compare-profile-scope.py` selects the saved connection using native active/newest
+ordering and reads only credential type plus email/orgID/server metadata. It
+reports equality booleans against staging metadata digests, never token fields or
+raw organization identifiers. Missing metadata is unknown, not a match. This is
+not evidence about a historical request header or wrapper/plugin overrides.
+
+Run Python with `-I` to prevent the old neighboring `inspect.py` helper from
+shadowing the standard-library module; the Python3.14 staging self-comparison
+passes in isolated mode. Regression tests include privacy, native ordering, scope
+mismatch, missing fields, database byte preservation and the shadowing case.
