@@ -22,7 +22,6 @@ func TestSecureBaseURLAllowsLoopbackHTTP(t *testing.T) {
 		"http://127.0.0.1:8080",
 		"http://localhost:3000",
 		"http://[::1]:9000",
-		"http://staging.localhost",
 	} {
 		if _, err := SecureBaseURL(raw); err != nil {
 			t.Errorf("SecureBaseURL(%q) must accept loopback: %v", raw, err)
@@ -33,6 +32,11 @@ func TestSecureBaseURLAllowsLoopbackHTTP(t *testing.T) {
 func TestSecureBaseURLRejectsPlaintextRemote(t *testing.T) {
 	for _, raw := range []string{
 		"http://api.cline.bot",
+		"http://staging.local",
+		"http://staging.localhost",
+		"https://user:SECRET@api.cline.bot",
+		"https://api.cline.bot?token=SECRET",
+		"https:///missing-host",
 		"http://10.0.0.5:8080",
 		"ftp://api.cline.bot",
 		"file:///etc/passwd",

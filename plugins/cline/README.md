@@ -126,7 +126,7 @@ performs any client-protocol translation itself.
   `/v1/models` and the per-auth model list, and `executor.execute` failing
   closed with the upstream classification (502) using the fake token —
   with zero host-callback-context rejections (`host_callback_id` forwarding
-  works). No real credentials, accounts, or live upstreams were involved.
+  works). No real credentials or accounts were involved. Parent review found the test configuration targeted https://api.cline.bot and logs record an upstream response: this was an unplanned external fake-token call, not a fully local test or successful provider acceptance. Do not repeat it. Subsequent integration fixtures must use literal loopback endpoints with external networking blocked.
 - Upstream host behavior (cooldown persistence, dispatch accounting, retry
   ceilings) is the host's responsibility and configured at the platform level
   per the gateway refactor plan; this plugin does not add a second owner for

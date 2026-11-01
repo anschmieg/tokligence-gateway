@@ -23,10 +23,13 @@ func SecureBaseURL(raw string) (string, error) {
 	}
 	parsed, err := url.Parse(trimmed)
 	if err != nil {
-		return "", fmt.Errorf("base URL %q is invalid: %w", raw, err)
+		return "", fmt.Errorf("base URL is invalid")
 	}
 	host := strings.ToLower(parsed.Hostname())
-	isLoopback := host == "localhost" || host == "127.0.0.1" || host == "::1" || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local")
+	isLoopback := host == "localhost" || host == "127.0.0.1" || host == "::1"
+	if host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("base URL must have a host and no credentials, query or fragment")
+	}
 	switch strings.ToLower(parsed.Scheme) {
 	case "https":
 		return strings.TrimRight(trimmed, "/"), nil
@@ -34,8 +37,8 @@ func SecureBaseURL(raw string) (string, error) {
 		if isLoopback {
 			return strings.TrimRight(trimmed, "/"), nil
 		}
-		return "", fmt.Errorf("base URL %q must use HTTPS (loopback http is allowed for isolated test deployments)", raw)
+		return "", fmt.Errorf("base URL must use HTTPS (literal loopback or localhost HTTP is allowed for isolated tests)")
 	default:
-		return "", fmt.Errorf("base URL %q must use http or https", raw)
+		return "", fmt.Errorf("base URL must use http or https")
 	}
 }
