@@ -83,6 +83,7 @@ BACKEND = sys.argv[2]
 PLUGIN = sys.argv[3]
 WORK = pathlib.Path(sys.argv[4])
 LIFECYCLE_ONLY = len(sys.argv) > 5 and sys.argv[5] == "true"
+TOOLS_ONLY = len(sys.argv) > 6 and sys.argv[6] == "true"
 
 BACKEND_PORT = 18080
 MOCK_PORT = 18081
@@ -169,6 +170,12 @@ class MockHandler(http.server.BaseHTTPRequestHandler):
         summary.setdefault("mock_models_seen", [])
         summary["mock_models_seen"].append(upstream_model)
 
+        if req.get("tools") and req.get("tool_choice") == "required":
+            summary["tools_declared"] = sorted(t.get("function", {}).get("name", "") for t in req["tools"])
+        tool_messages = [m for m in req.get("messages", []) if m.get("role") == "tool"]
+        if tool_messages:
+            summary["tool_results_observed"] = sorted((m.get("tool_call_id"), m.get("content")) for m in tool_messages)
+            summary["tool_calls_replayed"] = next((m.get("tool_calls") for m in req["messages"] if m.get("role") == "assistant" and m.get("tool_calls")), [])
         if wants_stream:
             # Realistic OpenAI-chat SSE: role, text, reasoning, finish+usage, DONE.
             frames = [
@@ -186,6 +193,23 @@ class MockHandler(http.server.BaseHTTPRequestHandler):
                  "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
                  "usage": {"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5}},
             ]
+            if req.get("tool_choice") == "required":
+                frames = [
+                    {"id":"chatcmpl-tools","object":"chat.completion.chunk","model":upstream_model,
+                     "choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[
+                         {"index":0,"id":"call_a","type":"function","function":{"name":"lookup","arguments":"{\"key\":"}},
+                         {"index":1,"id":"call_b","type":"function","function":{"name":"lookup","arguments":"{\"key\":"}}
+                     ]}}]},
+                    {"id":"chatcmpl-tools","object":"chat.completion.chunk","model":upstream_model,
+                     "choices":[{"index":0,"delta":{"tool_calls":[
+                         {"index":1,"function":{"arguments":"\"b\"}"}},
+                         {"index":0,"function":{"arguments":"\"a\"}"}}
+                     ]}}]},
+                    {"id":"chatcmpl-tools","object":"chat.completion.chunk","model":upstream_model,
+                     "choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]},
+                    {"id":"chatcmpl-tools","object":"chat.completion.chunk","model":upstream_model,
+                     "choices":[],"usage":{"prompt_tokens":5,"completion_tokens":10,"total_tokens":15}},
+                ]
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Transfer-Encoding", "chunked")
@@ -415,7 +439,39 @@ def assistant_blocks_from_sse(text):
             for kind, field in (("thinking_delta", "thinking"), ("text_delta", "text"), ("signature_delta", "signature")):
                 if delta.get("type") == kind:
                     block[field] = block.get(field, "") + delta[field]
+            if delta.get("type") == "input_json_delta":
+                block["_input_json"] = block.get("_input_json", "") + delta["partial_json"]
+    for block in blocks.values():
+        if "_input_json" in block:
+            block["input"] = json.loads(block.pop("_input_json"))
     return [blocks[index] for index in sorted(blocks)]
+
+def tools_check(headers):
+    before = summary["mock"]["chat_completions_dispatches"]
+    user = {"role":"user", "content":"run two independent lookups"}
+    definition = {"name":"lookup", "description":"fixture lookup", "input_schema":{"type":"object","properties":{"key":{"type":"string"}},"required":["key"]}}
+    status, body = post_stream("/v1/messages", {
+        "model":MODEL_ID,"max_tokens":128,"stream":True,"tools":[definition],
+        "tool_choice":{"type":"any"},"messages":[user],
+    }, headers)
+    (WORK / "tool-response.sse").write_bytes(body)
+    blocks = assistant_blocks_from_sse(body.decode()) if status == 200 else []
+    calls = [b for b in blocks if b.get("type") == "tool_use"]
+    assert status == 200 and sorted((b["id"], b["name"], b["input"]["key"]) for b in calls) == [("call_a","lookup","a"),("call_b","lookup","b")], "parallel tool response lost identity/arguments"
+    assert '"stop_reason":"tool_use"' in body.decode().replace(" ",""), "tool terminal lost"
+    assert summary.get("tools_declared") == ["lookup"], "tool schema/choice did not reach provider"
+    status, body = post_json("/v1/messages", {
+        "model":MODEL_ID,"max_tokens":128,"stream":False,"tools":[definition],
+        "messages":[user,{"role":"assistant","content":blocks},
+                    {"role":"user","content":[{"type":"tool_result","tool_use_id":b["id"],"content":"result-"+b["input"]["key"]} for b in calls]}],
+    },headers)
+    assert status == 200 and json.loads(body).get("type") == "message", "tool continuation failed"
+    assert summary.get("tool_results_observed") == [("call_a","result-a"),("call_b","result-b")], "tool results lost or reassigned"
+    replayed = summary.get("tool_calls_replayed", [])
+    assert sorted((c["id"],c["function"]["name"],json.loads(c["function"]["arguments"])["key"]) for c in replayed) == [("call_a","lookup","a"),("call_b","lookup","b")], "tool calls lost on continuation"
+    assert summary["mock"]["chat_completions_dispatches"] == before+2, "tool fixture dispatch count mismatch"
+    return {"parallel_calls":2,"tool_results":2,"continuation":True}
+
 
 def lifecycle_check(session_state):
     endpoint = "http://127.0.0.1:%d/v8/management/config/plugins/configs/opencode/enabled" % BACKEND_PORT
@@ -586,7 +642,12 @@ def run_profile(work, profile, shape):
         # response data, then verify it reaches the next upstream assistant.
         if LIFECYCLE_ONLY and buffered_ok and stream_ok:
             summary["lifecycle"] = lifecycle_check(session_state)
-        if not LIFECYCLE_ONLY and stream_ok and "smoke-reasoning" in text and "thinking_delta" in text:
+        if TOOLS_ONLY and buffered_ok and stream_ok:
+            summary["tools"] = tools_check(chat_headers)
+            entries = json.loads(session_state.read_text())["entries"]
+            assert len(entries) == 1 and entries[0]["state"] == "idle" and entries[0]["leases"] == 0, "tool conversation leaked or split session ownership"
+            summary["tools"]["single_idle_session"] = True
+        if not LIFECYCLE_ONLY and not TOOLS_ONLY and stream_ok and "smoke-reasoning" in text and "thinking_delta" in text:
             replay_before = summary["mock"]["chat_completions_dispatches"]
             summary["reasoning_replay"]["attempted"] = True
             replay_status, replay_body = post_json("/v1/messages", {
@@ -625,6 +686,8 @@ def reset_profile_state():
     summary["blocker"] = ""
     summary.pop("mock_models_seen", None)
     summary.pop("lifecycle", None)
+    for key in ("tools", "tools_declared", "tool_results_observed", "tool_calls_replayed"):
+        summary.pop(key, None)
 
 
 def write_summary(report):
@@ -683,7 +746,10 @@ def main():
     parser.add_argument("--output", required=True,
                         help="Fresh empty directory for private artifacts")
     parser.add_argument("--lifecycle-only",action="store_true",help="Verify unload/reinit; reasoning continuation remains explicitly untested")
+    parser.add_argument("--tools-only",action="store_true",help="Verify parallel tools and results; reasoning continuation remains untested")
     args = parser.parse_args()
+    if args.lifecycle_only and args.tools_only:
+        parser.error("choose only one targeted mode")
 
     if shutil.which("bwrap") is None:
         parser.error("bubblewrap (bwrap) is required; there is no unsandboxed fallback")
@@ -735,6 +801,7 @@ def main():
         "/usr/bin/python3", "/" + FIXTURE_NAME,
         ns_token, "/backend", "/plugin.so", "/work",
         "true" if args.lifecycle_only else "false",
+        "true" if args.tools_only else "false",
     ]
 
     child = subprocess.Popen(command, start_new_session=True)
@@ -792,9 +859,11 @@ def main():
     mock_env = enveloped["mock"]
     if args.lifecycle_only and not enveloped["state"].get("lifecycle",{}).get("session_ids_preserved"):
         failures.append("enveloped: unload/reinitialization lifecycle not verified")
-    if not args.lifecycle_only and not enveloped["state"]["reasoning_replay"].get("ok"):
+    if not args.lifecycle_only and not args.tools_only and not enveloped["state"]["reasoning_replay"].get("ok"):
         failures.append("enveloped: reasoning-bearing continuation was not verified")
-    expected_dispatches = 2 if args.lifecycle_only else 3
+    if args.tools_only and not enveloped["state"].get("tools",{}).get("continuation"):
+        failures.append("enveloped: parallel tool continuation not verified")
+    expected_dispatches = 4 if args.tools_only else 2 if args.lifecycle_only else 3
     if mock_env.get("chat_completions_dispatches") != expected_dispatches:
         failures.append("enveloped: physical mock dispatches = %r, want exactly %d "
                         "(one per caller call; the plugin forces stream:true upstream)"
@@ -815,8 +884,8 @@ def main():
         failures.append("raw_native: dispatch was attempted despite zero publication")
 
     verdict = {
-        "scope": "lifecycle-only" if args.lifecycle_only else "reasoning-continuation",
-        "reasoning_replay": "untested" if args.lifecycle_only else "verified" if enveloped["state"]["reasoning_replay"].get("ok") else "failed",
+        "scope": "tools-only" if args.tools_only else "lifecycle-only" if args.lifecycle_only else "reasoning-continuation",
+        "reasoning_replay": "untested" if args.lifecycle_only or args.tools_only else "verified" if enveloped["state"]["reasoning_replay"].get("ok") else "failed",
         "outer_net_ns": ns_token,
         "failures": failures,
         "verdict": "pass" if not failures else "fail",

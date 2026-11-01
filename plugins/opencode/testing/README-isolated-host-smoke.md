@@ -65,3 +65,13 @@ while the backend remains running and durable session identity after reload.
 Its verdict explicitly marks reasoning replay **untested**, never verified.
 `/tmp/opencode-host-lifecycle-20261101-a` passed this targeted mode; shutdown
 unit tests additionally cover active-pump and synchronous-request draining.
+
+Targeted `--tools-only` verifies two parallel lookup calls with interleaved
+argument fragments, translated through the actual Messages endpoint. It feeds
+back the returned assistant blocks and matching tool results, checks the mock
+receives both original IDs/names/arguments/results, and requires one idle
+registry session with zero leases afterward. Four mock requests total (the
+two basic calls plus tool call/continuation); no real tool execution or file
+access. Reasoning replay remains explicitly untested in this mode.
+`/tmp/opencode-host-tools-20261101-a` passed the round trip; its persisted
+registry also contains exactly one idle entry with zero leases.
