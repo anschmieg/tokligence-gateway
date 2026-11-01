@@ -65,6 +65,7 @@ is a freshly mounted procfs. Everything this fixture writes goes under /work.
 The fixture prints nothing on success; all evidence goes to /work/summary.json.
 """
 import http.server
+import fcntl
 import json
 import os
 import pathlib
@@ -81,6 +82,7 @@ OUTER_NS_NET = sys.argv[1]
 BACKEND = sys.argv[2]
 PLUGIN = sys.argv[3]
 WORK = pathlib.Path(sys.argv[4])
+LIFECYCLE_ONLY = len(sys.argv) > 5 and sys.argv[5] == "true"
 
 BACKEND_PORT = 18080
 MOCK_PORT = 18081
@@ -415,6 +417,55 @@ def assistant_blocks_from_sse(text):
                     block[field] = block.get(field, "") + delta[field]
     return [blocks[index] for index in sorted(blocks)]
 
+def lifecycle_check(session_state):
+    endpoint = "http://127.0.0.1:%d/v8/management/config/plugins/configs/opencode/enabled" % BACKEND_PORT
+    management_headers = {"Authorization": "Bearer fake-management-only"}
+    def toggle(enabled):
+        with urllib.request.urlopen(urllib.request.Request(endpoint, headers=management_headers), timeout=3) as response:
+            etag = response.headers.get("ETag")
+        if not etag:
+            raise RuntimeError("native management did not expose ETag")
+        req = urllib.request.Request(endpoint, data=json.dumps(enabled).encode(), method="PUT",
+            headers={**management_headers, "Content-Type":"application/json", "If-Match":etag})
+        with urllib.request.urlopen(req, timeout=3) as response:
+            if response.status != 200:
+                raise RuntimeError("native plugin toggle failed")
+    before = json.loads(session_state.read_text())
+    before_ids = sorted(entry["session_id"] for entry in before["entries"])
+    if not before_ids:
+        raise RuntimeError("lifecycle fixture has no durable identity")
+    toggle(False)
+    released = False
+    deadline = time.monotonic()+3
+    while time.monotonic()<deadline:
+        try:
+            with pathlib.Path(str(session_state)+".lock").open("r+") as lock:
+                fcntl.flock(lock.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
+                released = True
+                break
+        except BlockingIOError:
+            time.sleep(0.05)
+    if not released:
+        raise RuntimeError("plugin unload retained registry ownership")
+    toggle(True)
+    ready = False
+    deadline = time.monotonic()+3
+    while time.monotonic()<deadline:
+        req = urllib.request.Request("http://127.0.0.1:%d/v1/models" % BACKEND_PORT,
+            headers={"Authorization":"Bearer "+CALLER_KEY})
+        with urllib.request.urlopen(req,timeout=3) as response:
+            data = json.load(response)
+        if any(model.get("id")==MODEL_ID for model in data.get("data",[])):
+            ready=True
+            break
+        time.sleep(0.05)
+    if not ready:
+        raise RuntimeError("plugin reinitialization failed")
+    after = json.loads(session_state.read_text())
+    if sorted(entry["session_id"] for entry in after["entries"]) != before_ids:
+        raise RuntimeError("plugin reinitialization changed durable identity")
+    return {"registry_lock_released":True,"reinitialized":True,"session_ids_preserved":True}
+
 
 def run_profile(work, profile, shape):
     summary["profile"] = profile
@@ -533,7 +584,9 @@ def run_profile(work, profile, shape):
             summary["stream"]["detail"] = "status=%s body=%s" % (status, sanitize_error(body))
         # Independent custom continuation: require actual reasoning-bearing
         # response data, then verify it reaches the next upstream assistant.
-        if stream_ok and "smoke-reasoning" in text and "thinking_delta" in text:
+        if LIFECYCLE_ONLY and buffered_ok and stream_ok:
+            summary["lifecycle"] = lifecycle_check(session_state)
+        if not LIFECYCLE_ONLY and stream_ok and "smoke-reasoning" in text and "thinking_delta" in text:
             replay_before = summary["mock"]["chat_completions_dispatches"]
             summary["reasoning_replay"]["attempted"] = True
             replay_status, replay_body = post_json("/v1/messages", {
@@ -571,6 +624,7 @@ def reset_profile_state():
     summary["blocked"] = False
     summary["blocker"] = ""
     summary.pop("mock_models_seen", None)
+    summary.pop("lifecycle", None)
 
 
 def write_summary(report):
@@ -628,6 +682,7 @@ def main():
                         help="Built opencode plugin shared object (opencode.so)")
     parser.add_argument("--output", required=True,
                         help="Fresh empty directory for private artifacts")
+    parser.add_argument("--lifecycle-only",action="store_true",help="Verify unload/reinit; reasoning continuation remains explicitly untested")
     args = parser.parse_args()
 
     if shutil.which("bwrap") is None:
@@ -679,6 +734,7 @@ def main():
         "--",
         "/usr/bin/python3", "/" + FIXTURE_NAME,
         ns_token, "/backend", "/plugin.so", "/work",
+        "true" if args.lifecycle_only else "false",
     ]
 
     child = subprocess.Popen(command, start_new_session=True)
@@ -734,12 +790,15 @@ def main():
         failures.append("enveloped: anthropic stream failed (%s)"
                         % enveloped["state"]["stream"].get("detail"))
     mock_env = enveloped["mock"]
-    if not enveloped["state"]["reasoning_replay"].get("ok"):
+    if args.lifecycle_only and not enveloped["state"].get("lifecycle",{}).get("session_ids_preserved"):
+        failures.append("enveloped: unload/reinitialization lifecycle not verified")
+    if not args.lifecycle_only and not enveloped["state"]["reasoning_replay"].get("ok"):
         failures.append("enveloped: reasoning-bearing continuation was not verified")
-    if mock_env.get("chat_completions_dispatches") != 3:
-        failures.append("enveloped: physical mock dispatches = %r, want exactly 3 "
+    expected_dispatches = 2 if args.lifecycle_only else 3
+    if mock_env.get("chat_completions_dispatches") != expected_dispatches:
+        failures.append("enveloped: physical mock dispatches = %r, want exactly %d "
                         "(one per caller call; the plugin forces stream:true upstream)"
-                        % mock_env.get("chat_completions_dispatches"))
+                        % (mock_env.get("chat_completions_dispatches"), expected_dispatches))
     auth_seen = mock_env.get("last_authorization") or ""
     if "fake-access-token" not in auth_seen:
         failures.append("enveloped: mock never saw the fake bearer token (got %r)" % auth_seen[:40])
@@ -756,6 +815,8 @@ def main():
         failures.append("raw_native: dispatch was attempted despite zero publication")
 
     verdict = {
+        "scope": "lifecycle-only" if args.lifecycle_only else "reasoning-continuation",
+        "reasoning_replay": "untested" if args.lifecycle_only else "verified" if enveloped["state"]["reasoning_replay"].get("ok") else "failed",
         "outer_net_ns": ns_token,
         "failures": failures,
         "verdict": "pass" if not failures else "fail",
@@ -763,6 +824,8 @@ def main():
     (output / "verdict.json").write_text(json.dumps(verdict, indent=2, sort_keys=True) + "\n")
     # Sanitized stdout: verdict summary only; never secrets or artifact bodies.
     print(json.dumps({"verdict": verdict["verdict"],
+                      "scope": verdict["scope"],
+                      "reasoning_replay": verdict["reasoning_replay"],
                       "failures": failures,
                       "artifacts": str(summary_path)}))
     raise SystemExit(0 if not failures else 1)

@@ -155,13 +155,44 @@ type NowMs func() int64
 // Handler dispatches plugin RPC methods. Transport is injected so tests
 // drive refresh and dispatch with fakes and no network.
 type Handler struct {
-	mu            sync.RWMutex
-	activeStreams atomic.Int64
-	transport     Transport
-	nowMs         NowMs
-	cfg           PluginConfig
-	catalog       []RegisteredModel
-	registry      *SessionRegistry
+	mu                sync.RWMutex
+	activeStreams     atomic.Int64
+	shutdownRequested atomic.Bool
+	shutdownComplete  atomic.Bool
+	transport         Transport
+	nowMs             NowMs
+	cfg               PluginConfig
+	catalog           []RegisteredModel
+	registry          *SessionRegistry
+}
+
+// The host closes HTTP callback resources BEFORE plugin shutdown (pinned
+// host.go). Drain synchronous calls; let cancelled async pumps persist their
+// lease releases before relinquishing the descriptor lock. Never unlink it.
+func (h *Handler) Shutdown() {
+	h.shutdownRequested.Store(true)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.closeIfDrainedLocked()
+}
+
+func (h *Handler) ShutdownComplete() bool { return h.shutdownComplete.Load() }
+
+func (h *Handler) closeIfDrainedLocked() {
+	if h.shutdownRequested.Load() && h.activeStreams.Load() == 0 {
+		if h.registry != nil {
+			h.registry.Close()
+		}
+		h.shutdownComplete.Store(true)
+	}
+}
+
+func (h *Handler) streamFinished() {
+	if h.activeStreams.Add(-1) == 0 && h.shutdownRequested.Load() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		h.closeIfDrainedLocked()
+	}
 }
 
 // NewHandler builds a handler with the given transport and clock. The
@@ -180,6 +211,9 @@ func NewHandler(transport Transport, nowMs NowMs) *Handler {
 func (h *Handler) AttachRegistry(registry *SessionRegistry) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.shutdownRequested.Load() {
+		return withStatus(503, fmt.Errorf("opencode plugin is shutting down"))
+	}
 	if h.activeStreams.Load() != 0 {
 		return withStatus(409, fmt.Errorf("opencode streams are active"))
 	}
@@ -196,6 +230,9 @@ func (h *Handler) AttachRegistry(registry *SessionRegistry) error {
 // Configure applies the plugin configuration subtree. A configured
 // session_state_path upgrades the registry to persistent form.
 func (h *Handler) Configure(raw []byte) error {
+	if h.shutdownRequested.Load() {
+		return withStatus(503, fmt.Errorf("opencode plugin is shutting down"))
+	}
 	cfg, err := DecodeConfig(raw)
 	if err != nil {
 		return err
@@ -223,6 +260,9 @@ func (h *Handler) Configure(raw []byte) error {
 		return withStatus(409, fmt.Errorf("opencode requests are active; retry configuration when idle"))
 	}
 	defer h.mu.Unlock()
+	if h.shutdownRequested.Load() {
+		return withStatus(503, fmt.Errorf("opencode plugin is shutting down"))
+	}
 	if h.activeStreams.Load() != 0 {
 		return withStatus(409, fmt.Errorf("opencode streams are active; retry configuration when idle"))
 	}
@@ -267,9 +307,15 @@ func (h *Handler) Registration(schemaVersion uint32) RegistrationResponse {
 // HandleMethod dispatches one plugin RPC method. It returns the
 // envelope-ready result payload. An error carries an HTTP status when known.
 func (h *Handler) HandleMethod(method string, request []byte) ([]byte, error) {
+	if h.shutdownRequested.Load() {
+		return nil, withStatus(503, fmt.Errorf("opencode plugin is shutting down"))
+	}
 	if method != "plugin.register" && method != "plugin.reconfigure" {
 		h.mu.RLock()
 		defer h.mu.RUnlock()
+		if h.shutdownRequested.Load() {
+			return nil, withStatus(503, fmt.Errorf("opencode plugin is shutting down"))
+		}
 	}
 	switch method {
 	case "plugin.register", "plugin.reconfigure":
@@ -625,7 +671,7 @@ func (h *Handler) handleExecuteStream(req ExecutorRequest, endpoint string, head
 	// (rpc_client_stream.go keeps callbacks alive until the stream ends).
 	h.activeStreams.Add(1)
 	go func() {
-		defer h.activeStreams.Add(-1)
+		defer h.streamFinished()
 		defer h.transport.CloseStream(result)
 		defer func() {
 			if recovered := recover(); recovered != nil {

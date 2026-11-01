@@ -62,6 +62,7 @@ import "C"
 
 import (
 	"encoding/json"
+	"sync"
 	"unsafe"
 
 	opencode "github.com/tokligence/gateway/plugins/opencode"
@@ -118,6 +119,8 @@ type hostCallError struct{ method string }
 func (e *hostCallError) Error() string { return "host callback " + e.method + " failed" }
 
 var handler = opencode.NewHandler(opencode.NewHostBridge(callHost), nil)
+var handlerMu sync.Mutex
+var initialized bool
 
 func init() {
 	// Bind the plugin stream bridge used by the streaming executor path.
@@ -156,6 +159,17 @@ func cliproxy_plugin_init(host *C.cliproxy_host_api, plugin *C.cliproxy_plugin_a
 	if plugin == nil {
 		return 1
 	}
+	handlerMu.Lock()
+	defer handlerMu.Unlock()
+	// The pinned loader can reuse a resident image after shutdown. Do not
+	// overwrite its host callback pointer while any old pump still owns work.
+	if initialized {
+		if !handler.ShutdownComplete() {
+			return 1
+		}
+		handler = opencode.NewHandler(opencode.NewHostBridge(callHost), nil)
+	}
+	initialized = true
 	C.store_host_api(host)
 	plugin.abi_version = C.uint32_t(abiVersion)
 	plugin.call = C.cliproxy_plugin_call_fn(C.cliproxyPluginCall)
@@ -178,7 +192,10 @@ func cliproxyPluginCall(method *C.char, request *C.uint8_t, requestLen C.size_t,
 	if request != nil && requestLen > 0 {
 		payload = C.GoBytes(unsafe.Pointer(request), C.int(requestLen))
 	}
-	result, err := handler.HandleMethod(C.GoString(method), payload)
+	handlerMu.Lock()
+	current := handler
+	handlerMu.Unlock()
+	result, err := current.HandleMethod(C.GoString(method), payload)
 	if err != nil {
 		writeResponse(response, opencode.ErrorEnvelope(err))
 		return 1
@@ -196,7 +213,12 @@ func cliproxyPluginFree(ptr unsafe.Pointer, length C.size_t) {
 }
 
 //export cliproxyPluginShutdown
-func cliproxyPluginShutdown() {}
+func cliproxyPluginShutdown() {
+	handlerMu.Lock()
+	current := handler
+	handlerMu.Unlock()
+	current.Shutdown()
+}
 
 type staticError struct {
 	code    string

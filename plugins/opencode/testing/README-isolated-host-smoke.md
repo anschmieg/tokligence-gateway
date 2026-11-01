@@ -57,3 +57,11 @@ Parent evidence November1:
 No actual Claude Code client, tools, long response, live quota or universal
 native-harness parity is claimed from these cases. Incoming session headers are
 conversation references; the plugin now always uses its caller-scoped registry.
+
+Targeted unload/reinitialization mode adds `--lifecycle-only`. It makes only
+its two basic mock calls, then disables and re-enables the plugin through the
+native management API with `If-Match`. It verifies descriptor-lock release
+while the backend remains running and durable session identity after reload.
+Its verdict explicitly marks reasoning replay **untested**, never verified.
+`/tmp/opencode-host-lifecycle-20261101-a` passed this targeted mode; shutdown
+unit tests additionally cover active-pump and synchronous-request draining.
