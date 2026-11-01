@@ -40,7 +40,7 @@ var upstreamRequestIDHeaders = []string{"x-opencode-log-id", "x-request-id", "re
 // so arbitrary header junk never enters diagnostics.
 func UpstreamRequestID(headers map[string][]string, body []byte) string {
 	for _, name := range upstreamRequestIDHeaders {
-		for _, value := range headers[name] {
+		for _, value := range responseHeaderValues(headers, name) {
 			trimmed := strings.TrimSpace(value)
 			if upstreamRequestIDCharset.MatchString(trimmed) {
 				return trimmed
@@ -65,6 +65,15 @@ func UpstreamRequestID(headers map[string][]string, body []byte) string {
 		}
 	}
 	return ""
+}
+
+func responseHeaderValues(headers map[string][]string, name string) []string {
+	for key, values := range headers {
+		if strings.EqualFold(key, name) {
+			return values
+		}
+	}
+	return nil
 }
 
 // ParseRetryAfterSeconds extracts upstream retry guidance from the Retry-After
@@ -207,6 +216,9 @@ func (r *Rejection) statusError() *statusError {
 	message := r.Message
 	if message == "" {
 		message = r.Error()
+	}
+	if r.RequestID != "" {
+		message += " (request_id=" + r.RequestID + ")"
 	}
 	return &statusError{
 		status:      r.StatusCode,

@@ -22,6 +22,9 @@ func TestHandlerForwardsCallbackIDForAllHTTPPaths(t *testing.T) {
 						return []byte(`{"status_code":429,"stream_id":"rejected-stream"}`), nil
 					}
 					body := []byte(`{"ok":true}`)
+					if method == "executor.execute" {
+						body = []byte(fixtureTextSSE)
+					}
 					if method == "auth.refresh" {
 						body = []byte(`{"access_token":"fake-new","refresh_token":"fake-refresh","expires_in":3600}`)
 					}

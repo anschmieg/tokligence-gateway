@@ -592,9 +592,13 @@ func (h *Handler) handleExecute(request []byte, stream bool) ([]byte, error) {
 		if result.StatusCode < 200 || result.StatusCode >= 300 {
 			return nil, withStatus(502, fmt.Errorf("opencode upstream returned HTTP %d", result.StatusCode))
 		}
+		response, err := CollectOpenCodeSSE(result.Body, result.Headers)
+		if err != nil {
+			return nil, err
+		}
 		return okEnvelope(ExecutorResponse{
-			Payload: result.Body,
-			Headers: map[string][]string{"content-type": {"text/event-stream"}},
+			Payload: response,
+			Headers: map[string][]string{"content-type": {"application/json"}},
 		})
 	}
 	response, err := h.handleExecuteStream(req, endpoint, headers, payload, release)
@@ -633,6 +637,7 @@ func (h *Handler) handleExecuteStream(req ExecutorRequest, endpoint string, head
 	h.activeStreams.Add(1)
 	go func() {
 		defer h.activeStreams.Add(-1)
+		defer h.transport.CloseStream(result)
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				closeStreamWithError(req.StreamID, fmt.Errorf("opencode stream relay panic: %v", recovered))
@@ -641,19 +646,8 @@ func (h *Handler) handleExecuteStream(req ExecutorRequest, endpoint string, head
 				release()
 			}
 		}()
-		for chunk := range result.Chunks {
-			if chunk.Err != nil {
-				closeStreamWithError(req.StreamID, fmt.Errorf("opencode upstream stream failed: %v", chunk.Err))
-				h.transport.CloseStream(result)
-				return
-			}
-			if err := emitStreamChunk(req.StreamID, chunk.Payload); err != nil {
-				closeStreamWithError(req.StreamID, err)
-				h.transport.CloseStream(result)
-				return
-			}
-		}
-		h.transport.CloseStream(result)
+		err := RelayOpenCodeSSE(result.Chunks, result.Headers, func(frame []byte) error { return emitStreamChunk(req.StreamID, frame) })
+		closeStreamWithError(req.StreamID, err) // nil is the successful close
 	}()
 	return okEnvelope(map[string]any{
 		"headers": map[string][]string{"content-type": {"text/event-stream"}},

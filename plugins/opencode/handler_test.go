@@ -463,7 +463,7 @@ func TestExecuteFailsClosedBeforeDispatch(t *testing.T) {
 	// the registry's key: the request resolves a persistent provider session
 	// and dispatches with the minted identity.
 	doResult := transport.doResult
-	transport.doResult = HTTPResult{StatusCode: 200, Body: []byte("data: {}\n\n")}
+	transport.doResult = HTTPResult{StatusCode: 200, Body: []byte(fixtureTextSSE)}
 	if _, err := h.HandleMethod("executor.execute", executorRequest(func(p map[string]any) {
 		p["Metadata"] = map[string]any{"canonical_session_id": "0f4a6f1a-2b3c-4d5e-8f9a-1a2b3c4d5e6f"}
 	})); err != nil {
@@ -498,7 +498,7 @@ func TestExecuteDispatchesWithNativeHeaders(t *testing.T) {
 	transport := &fakeTransport{doResult: HTTPResult{
 		StatusCode: 200,
 		Headers:    map[string][]string{"content-type": {"text/event-stream"}},
-		Body:       []byte("data: {\"choices\":[]}\n\n"),
+		Body:       []byte(fixtureTextSSE),
 	}}
 	h := newTestHandler(t, transport)
 	request, _ := json.Marshal(map[string]any{
@@ -547,8 +547,14 @@ func TestExecuteDispatchesWithNativeHeaders(t *testing.T) {
 	if err := json.Unmarshal(decodeOKEnvelope(t, result), &response); err != nil {
 		t.Fatalf("decode executor response: %v", err)
 	}
-	if string(response.Payload) != `data: {"choices":[]}`+"\n\n" {
-		t.Errorf("response payload = %q, want the upstream body unchanged", response.Payload)
+	var completion struct {
+		Object  string
+		Choices []struct {
+			Message struct{ Role, Content string }
+		}
+	}
+	if err := json.Unmarshal(response.Payload, &completion); err != nil || completion.Object != "chat.completion" || completion.Choices[0].Message.Role != "assistant" || completion.Choices[0].Message.Content != "hi" {
+		t.Errorf("invalid buffered completion: %s (%v)", response.Payload, err)
 	}
 }
 
@@ -619,8 +625,7 @@ func TestExecuteStreamRelaysAndClosesOnError(t *testing.T) {
 	})
 
 	chunks := make(chan StreamChunk, 2)
-	chunks <- StreamChunk{Payload: []byte("data: 1\n\n")}
-	chunks <- StreamChunk{Payload: []byte("data: 2\n\n")}
+	chunks <- StreamChunk{Payload: []byte(fixtureTextSSE)}
 	close(chunks)
 	transport := &fakeTransport{streamResult: StreamResult{
 		StatusCode: 200,
@@ -649,7 +654,7 @@ func TestExecuteStreamRelaysAndClosesOnError(t *testing.T) {
 	waitFor(t, func() bool {
 		relayMu.Lock()
 		defer relayMu.Unlock()
-		return len(emitted) == 2
+		return len(emitted) == 2 && len(closed) == 1
 	})
 	relayMu.Lock()
 	emittedCount, closedCount = len(emitted), len(closed)
@@ -657,8 +662,8 @@ func TestExecuteStreamRelaysAndClosesOnError(t *testing.T) {
 	if emittedCount != 2 {
 		t.Fatalf("emitted chunks = %d, want 2 relayed frames", emittedCount)
 	}
-	if closedCount != 0 {
-		t.Errorf("stream closed with error on success: %d closes", closedCount)
+	if closedCount != 1 || closed[0] != nil {
+		t.Errorf("stream success requires one nil-error close: %d closes", closedCount)
 	}
 
 	// Upstream stream failure closes the plugin stream with the error.

@@ -2,12 +2,11 @@
 
 **Parent review: experimental candidate, NOT admitted for deployment.**
 Component tests/build do not establish working host dispatch. Blocking findings:
-successful terminal validation is incomplete; buffered execution returns SSE rather than a validated
-completed response. Trusted caller principal scope must be
+trusted caller principal scope must be
 proven through the host (auth-ID fallback is credential scope only). Console GET
 passthrough now admits only the parsed same-origin native config path and never
-copies caller authentication headers. Reasoning/tool continuation fixtures remain
-required. Pinned host HTTP bridge follows redirects (http_bridge.go:
+copies caller authentication headers. Actual-host reasoning/tool continuation
+fixtures remain required. Pinned stock host HTTP bridge follows redirects (http_bridge.go:
 checkPluginRedirect); the plugin API has no no-redirect request option. One host
 callback is therefore NOT proof of one physical request. Live admission requires
 resolving this dispatch-budget gap without relying on redirect-free luck.
@@ -31,6 +30,14 @@ cancellation closes the host stream even while stream_read is blocked, and
 abandonment unblocks pending sends. Fake-RPC handler/bridge tests cover these
 contracts, malformed results and pre-dispatch cancellation; actual-host smoke
 is still pending.
+
+Response paths share a bounded incremental SSE decoder. Streaming emits complete
+`data:` frames and commits tool/finish/usage frames only after successful terminal
+AND transport EOF; late failures withhold tools. Buffered calls return an assistant
+`chat.completion` JSON response with text/reasoning, parallel tools and usage
+aggregated. Truncation/filter/length/malformed/unsupported deltas fail explicitly.
+Focused codec and actual handler tests cover these outcomes, fragmented UTF8,
+reasoning text and bounded memory. This is fixture evidence, not live replay proof.
 
 Corrected implementation slice for the OpenCode Zen provider at the
 provider/executor level of the pinned mainline

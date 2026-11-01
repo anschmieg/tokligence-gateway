@@ -62,7 +62,7 @@ type blockingConfigTransport struct {
 func (b *blockingConfigTransport) Do(ctx context.Context, method, url string, headers map[string][]string, body []byte) (HTTPResult, error) {
 	b.once.Do(func() { close(b.started) })
 	<-b.resume
-	return HTTPResult{StatusCode: 200, Body: []byte(`{}`)}, nil
+	return HTTPResult{StatusCode: 200, Body: []byte(fixtureTextSSE)}, nil
 }
 
 func configLifecycleRequest(stream bool) []byte {
