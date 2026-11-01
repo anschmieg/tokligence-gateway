@@ -141,9 +141,11 @@ performs any client-protocol translation itself.
    validation through the bounded SSE parser, delivery via
    `host.stream.emit`/`host.stream.close` with the host-allocated `stream_id`.
    Tool-bearing frames are withheld until a successful terminal
-   (`stop`/`tool_calls`); `length`/`content_filter`, malformed SSE, upstream
+   (`stop`/`tool_calls`) AND transport EOF; `length`/`content_filter`, malformed SSE, upstream
    errors, and truncation close the host stream with an error and never
-   release withheld calls. Not yet exercised on a live host.
+   release withheld calls. Frames use the complete SSE data framing required by
+   the host Messages translator. Late post-DONE data/transport errors fail
+   without releasing tools. Not yet exercised on a live host.
 3. No token counting or HTTP passthrough.
 4. Per-credential proxy (`AuthData.ProxyURL`) is not yet applied to upstream
    calls; the host transport already honors its own proxy policy.

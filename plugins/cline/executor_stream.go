@@ -150,7 +150,7 @@ func forceStreamInBody(body []byte) ([]byte, error) {
 //
 // Contract enforced here:
 //   - tool-bearing frames are withheld until a successful terminal
-//     (stop/tool_calls) validates the stream; on length/content_filter/
+//     (stop/tool_calls) plus transport EOF validates the stream; on length/content_filter/
 //     error/truncation the withheld calls are never released and the
 //     terminal reason is preserved in the close error
 //   - the [DONE] SSE marker is parser-internal: it is never emitted as a
@@ -190,19 +190,9 @@ func pumpUpstreamStream(streamID string, upstream *HostStreamResponse, bridge St
 						fail(fmt.Sprintf("cline upstream stream finished with %q", event.FinishReason))
 						return
 					}
-					if errFinish := parser.Finish(); errFinish != nil {
-						fail(streamFailureMessage(errFinish, event.FinishReason))
-						return
-					}
-					for _, frame := range withheld {
-						if errEmit := bridge.Emit(streamID, frame); errEmit != nil {
-							fail(fmt.Sprintf("cline stream emit failed: %v", errEmit))
-							return
-						}
-					}
-					closeUpstream()
-					bridge.Close(streamID, "")
-					return
+					// DONE is provisional until transport EOF. Later bytes or a
+					// read failure must never commit executable calls.
+					continue
 				}
 				if len(event.Data) == 0 {
 					continue
@@ -210,7 +200,7 @@ func pumpUpstreamStream(streamID string, upstream *HostStreamResponse, bridge St
 				if len(withheld) == 0 && event.FinishReason == "" && !frameCarriesToolCalls(event.Data) {
 					// Content/reasoning/usage frames flow through immediately;
 					// they carry nothing executable.
-					if errEmit := bridge.Emit(streamID, event.Data); errEmit != nil {
+					if errEmit := bridge.Emit(streamID, sseDataFrame(event.Data)); errEmit != nil {
 						fail(fmt.Sprintf("cline stream emit failed: %v", errEmit))
 						return
 					}
@@ -225,18 +215,18 @@ func pumpUpstreamStream(streamID string, upstream *HostStreamResponse, bridge St
 					return
 				}
 			}
-			continue
 		}
 		if errRead == io.EOF {
-			// The upstream body ended. Finish() distinguishes a complete
-			// stream from a truncated one; a truncated stream is never
-			// reported as success. When the [DONE] terminal was already
-			// handled above the bridge is closed already, so a second Close
-			// on the same id must stay harmless — it is, because the host
-			// removed the stream from its registry on the first close.
+			// Only real EOF commits held tools and terminal frames.
 			if errFinish := parser.Finish(); errFinish != nil {
 				fail(streamFailureMessage(errFinish, ""))
 				return
+			}
+			for _, frame := range withheld {
+				if errEmit := bridge.Emit(streamID, sseDataFrame(frame)); errEmit != nil {
+					fail(fmt.Sprintf("cline stream emit failed: %v", errEmit))
+					return
+				}
 			}
 			closeUpstream()
 			bridge.Close(streamID, "")
@@ -287,4 +277,12 @@ func frameCarriesToolCalls(frame []byte) bool {
 		}
 	}
 	return false
+}
+
+// The pinned host translators consume complete SSE data frames, not bare JSON.
+func sseDataFrame(data []byte) []byte {
+	frame := make([]byte, 0, len(data)+8)
+	frame = append(frame, "data: "...)
+	frame = append(frame, data...)
+	return append(frame, '\n', '\n')
 }
