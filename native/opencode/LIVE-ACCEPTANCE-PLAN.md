@@ -1,5 +1,33 @@
 # Reviewed live acceptance plan — current architecture and historical evidence
 
+## November1 Beam comparison (supersedes historical windows below)
+
+`oauth-beam-matchedscope-plan.json` fixes run `native-beam-matchedscope-20261101`
+and window `native-beam-matchedscope-window-20261101`, not before10:10UTC.
+It permits at most two actual inference dispatch reservations, max1024 each,
+with at least120seconds between them: actual2.1.4 CLI with the existing staging
+OAuth credential, then matched-history gateway only after strict CLI success.
+It does not claim to launch the user's compiled2.2.5 binary. The reference
+compiler comparisons independently cover2.0.32 and2.2.5,80 cases each.
+
+New evidence supporting this distinct comparison: successful manual Beam on
+2.0.32 and2.2.5, matching saved OAuth email/org/server, current staging token's
+live account identity verified, and removal of the obsolete1.18 compiler
+override. Native catalog confirms Beam enabled/free/text/tools at the reviewed
+endpoint. This is not an automatic retry on cooldown expiry. Previous plans,
+rejected reports, consumed IDs and windows are preserved.
+
+Read-only admission must be ready with no blockers immediately before execute.
+The timer is disabled. On any rejection, malformed/timeout/uncertain result,
+stop all diagnostic inference and restore only owned services. No alternative
+model, account, address, ID or fallback may compensate for failure.
+
+Basic-pair success does not authorize a burst or establish tools/reasoning/long/
+Claude/four-model coverage. Assess its evidence before any separately planned
+case; missing reasoning remains untested. Provider quota scope/limits remain
+unknown, and neither these controls nor parity can guarantee no future429.
+
+
 ## October31 architecture and upstream blocker
 
 Zero-inference native discovery passed. The subsequent actual2.1.4 OAuth CLI control returned429 FreeUsageLimitError on its one actual model request, resetNovember1 00:00UTC; no gateway comparison followed. All consumed windows/reports remain immutable. Native/gateway persistent cooldown protection is deployed; no automatic reset retry is armed. Live acceptance remains incomplete.
