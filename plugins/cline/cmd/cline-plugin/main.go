@@ -142,12 +142,43 @@ func callHost(method string, payload []byte) ([]byte, error) {
 		return nil, err
 	}
 	if !envelope.OK {
-		if envelope.Error != nil && envelope.Error.Message != "" {
-			return nil, &hostCallError{method: method}
-		}
 		return nil, &hostCallError{method: method}
 	}
 	return envelope.Result, nil
+}
+
+// hostStreamBridge forwards validated stream frames to the host stream
+// bridge (host.stream.emit / host.stream.close) using the exact stream_id
+// the host allocated for this executor.execute_stream call.
+type hostStreamBridge struct{}
+
+// hostStreamEmitRequest matches the host's rpcStreamEmitRequest schema.
+type hostStreamEmitRequest struct {
+	StreamID string `json:"stream_id"`
+	Payload  []byte `json:"payload,omitempty"`
+}
+
+// hostStreamCloseRequest matches the host's rpcStreamCloseRequest schema.
+type hostStreamCloseRequest struct {
+	StreamID string `json:"stream_id"`
+	Error    string `json:"error,omitempty"`
+}
+
+func (hostStreamBridge) Emit(streamID string, payload []byte) error {
+	raw, err := json.Marshal(hostStreamEmitRequest{StreamID: streamID, Payload: payload})
+	if err != nil {
+		return err
+	}
+	_, err = callHost("host.stream.emit", raw)
+	return err
+}
+
+func (hostStreamBridge) Close(streamID string, errMsg string) {
+	raw, err := json.Marshal(hostStreamCloseRequest{StreamID: streamID, Error: errMsg})
+	if err != nil {
+		return
+	}
+	_, _ = callHost("host.stream.close", raw)
 }
 
 type hostCallError struct{ method string }
@@ -155,6 +186,13 @@ type hostCallError struct{ method string }
 func (e *hostCallError) Error() string { return "host callback " + e.method + " failed" }
 
 var handler = cline.NewHandler(hostTransport{})
+
+func init() {
+	handler.SetStreamDeps(&cline.StreamDeps{
+		Client: cline.NewHostStreamClient(callHost),
+		Bridge: hostStreamBridge{},
+	})
+}
 
 //export cliproxy_plugin_init
 func cliproxy_plugin_init(host *C.cliproxy_host_api, plugin *C.cliproxy_plugin_api) C.int {
