@@ -165,3 +165,9 @@ verification is still pending. Fake credentials only until blockers are fixed.
    grant; it does not perform the handoff.
 4. **Reasoning replay fixtures** — the next slice candidate, together with a
    live-authorized request/reply capture.
+
+Dispatch-control admission rejects non-object payloads, invalid output-token
+integers, simultaneous output-limit aliases, multiple choices (`n != 1`), and
+malformed `stream_options.include_usage` before host HTTP. These are explicit
+executor restrictions, not a complete native schema validator or a guessed
+model limit. Valid limits are never clamped; unknown options remain intact.

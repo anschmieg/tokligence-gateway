@@ -102,7 +102,10 @@ func shapeInferenceRequest(payload []byte, upstreamModel string) ([]byte, error)
 		return nil, fmt.Errorf("opencode request payload is not a JSON object: %w", err)
 	}
 	if body == nil {
-		body = map[string]json.RawMessage{}
+		return nil, fmt.Errorf("opencode request payload must be a JSON object, not null")
+	}
+	if err := validateDispatchControls(body); err != nil {
+		return nil, err
 	}
 	modelJSON, err := json.Marshal(upstreamModel)
 	if err != nil {
@@ -148,4 +151,40 @@ func NormalizeHeaderValueList(headers map[string][]string, name string) []string
 	values := append([]string(nil), headers[name]...)
 	sort.Strings(values)
 	return values
+}
+
+// validateDispatchControls rejects controls this single-choice, native-stream
+// executor cannot honor. It does not clamp limits, repair history, or guess
+// model-specific ceilings. Native openai-chat.ts emits exactly one output
+// token field and stream_options.include_usage is a required boolean when
+// stream_options is present. Unknown provider options remain untouched.
+func validateDispatchControls(body map[string]json.RawMessage) error {
+	for _, key := range []string{"max_tokens", "max_completion_tokens", "n"} {
+		if raw, ok := body[key]; ok {
+			var value int64
+			if err := json.Unmarshal(raw, &value); err != nil || value <= 0 {
+				return fmt.Errorf("opencode %s must be a positive integer", key)
+			}
+			if key == "n" && value != 1 {
+				return fmt.Errorf("opencode executor supports only n=1")
+			}
+		}
+	}
+	if _, first := body["max_tokens"]; first {
+		if _, second := body["max_completion_tokens"]; second {
+			return fmt.Errorf("opencode request must use only one output token limit field")
+		}
+	}
+	if raw, ok := body["stream_options"]; ok {
+		var options map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &options); err != nil || options == nil {
+			return fmt.Errorf("opencode stream_options must be an object")
+		}
+		var value bool
+		usage, exists := options["include_usage"]
+		if !exists || string(usage) == "null" || json.Unmarshal(usage, &value) != nil {
+			return fmt.Errorf("opencode stream_options.include_usage must be a boolean")
+		}
+	}
+	return nil
 }
