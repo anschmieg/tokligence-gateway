@@ -3,6 +3,10 @@
 Status: milestone 1 planning artifact for a lower-cost implementation agent.
 Date: 2026-11-01. The user has authorized autonomous branch/staging implementation. Each delegated milestone receives a bounded parent brief and ends for parent validation; this document is not a request for repeated user permission. Milestones2–4 below are read-only. Later implementation, synthetic execution and staging deployment are authorized through their scoped briefs; production promotion and new provider inference are excluded unless explicitly admitted.
 
+## User correction: verification scope
+
+Do not implement the previously delegated broad synthetic CLIProxyAPI core fixture. Rely on upstream documentation/tests for unchanged standard functionality. Subsequent milestones prioritize actual provider/plugin implementation; add targeted tests only for our changes and concrete integration/configuration risks. A minimal startup/API smoke check is sufficient for an unchanged upstream binary. Earlier broad test lists below are narrowed by this rule.
+
 ## Guardrails that apply to every milestone
 
 - Backend is only mainline `https://github.com/router-for-me/CLIProxyAPI`; management UI is only its native upstream CLI Proxy API Management Center. Do not use the Plus fork or build a competing management UI.

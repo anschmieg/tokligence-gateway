@@ -151,9 +151,13 @@ Exit gate: each retained patch fixes a demonstrated issue and does not cause a s
 
 ## Phase5 — Independent acceptance layers
 
+### Verification scope
+
+Rely on pinned upstream documentation and upstream tests for ordinary CLIProxyAPI core features. Do not build a parallel core conformance suite or manually repeat generic streaming/tools/auth/config tests. Our tests cover custom provider/plugin behavior, transformations we add, deployment/configuration boundaries we change, and concrete unresolved risks that upstream evidence cannot answer. Begin with a minimal startup/API smoke check, then target the changed paths. Synthetic fixtures are justified for custom OpenCode requests, reasoning/session handling and dispatch-policy changes, not as a prerequisite to revalidate the entire upstream server.
+
 ### Layer1: offline contracts and faults
 
-Run protocol fixtures, provider-reference differential tests, credential isolation, session lifecycle, stream terminal/error framing, concurrency, crash recovery, timeout/cancellation and quota persistence tests. Assert physical dispatch counts for redirects, retries and nested fallbacks. Test image/document/redacted reasoning rejection where unsupported. Verify configuration and management isolation. Pin dependency/source hashes and keep sanitized evidence.
+For custom or modified components, run targeted protocol fixtures, provider-reference differential tests and applicable credential/session/stream/fault regressions. Reuse upstream coverage for unchanged core behavior. Assert physical dispatch counts for redirects, retries and nested fallbacks. Test image/document/redacted reasoning rejection where unsupported. Verify configuration and management isolation. Pin dependency/source hashes and keep sanitized evidence.
 
 ### Layer2: actual clients with synthetic upstreams
 
