@@ -332,7 +332,7 @@ func (h *Handler) handleAuthParse(request []byte) ([]byte, error) {
 	if fileName == "" {
 		fileName = ProviderKey + ".json"
 	}
-	storageJSON, err := marshalJSON(credential)
+	storageJSON, err := EncodeCredentialStorage(credential)
 	if err != nil {
 		return nil, err
 	}
@@ -416,7 +416,7 @@ func (h *Handler) handleAuthRefresh(request []byte) ([]byte, error) {
 	if err != nil {
 		return nil, withStatus(502, err)
 	}
-	storageJSON, err := marshalJSON(rotated)
+	storageJSON, err := EncodeCredentialStorage(rotated)
 	if err != nil {
 		return nil, err
 	}

@@ -202,10 +202,9 @@ func TestAuthParseHandlesNativeCredential(t *testing.T) {
 	if parsed.Auth.NextRefreshAfter.UnixMilli() != 2000000000000-DefaultRefreshBufferMs {
 		t.Errorf("NextRefreshAfter = %d, want expiry minus the native 5min lead", parsed.Auth.NextRefreshAfter.UnixMilli())
 	}
-	// The persisted storage keeps the native shape (round-trips through the
-	// plugin without transformation).
-	var stored Credential
-	if err := json.Unmarshal(parsed.Auth.StorageJSON, &stored); err != nil {
+	// The host envelope keeps its provider label separate from native OAuth.
+	stored, err := ParseCredential(parsed.Auth.StorageJSON)
+	if err != nil {
 		t.Fatalf("storage json invalid: %v", err)
 	}
 	if stored.Refresh != "live-refresh-token" || stored.Type != "oauth" {
@@ -270,8 +269,8 @@ func TestAuthRefreshPerformsNativeGrant(t *testing.T) {
 	if err := json.Unmarshal(decodeOKEnvelope(t, result), &refreshed); err != nil {
 		t.Fatalf("decode auth.refresh: %v", err)
 	}
-	var stored Credential
-	if err := json.Unmarshal(refreshed.Auth.StorageJSON, &stored); err != nil {
+	stored, err := ParseCredential(refreshed.Auth.StorageJSON)
+	if err != nil {
 		t.Fatalf("rotated storage invalid: %v", err)
 	}
 	if stored.Access != "rotated-access" || stored.Refresh != "rotated-refresh" {

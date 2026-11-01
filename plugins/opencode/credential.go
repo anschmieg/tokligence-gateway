@@ -42,8 +42,9 @@ const (
 
 // Credential is the native OpenCode OAuth credential value
 // (schema/src/credential.ts: Credential.OAuth). It is the exact shape the
-// OpenCode CLI persists in its credential store, so a seeded auth-dir file is
-// interchangeable with a working client's export. metadata carries the
+// OpenCode CLI persists in its credential store. CLIProxyAPI's file storage
+// wraps it in a provider-labelled envelope; it is not a native DB file.
+// metadata carries the
 // account/org/server fields the native login flow records.
 type Credential struct {
 	Type     string          `json:"type"`
@@ -75,6 +76,22 @@ func ParseCredential(raw []byte) (Credential, error) {
 	if len(strings.TrimSpace(string(raw))) == 0 {
 		return Credential{}, fmt.Errorf("opencode credential storage is empty")
 	}
+	// CLIProxyAPI's mergedStorageJSON forces root type to the provider ID.
+	// Nest the native value so its OAuth discriminator/account metadata survive
+	// host persistence and refresh without sharing the host routing namespace.
+	var envelope struct {
+		Type          string          `json:"type"`
+		Version       int             `json:"storage_version"`
+		Credential    json.RawMessage `json:"credential"`
+		OAuthProvider string          `json:"oauth_provider"`
+	}
+	if json.Unmarshal(raw, &envelope) == nil && envelope.Type == ProviderKey {
+		if envelope.Version != 1 || len(envelope.Credential) == 0 ||
+			(envelope.OAuthProvider != "" && envelope.OAuthProvider != ProviderKey) {
+			return Credential{}, fmt.Errorf("opencode host credential envelope is invalid")
+		}
+		raw = envelope.Credential
+	}
 	if err := json.Unmarshal(raw, &credential); err != nil {
 		return Credential{}, fmt.Errorf("opencode credential storage is invalid: %w", err)
 	}
@@ -88,6 +105,16 @@ func ParseCredential(raw []byte) (Credential, error) {
 		return Credential{}, fmt.Errorf("opencode credential has no refresh token")
 	}
 	return credential, nil
+}
+
+// EncodeCredentialStorage is the provider-owned CLIProxyAPI file/RawJSON shape.
+// It is not a native OpenCode DB export; the nested credential remains native.
+func EncodeCredentialStorage(credential Credential) ([]byte, error) {
+	return json.Marshal(struct {
+		Type       string     `json:"type"`
+		Version    int        `json:"storage_version"`
+		Credential Credential `json:"credential"`
+	}{ProviderKey, 1, credential})
 }
 
 // Authorization returns the bearer value for inference requests. The native
@@ -160,6 +187,9 @@ func (c Credential) Expiry() int64 {
 // ExpiredAt reports whether the access token is expired relative to nowMs
 // (epoch milliseconds).
 func (c Credential) ExpiredAt(nowMs int64) bool {
+	if strings.TrimSpace(c.Access) == "" {
+		return true
+	}
 	if c.Expires <= 0 {
 		// No recorded expiry: the native refresh path treats this as expiring
 		// immediately (integration.ts expiring() has expires <= now + 5min).
@@ -245,34 +275,38 @@ func RefreshTokenResponse(body []byte, current Credential, nowMs int64) (Credent
 	if token.ExpiresIn <= 0 {
 		return Credential{}, fmt.Errorf("opencode token response has no expires_in")
 	}
-	next := Credential{
-		Type:     CredentialTypeOAuth,
-		MethodID: current.MethodID,
-		Access:   accessToken,
-		Refresh:  refreshToken,
-		Expires:  nowMs + int64(token.ExpiresIn*1000),
+	next := current
+	next.Access, next.Refresh, next.Expires = accessToken, refreshToken, nowMs+int64(token.ExpiresIn*1000)
+	// Native refresh spreads the old value and preserves its metadata exactly
+	// when org_id is absent. A typed metadata struct would drop extension fields
+	// and invent empty account values during each rotation.
+	if token.OrgID == nil {
+		return next, nil
 	}
-	var metadata credentialMetadata
+	metadata := map[string]json.RawMessage{}
 	if len(strings.TrimSpace(string(current.Metadata))) > 0 {
 		if err := json.Unmarshal(current.Metadata, &metadata); err != nil {
 			return Credential{}, fmt.Errorf("opencode credential metadata is invalid: %w", err)
 		}
 	}
-	if token.OrgID != nil && strings.TrimSpace(*token.OrgID) != "" {
-		orgID := strings.TrimSpace(*token.OrgID)
-		if metadata.OrgID != orgID {
-			metadata.OrgName = orgID
-		}
-		metadata.OrgID = orgID
+	if metadata == nil {
+		metadata = map[string]json.RawMessage{}
+	}
+	var oldIDValue, oldNameValue any
+	_ = json.Unmarshal(metadata["orgID"], &oldIDValue)
+	_ = json.Unmarshal(metadata["orgName"], &oldNameValue)
+	oldID, hasID := oldIDValue.(string)
+	_, hasName := oldNameValue.(string)
+	orgID := *token.OrgID
+	idJSON, _ := json.Marshal(orgID)
+	metadata["orgID"] = idJSON
+	if !hasID || oldID != orgID || !hasName {
+		metadata["orgName"] = idJSON
 	}
 	rawMetadata, err := json.Marshal(metadata)
 	if err != nil {
 		return Credential{}, err
 	}
-	if string(rawMetadata) == "{}" {
-		next.Metadata = nil
-	} else {
-		next.Metadata = rawMetadata
-	}
+	next.Metadata = rawMetadata
 	return next, nil
 }

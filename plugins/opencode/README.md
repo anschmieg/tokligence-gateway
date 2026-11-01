@@ -137,8 +137,15 @@ plugins:
 
 Real credential activation requires a sequential verified refresh-owner handoff.
 Never copy/reseed a live OAuth database or create a second owner for testing.
-The parsed shape is native `Credential.OAuth`: type/methodID/access/refresh/
-expires/metadata. Fake credentials only until integration blockers are fixed.
+Host file format is `{"type":"opencode","storage_version":1,"credential":{...}}`.
+The nested value is native `Credential.OAuth` with type `oauth`, methodID,
+access/refresh/expires/metadata. CLIProxyAPI forces the outer type to the provider
+on save; nesting prevents that operation from corrupting the native discriminator
+or account metadata. EncodeCredentialStorage emits this format for parse/refresh.
+Bare native values remain accepted internally, but are not sufficient as a host
+auth file. Flat legacy `type: opencode` credentials remain rejected. Focused fake
+tests cover host metadata overlay, refresh rotation and watcher reparse; real-host
+verification is still pending. Fake credentials only until blockers are fixed.
 
 ## Exact remaining blockers
 
