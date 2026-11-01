@@ -57,7 +57,9 @@ api-keys:
           alias: "mistral-medium-3-5"
 
     # --- OpenRouter (pay-as-you-go) -----------------------------------------
-    # Catalog policy from gateway.routes.yaml is operator-enforced here by
+    # Candidate free IDs below are NOT independently availability-verified.
+    # Check the actual provider catalog before enabling; never assume appending
+    # :free creates a valid/free model. Catalog policy is operator-enforced by
     # listing ONLY the models you admit. :free suffix = OpenRouter free tier;
     # a paid id is an explicit paid admission. No wildcard, no "all models".
     - name: openrouter

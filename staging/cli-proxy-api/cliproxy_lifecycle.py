@@ -7,7 +7,7 @@ private file and a short reason only. A PID from the private record is only
 signalled after re-verifying process identity (kernel start time, UID, and
 full command line), so an unrelated recycled PID can never be killed. Refuses
 to start when the port is occupied, when an owned process is already running,
-or when the config deviates from the credential-free staging shape.
+or when the config deviates from the loopback staging shape.
 """
 
 from __future__ import annotations
@@ -50,15 +50,11 @@ REQUIRED_SHAPES = [
     'catalog: ""',
     "enabled: false",
 ]
-# Any of these means the config was extended beyond the credential-free
-# staging shape; refuse rather than silently operate. The api-keys pattern is
-# anchored at column 0: the bootstrap config's indented access.api-keys client
-# list is expected, but an unindented api-keys root is provider groups.
+# Provider configuration is owned/validated by the native backend. Do not
+# make documented provider entries prevent an ordinary staging restart.
+# These string checks are only a bootstrap-shape sanity check, not a YAML
+# parser or security boundary against an administrator editing the config.
 FORBIDDEN_SHAPES = [
-    (r"(?m)^api-keys:", "top-level api-keys provider groups"),
-    ("openai-compatibility:", "an openai-compatibility provider"),
-    ("base-url:", "a provider base-url"),
-    ("  api-key:", "a provider api-key entry"),
     ("allow-remote: true", "remote management access"),
 ]
 
@@ -83,7 +79,7 @@ def config_ok(config: Path) -> None:
         die("config does not match the expected loopback staging shape; refusing to operate")
     for pattern, label in FORBIDDEN_SHAPES:
         if re.search(pattern, data):
-            die(f"config contains {label}; this credential-free staging tool refuses to operate")
+            die(f"config contains {label}; this loopback staging tool refuses to operate")
     if 'secret-key: ""' in data or "secret-key:" not in data:
         die("config is missing a management secret key")
     if "api-keys:" not in data:

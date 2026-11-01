@@ -175,13 +175,13 @@ evaluation (`docs/design/cli-proxyapi-upstream-evaluation.md`):
 | cerebras / groq / nvidia / together / nous | **Generic compatible** | compat entries, exact old model ids preserved |
 | google-ai-studio | **Built-in native** | native `gemini-api-key` provider (upstream built-in aistudio executor) — needs its own config work, not in template yet |
 | codex-oauth (gpt-6 lane) | **Built-in native** | native codex executor + OAuth login via dashboard; separate credential work |
-| claude/tokligence (minimax anthropic) | **Custom required** | no native MiniMax provider; needs custom compat/executor later |
+| claude/tokligence (minimax anthropic) | **Evaluate native compatibility first** | test documented Anthropic-compatible configuration before considering custom code |
 | copilot-auto | **Custom required** | no native GitHub Copilot executor |
 | cline-oauth | **Custom required** | Cline OAuth unsupported natively; custom future |
 | opencode-zen (chat + SystemOne) | **Custom required** | no native OpenCode provider; own milestone, 429 unresolved |
 | opencode-native | **Custom required** | same |
 | chatgpt-specialist | **Retained specialist** | custom service, keep until replaced |
-| modal (GLM) | **Custom required, unverified** | reasoning_content preservation under compat executor unverified; commented-out template entry only |
+| modal (GLM) | **Generic candidate, unverified** | evaluate reasoning preservation using upstream evidence before adding any custom implementation; commented-out template entry only |
 
 Old aliases/prefix routes map to explicit per-model `alias` fields in the
 template (e.g. `mistral/` prefix → `mistral/mistral-large-latest` alias).
@@ -196,14 +196,10 @@ no fallback alias chains in the template).
 
 ### Lifecycle note
 
-`cliproxy_lifecycle.py start` currently refuses configs containing
-`openai-compatibility:`/`base-url:`/provider `api-key:` entries (the
-credential-free staging gate, see "Lifecycle behavior" above). Adding
-providers through the dashboard will therefore block `start` after a stop
-until that gate is adjusted. Parent is handling that lifecycle adjustment
-separately; until then, `status`/`stop` still work and the running server
-hot-applies dashboard writes without a restart.
+Documented native provider entries no longer prevent a restart. The native backend owns YAML/schema validation; lifecycle checks are only staging bootstrap sanity checks, not a policy engine. Loopback management remains required. Plugins stay disabled until their integration milestone is reviewed. No providers or credentials have been applied to staging by adding this template.
 
 ## Deployed foundation checkpoint — 2026-11-01
 
 Parent integrated lifecycle commit d966978 and deployed scripts to `/home/agent/cliproxy-staging` on the VPS. Pinned backend8.0.49/native dashboard1.27.0 are running loopback-only at127.0.0.1:4195. Minimal smoke passed: health, served dashboard digest, management/client authentication separation and one-restart config/key persistence. Auth storage is empty; no providers configured and no inference performed. Existing OpenCode staging and production were not changed. Native T3 hub connection and provider routes remain unverified.
+
+Template model IDs and tier labels are migration candidates from historical policy, not current entitlement/availability proof. Verify catalog metadata before enabling an entry; do not manufacture `:free` IDs from a paid model name.
