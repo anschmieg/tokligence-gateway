@@ -139,7 +139,7 @@ func (p *StreamParser) decode(data []byte) (StreamEvent, error) {
 			return StreamEvent{}, p.fail("unsupported stream finish reason")
 		}
 	}
-	return StreamEvent{Data: append([]byte(nil), data...)}, nil
+	return StreamEvent{Data: append([]byte(nil), data...), FinishReason: p.finish}, nil
 }
 
 // Finish must be called on EOF. A disconnected/truncated stream is never success.

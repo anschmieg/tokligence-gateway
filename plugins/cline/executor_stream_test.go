@@ -93,6 +93,9 @@ func TestPumpFlushesAllFramesOnSuccessfulTerminal(t *testing.T) {
 			t.Fatalf("emitted frames lost %q: %q", want, joined)
 		}
 	}
+	if strings.Index(joined, toolCallFrame) > strings.Index(joined, `"finish_reason":"stop"`) {
+		t.Fatal("finish frame overtook withheld tool call")
+	}
 }
 
 // TestPumpWithholdsToolFramesOnLengthTerminal proves a length terminal never

@@ -207,7 +207,7 @@ func pumpUpstreamStream(streamID string, upstream *HostStreamResponse, bridge St
 				if len(event.Data) == 0 {
 					continue
 				}
-				if !frameCarriesToolCalls(event.Data) {
+				if len(withheld) == 0 && event.FinishReason == "" && !frameCarriesToolCalls(event.Data) {
 					// Content/reasoning/usage frames flow through immediately;
 					// they carry nothing executable.
 					if errEmit := bridge.Emit(streamID, event.Data); errEmit != nil {
@@ -216,6 +216,8 @@ func pumpUpstreamStream(streamID string, upstream *HostStreamResponse, bridge St
 					}
 					continue
 				}
+				// Once a tool frame is held, retain subsequent frames in order.
+				// In particular, finish/usage must not overtake the tool call.
 				withheld = append(withheld, event.Data)
 				withheldBytes += len(event.Data)
 				if withheldBytes > maxWithheldToolBytes {
