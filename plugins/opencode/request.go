@@ -3,7 +3,6 @@ package opencode
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"sort"
 	"strings"
 )
@@ -137,12 +136,8 @@ func InferenceEndpoint(baseURL string) (string, error) {
 	if trimmed == "" {
 		return "", fmt.Errorf("opencode inference base URL is not configured")
 	}
-	parsed, err := url.Parse(trimmed)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return "", fmt.Errorf("opencode inference base URL %q is not absolute", baseURL)
-	}
-	if !strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https") {
-		return "", fmt.Errorf("opencode inference base URL %q is not HTTP(S)", baseURL)
+	if _, err := secureEndpoint(trimmed); err != nil {
+		return "", err
 	}
 	return trimmed + "/chat/completions", nil
 }

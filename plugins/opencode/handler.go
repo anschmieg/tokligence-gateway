@@ -5,7 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -153,11 +156,13 @@ type NowMs func() int64
 // Handler dispatches plugin RPC methods. Transport is injected so tests
 // drive refresh and dispatch with fakes and no network.
 type Handler struct {
-	transport Transport
-	nowMs     NowMs
-	cfg       PluginConfig
-	catalog   []RegisteredModel
-	registry  *SessionRegistry
+	mu            sync.RWMutex
+	activeStreams atomic.Int64
+	transport     Transport
+	nowMs         NowMs
+	cfg           PluginConfig
+	catalog       []RegisteredModel
+	registry      *SessionRegistry
 }
 
 // NewHandler builds a handler with the given transport and clock. The
@@ -173,10 +178,20 @@ func NewHandler(transport Transport, nowMs NowMs) *Handler {
 
 // AttachRegistry replaces the handler's registry with a persistent one.
 // Called by the cgo entry point after the config supplies the state path.
-func (h *Handler) AttachRegistry(registry *SessionRegistry) {
-	if registry != nil {
-		h.registry = registry
+func (h *Handler) AttachRegistry(registry *SessionRegistry) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.activeStreams.Load() != 0 {
+		return withStatus(409, fmt.Errorf("opencode streams are active"))
 	}
+	if registry != nil && registry != h.registry {
+		old := h.registry
+		h.registry = registry
+		if old != nil {
+			old.Close()
+		}
+	}
+	return nil
 }
 
 // Configure applies the plugin configuration subtree. A configured
@@ -186,22 +201,44 @@ func (h *Handler) Configure(raw []byte) error {
 	if err != nil {
 		return err
 	}
-	h.cfg = cfg
+	if cfg.InferenceBaseURL != "" {
+		if _, err := InferenceEndpoint(cfg.InferenceBaseURL); err != nil {
+			return err
+		}
+	}
 	if path := cfg.registryStatePath(); path != "" {
-		registry, err := NewSessionRegistry(RegistryOptions{Path: path, NowMs: h.nowMs})
+		cfg.SessionStatePath, err = filepath.Abs(path)
 		if err != nil {
 			return err
 		}
-		h.registry = registry
 	}
-	catalog, err := BuildModelCatalog(cfg)
-	if err != nil {
-		// An empty model list is a valid not-yet-configured state; the
-		// executor refuses models until configured.
-		h.catalog = nil
-		return nil
+	var catalog []RegisteredModel
+	if len(cfg.Models) > 0 {
+		catalog, err = BuildModelCatalog(cfg)
+		if err != nil {
+			return err
+		}
 	}
-	h.catalog = catalog
+	// A write never waits behind a long dispatch or swaps out a live pump.
+	if !h.mu.TryLock() {
+		return withStatus(409, fmt.Errorf("opencode requests are active; retry configuration when idle"))
+	}
+	defer h.mu.Unlock()
+	if h.activeStreams.Load() != 0 {
+		return withStatus(409, fmt.Errorf("opencode streams are active; retry configuration when idle"))
+	}
+	registry := h.registry
+	if registry == nil || registry.path != cfg.registryStatePath() {
+		registry, err = NewSessionRegistry(RegistryOptions{Path: cfg.registryStatePath(), NowMs: h.nowMs})
+		if err != nil {
+			return err
+		}
+	}
+	old := h.registry
+	h.cfg, h.catalog, h.registry = cfg, catalog, registry
+	if old != nil && old != registry {
+		old.Close()
+	}
 	return nil
 }
 
@@ -231,6 +268,10 @@ func (h *Handler) Registration(schemaVersion uint32) RegistrationResponse {
 // HandleMethod dispatches one plugin RPC method. It returns the
 // envelope-ready result payload. An error carries an HTTP status when known.
 func (h *Handler) HandleMethod(method string, request []byte) ([]byte, error) {
+	if method != "plugin.register" && method != "plugin.reconfigure" {
+		h.mu.RLock()
+		defer h.mu.RUnlock()
+	}
 	switch method {
 	case "plugin.register", "plugin.reconfigure":
 		var req LifecycleRequest
@@ -280,6 +321,9 @@ func (h *Handler) handleAuthParse(request []byte) ([]byte, error) {
 	if err := decodeInto(request, &req); err != nil {
 		return nil, err
 	}
+	if req.Provider != "" && req.Provider != ProviderKey {
+		return okEnvelope(AuthParseResponse{Handled: false})
+	}
 	credential, err := ParseCredential(req.RawJSON.bytes())
 	if err != nil {
 		return okEnvelope(AuthParseResponse{Handled: false})
@@ -297,7 +341,7 @@ func (h *Handler) handleAuthParse(request []byte) ([]byte, error) {
 		Handled: true,
 		Auth: AuthData{
 			Provider:         ProviderKey,
-			ID:               strings.TrimSuffix(fileName, ".json"),
+			ID:               ProviderKey + ":" + fileName,
 			FileName:         fileName,
 			Label:            "OpenCode Console",
 			StorageJSON:      storageJSON,
@@ -319,6 +363,9 @@ func (h *Handler) handleAuthRefresh(request []byte) ([]byte, error) {
 	if err := decodeInto(request, &req); err != nil {
 		return nil, err
 	}
+	if req.AuthProvider != "" && req.AuthProvider != ProviderKey {
+		return nil, withStatus(400, fmt.Errorf("opencode cannot refresh another provider's credential"))
+	}
 	credential, err := ParseCredential(req.StorageJSON.bytes())
 	if err != nil {
 		return nil, withStatus(500, fmt.Errorf("opencode refresh rejected: %v", err))
@@ -327,6 +374,9 @@ func (h *Handler) handleAuthRefresh(request []byte) ([]byte, error) {
 		return nil, withStatus(500, fmt.Errorf("opencode refresh has no host transport"))
 	}
 	server := credential.Server()
+	if _, err := secureEndpoint(server); err != nil {
+		return nil, withStatus(400, err)
+	}
 	body, err := marshalJSON(map[string]string{
 		"grant_type":    "refresh_token",
 		"refresh_token": credential.Refresh,
@@ -374,6 +424,9 @@ func (h *Handler) handleAuthRefresh(request []byte) ([]byte, error) {
 	return okEnvelope(AuthRefreshResponse{
 		Auth: AuthData{
 			Provider:         ProviderKey,
+			ID:               req.AuthID,
+			Metadata:         req.Metadata,
+			Attributes:       req.Attributes,
 			StorageJSON:      storageJSON,
 			NextRefreshAfter: time.UnixMilli(next),
 		},
@@ -397,6 +450,9 @@ func (h *Handler) handleModelForAuth(request []byte) ([]byte, error) {
 	var req AuthModelRequest
 	if err := decodeInto(request, &req); err != nil {
 		return nil, err
+	}
+	if req.AuthProvider != "" && req.AuthProvider != ProviderKey {
+		return nil, withStatus(400, fmt.Errorf("opencode cannot publish models for another provider"))
 	}
 	if _, err := ParseCredential(req.StorageJSON.bytes()); err != nil {
 		return nil, withStatus(401, fmt.Errorf("opencode credential is unusable: %v", err))
@@ -462,6 +518,9 @@ func (h *Handler) handleExecute(request []byte, stream bool) ([]byte, error) {
 	var req ExecutorRequest
 	if err := decodeInto(request, &req); err != nil {
 		return nil, err
+	}
+	if req.AuthProvider != "" && req.AuthProvider != ProviderKey {
+		return nil, withStatus(400, fmt.Errorf("opencode cannot execute with another provider's credential"))
 	}
 	if !h.cfg.Enabled {
 		return nil, withStatus(503, fmt.Errorf("opencode plugin is disabled"))
@@ -571,7 +630,9 @@ func (h *Handler) handleExecuteStream(req ExecutorRequest, endpoint string, head
 	// Stream opened: acknowledge to the host and relay chunks
 	// asynchronously, exactly like the host's async plugin protocol expects
 	// (rpc_client_stream.go keeps callbacks alive until the stream ends).
+	h.activeStreams.Add(1)
 	go func() {
+		defer h.activeStreams.Add(-1)
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				closeStreamWithError(req.StreamID, fmt.Errorf("opencode stream relay panic: %v", recovered))
@@ -697,14 +758,18 @@ func (h *Handler) releaseSessionLease(req ExecutorRequest) {
 // (config discovery). Arbitrary upstream HTTP is refused.
 func (h *Handler) handleExecutorHTTPRequest(request []byte) ([]byte, error) {
 	var req struct {
-		Method      string              `json:"Method"`
-		URL         string              `json:"URL"`
-		Headers     map[string][]string `json:"Headers"`
-		Body        wireBytes           `json:"Body"`
-		StorageJSON wireBytes           `json:"StorageJSON"`
+		AuthProvider string              `json:"AuthProvider"`
+		Method       string              `json:"Method"`
+		URL          string              `json:"URL"`
+		Headers      map[string][]string `json:"Headers"`
+		Body         wireBytes           `json:"Body"`
+		StorageJSON  wireBytes           `json:"StorageJSON"`
 	}
 	if err := decodeInto(request, &req); err != nil {
 		return nil, err
+	}
+	if req.AuthProvider != "" && req.AuthProvider != ProviderKey {
+		return nil, withStatus(400, fmt.Errorf("opencode cannot bridge another provider's credential"))
 	}
 	if !h.cfg.Enabled {
 		return nil, withStatus(503, fmt.Errorf("opencode plugin is disabled"))
@@ -726,17 +791,16 @@ func (h *Handler) handleExecutorHTTPRequest(request []byte) ([]byte, error) {
 	// bridged: the management surface (config discovery) is a Console API
 	// call, which natively carries the x-org-id header.
 	server := credential.Server()
-	if !strings.HasPrefix(strings.TrimSpace(req.URL), server) {
-		return nil, withStatus(403, fmt.Errorf("opencode http passthrough is limited to the credential's Console server %s", server))
+	if err := validateConsoleConfigURL(server, req.URL); err != nil {
+		return nil, withStatus(403, err)
 	}
 	consoleHeaders, err := credential.ConsoleHeaders()
 	if err != nil {
 		return nil, withStatus(500, err)
 	}
 	headerMap := map[string][]string{}
-	for name, values := range req.Headers {
-		headerMap[name] = values
-	}
+	// Caller headers cannot override or duplicate bearer/org/Host/cookie fields.
+	headerMap["accept"] = []string{"application/json"}
 	for name, value := range consoleHeaders {
 		headerMap[name] = []string{value}
 	}
@@ -764,4 +828,10 @@ func (h *Handler) handleSessionStats() ([]byte, error) {
 }
 
 // WithConfigured is a test helper returning the handler's effective config.
-func (h *Handler) WithConfigured() PluginConfig { return h.cfg }
+func (h *Handler) WithConfigured() PluginConfig {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	cfg := h.cfg
+	cfg.Models = append([]string(nil), cfg.Models...)
+	return cfg
+}

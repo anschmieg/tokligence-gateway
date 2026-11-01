@@ -5,11 +5,14 @@ Component tests/build do not establish working host dispatch. Blocking findings:
 host callbacks omit per-request callback IDs; the cgo shim/bridge envelope
 contract needs reconciliation; stream close/cancellation and successful terminal
 validation are incomplete; buffered execution returns SSE rather than a validated
-completed response. Reconfigure must become atomic/concurrency-safe and reuse
-the existing lock for an unchanged path. Trusted caller principal scope must be
+completed response. Trusted caller principal scope must be
 proven through the host (auth-ID fallback is credential scope only). Console GET
-passthrough currently uses unsafe URL-prefix validation and must be fixed or
-removed before activation. Reasoning/tool continuation fixtures remain required.
+passthrough now admits only the parsed same-origin native config path and never
+copies caller authentication headers. Reasoning/tool continuation fixtures remain
+required. Pinned host HTTP bridge follows redirects (http_bridge.go:
+checkPluginRedirect); the plugin API has no no-redirect request option. One host
+callback is therefore NOT proof of one physical request. Live admission requires
+resolving this dispatch-budget gap without relying on redirect-free luck.
 
 Parent lifecycle fixes: atomic registry acquire, idle TTL/LRU on reuse/release,
 crash recovery clearing dead leases without changing IDs, strict persisted-state
@@ -18,6 +21,11 @@ after close/uncertain writes. Synchronous handler exits release leases and rejec
 stream handles close. Missing transport returns503, never fake success.
 Focused race tests include concurrent eviction, SIGKILL/reopen, persistence
 failure and handler error exits. No real credentials or inference were used.
+
+Reconfiguration is atomic and refuses active buffered/async requests; unchanged
+state paths reuse their lock, failed acquisition leaves the old state untouched,
+and replaced idle registries close. Refresh preserves the host credential ID,
+metadata and attributes; foreign provider requests are rejected before HTTP.
 
 Corrected implementation slice for the OpenCode Zen provider at the
 provider/executor level of the pinned mainline

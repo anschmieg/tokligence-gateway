@@ -196,8 +196,8 @@ func TestAuthParseHandlesNativeCredential(t *testing.T) {
 	if parsed.Auth.Provider != ProviderKey {
 		t.Errorf("provider = %q, want %q", parsed.Auth.Provider, ProviderKey)
 	}
-	if parsed.Auth.ID != "opencode" {
-		t.Errorf("id = %q, want the file name stem", parsed.Auth.ID)
+	if parsed.Auth.ID != "opencode:opencode.json" {
+		t.Errorf("id = %q, want provider-namespaced file identity", parsed.Auth.ID)
 	}
 	if parsed.Auth.NextRefreshAfter.UnixMilli() != 2000000000000-DefaultRefreshBufferMs {
 		t.Errorf("NextRefreshAfter = %d, want expiry minus the native 5min lead", parsed.Auth.NextRefreshAfter.UnixMilli())
