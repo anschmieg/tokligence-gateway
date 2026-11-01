@@ -1,14 +1,14 @@
 # Gateway product scope refactor: bounded execution runbook
 
 Status: milestone 1 planning artifact for a lower-cost implementation agent.
-Date: 2026-11-01. This runbook authorizes no deployment, credentials, live inference, external account action, timer, or production change. The parent reviews each milestone before authorizing the next.
+Date: 2026-11-01. The user has authorized autonomous branch/staging implementation. Each delegated milestone receives a bounded parent brief and ends for parent validation; this document is not a request for repeated user permission. Milestones2–4 below are read-only. Later implementation, synthetic execution and staging deployment are authorized through their scoped briefs; production promotion and new provider inference are excluded unless explicitly admitted.
 
 ## Guardrails that apply to every milestone
 
 - Backend is only mainline `https://github.com/router-for-me/CLIProxyAPI`; management UI is only its native upstream CLI Proxy API Management Center. Do not use the Plus fork or build a competing management UI.
 - Preserve native CLIProxyAPI inference and management APIs as directly usable integration surfaces for T3 Code hubs. Hub contract discovery is external and read-only; do not invent methods or payloads.
 - Prefer provider, executor, or plugin customization. A runtime helper is allowed only after a concrete requirement fails through an evaluated extension point and the exception records the limitation, tested alternatives, state owner, maintenance cost, and retirement condition.
-- Never read, print, copy, seed, rotate, refresh, or migrate production credentials or databases. No OAuth login/refresh, provider inference/quota probes, account/IP changes, SSH writes, runtime deployment, production changes, timers, subagents, or PRs under this runbook.
+- Never read, print, copy, seed, rotate, refresh, or migrate production credentials or databases. No OAuth login/refresh, provider inference/quota probes, account/IP changes, production changes, timers, subagents or PRs by default. SSH writes and staging deployment require a later scoped implementation brief after the preceding gates pass.
 - Provider 429 evidence remains unresolved. Stop inference work at any 401/403/429, malformed stream, timeout, or uncertain outcome. Do not retry, rotate, or infer cause.
 - Keep all unrelated existing changes. Do not edit application code during the evidence and architecture milestones. Every implementation milestone uses a separate reviewable commit and ends for parent review.
 
@@ -74,7 +74,7 @@ Ask the parent to arrange read-only confirmation of current staging ownership/to
 
 **Files/artifacts:** only after parent approval, add sanitized request/response fixtures and an architecture decision record naming the first ordinary provider slice, exact extension hook and owner. Implementation may touch only the selected provider/executor/plugin package and required fixture/test files. Any helper exception must include the required evidence. Do not edit existing Tokligence routes until an explicit migration slice is authorized.
 
-**Commands:** select exact repository scripts after inspecting `package.json`; expected checks are `npm run lint`, focused `node --test <selected-fixture-test>`, and `git diff --check`. Never run live-provider tests. Do not run broad `npm test` without explicit parent approval because test coverage includes live/integration-oriented scripts.
+**Commands:** select exact repository scripts after inspecting `package.json`; expected checks are `npm run lint`, focused `node --test <selected-fixture-test>`, and `git diff --check`. Never run live-provider tests. Inspect test discovery and network behavior before selecting a broad suite; do not assume tests are live or safe from their names. Run verified offline suites when appropriate without asking the user routine permission.
 
 **Acceptance:** offline contract and fault tests prove direct native API availability, exact model selection, no hidden fallback/retry, credential ownership labels only, safe config revision/write behavior, streaming cancellation if in-scope, and the inventoried T3 contract. Physical dispatch count is asserted only against a synthetic upstream. Full test command/output and commit are reviewable.
 
@@ -84,6 +84,6 @@ Ask the parent to arrange read-only confirmation of current staging ownership/to
 
 ## Milestone 6 — First isolated platform slice (future authorization required)
 
-This milestone is deliberately not executable from the current authorization. It requires a reviewed source pin, T3 contract, staging proposal, synthetic acceptance plan, and a separate explicit parent authorization. The future artifacts should include a versioned staging deployment packet, sanitized effective config, native dashboard workflow evidence, hub integration fixture results, restart/redeploy persistence and rollback evidence. No production promotion is included. Any later production promotion requires its own approval after a concrete packet exists.
+This milestone is deliberately not executable from the current authorization. It requires a reviewed source pin, T3 contract, staging proposal, synthetic acceptance plan, and a scoped parent implementation brief under the existing user authorization. The future artifacts should include a versioned staging deployment packet, sanitized effective config, native dashboard workflow evidence, hub integration fixture results, restart/redeploy persistence and rollback evidence. No production promotion is included. Any later production promotion requires its own approval after a concrete packet exists.
 
 **Stop conditions:** any production credential/data, provider inference/quota call, OAuth lifecycle action, account/IP change, timer, public admin exposure, native API incompatibility, unbounded retry/fallback, or uncertainty about credential ownership. Do not proceed to OpenCode adapter work or resolve the existing 429 as part of this slice.
