@@ -12,9 +12,9 @@ import (
 // (plugins.configs.cline.models). It mirrors the shape the gateway consumed
 // from the Cline recommended-models feed.
 type ModelEntry struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"display_name,omitempty"`
-	Description string `json:"description,omitempty"`
+	ID          string `json:"id" yaml:"id"`
+	DisplayName string `json:"display_name,omitempty" yaml:"display_name"`
+	Description string `json:"description,omitempty" yaml:"description"`
 }
 
 // PluginModels is the model registrar response payload.

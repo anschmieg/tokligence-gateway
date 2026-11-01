@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // ProviderKey is the provider identifier registered with the host for both the
@@ -133,23 +135,6 @@ type AuthLoginPollResponse struct {
 	Auth    AuthData `json:"Auth,omitempty"`
 }
 
-// DeviceAuthResponse is the WorkOS device-authorization endpoint response.
-type DeviceAuthResponse struct {
-	DeviceCode              string `json:"device_code"`
-	UserCode                string `json:"user_code"`
-	VerificationURI         string `json:"verification_uri"`
-	VerificationURIComplete string `json:"verification_uri_complete"`
-	ExpiresIn               int    `json:"expires_in"`
-	Interval                int    `json:"interval"`
-}
-
-// loginState is the opaque state carried between login start and polls.
-type loginState struct {
-	DeviceCode      string `json:"device_code"`
-	ExpiresAt       string `json:"expires_at"`
-	PollIntervalSec int    `json:"poll_interval_sec"`
-}
-
 // Handler dispatches plugin RPC methods. Transport (host HTTP callback) is
 // injected so tests can drive refresh with fixtures without any network.
 type Handler struct {
@@ -158,7 +143,6 @@ type Handler struct {
 	workosBaseURL string
 	refreshBuffer time.Duration
 	catalog       *ModelCatalog
-	loginFlights  map[string]loginState
 }
 
 // Transport issues the plugin's upstream HTTP calls through the host callback.
@@ -174,17 +158,18 @@ func NewHandler(transport Transport) *Handler {
 		apiBaseURL:    DefaultAPIBaseURL,
 		workosBaseURL: DefaultWorkOSBaseURL,
 		refreshBuffer: DefaultRefreshBuffer,
-		loginFlights:  map[string]loginState{},
 	}
 }
 
-// Configure applies the plugin configuration YAML/JSON subtree.
+// Configure applies the plugin configuration subtree. The host hands the
+// original YAML subtree (yaml.v3, the same library upstream itself uses); the
+// JSON fallback keeps harness fixtures readable.
 func (h *Handler) Configure(raw []byte) error {
 	if len(strings.TrimSpace(string(raw))) == 0 {
 		return fmt.Errorf("cline plugin configuration is empty")
 	}
 	var cfg pluginConfig
-	if err := json.Unmarshal(raw, &cfg); err != nil {
+	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		return fmt.Errorf("cline plugin configuration is invalid: %w", err)
 	}
 	if strings.TrimSpace(cfg.APIBaseURL) != "" {
@@ -445,10 +430,4 @@ func normalizeClineResponse(body []byte) []byte {
 		return body
 	}
 	return payload.Data
-}
-
-// DeviceAuthStart builds the device-authorization request for the login flow.
-// Exported for tests; the login RPC methods are intentionally unimplemented.
-func (h *Handler) DeviceAuthStart(transport Transport) (*DeviceAuthResponse, error) {
-	return nil, fmt.Errorf("not implemented")
 }

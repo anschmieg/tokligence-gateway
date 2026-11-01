@@ -65,6 +65,47 @@ func mustMarshal(t *testing.T, value any) []byte {
 	return raw
 }
 
+func TestRegisterAcceptsHostYAMLConfig(t *testing.T) {
+	// The host hands the original YAML subtree with enabled/priority merged in.
+	config := []byte(`enabled: true
+priority: 0
+api_base_url: https://api.cline.bot
+models:
+  - id: gpt-x
+    display_name: GPT X
+`)
+	handler := NewHandler(nil)
+	raw, err := handler.HandleMethod("plugin.register", mustMarshal(t, LifecycleRequest{
+		ConfigYAML:    config,
+		SchemaVersion: 10,
+	}))
+	if err != nil {
+		t.Fatalf("plugin.register: %v", err)
+	}
+	var registration RegistrationResponse
+	decodeResult(t, raw, &registration)
+	if !registration.Capabilities.Executor {
+		t.Fatal("executor capability missing after YAML registration")
+	}
+	modelsRaw, err := handler.HandleMethod("model.register", nil)
+	if err != nil {
+		t.Fatalf("model.register: %v", err)
+	}
+	var models PluginModels
+	decodeResult(t, modelsRaw, &models)
+	if len(models.Models) != 1 || models.Models[0].ID != "cline/gpt-x" {
+		t.Fatalf("models = %+v", models.Models)
+	}
+}
+
+func TestConfigureRejectsModelsListWithoutIds(t *testing.T) {
+	handler := NewHandler(nil)
+	err := handler.Configure([]byte("models:\n  - display_name: NoId\n"))
+	if err == nil {
+		t.Fatal("expected error when no model carries an id")
+	}
+}
+
 func decodeResult(t *testing.T, envelope []byte, target any) {
 	t.Helper()
 	var env struct {
