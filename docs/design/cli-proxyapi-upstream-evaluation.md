@@ -167,3 +167,11 @@ One ordinary provider, minimal surface, fully offline-verifiable:
 - No secrets read, no inference, no deployment. ✔
 
 Proceed to milestone 3 (T3 hub contract) per the runbook; the slice proposal above is parent-reviewed input for milestone 5 scoping, not an authorization to execute.
+
+## Parent validation: accepted evidence, conditional implementation readiness
+
+Source spot-checks confirm retry-round settings, both management escape-hatch routes and the current7.x integration. This is not full acceptance of the proposed safeguards. Removing UI buttons does not disable `/requests/api-call` or `/credentials/verify` for a management-key holder (including T3 Code). Server-side enforcement or an explicit authenticated ingress deny policy is required before the affected operations are exposed; do not assume a plugin can shadow an existing route without proof. No issue filing is authorized by this artifact.
+
+`request-retry:0` and `max-retry-credentials:1` bound credential rounds, not necessarily physical sends: model pools, same-auth stream handling, bootstrap retries, redirects and executor internals need counting tests. `models.catalog:""` does not itself prove offline catalog operation; select and verify the actual local-catalog flag/config. The proposed slice may proceed only in a network namespace with no external connectivity, empty credentials, synthetic provider, temporary state and explicit process cleanup. This is a test fixture, not deployment readiness or T3 hub compatibility.
+
+Artifact manifests must validate every SHA-256 as64 hex digits and compare downloaded bytes for the host architecture before execution. Some no-plugin digest strings in this evaluation appear shorter than64 digits; treat them as UNVERIFIED and do not use them until corrected from primary release evidence. The dashboard/backend API requirement establishes a candidate pair, not runtime acceptance. Current date is November1; wording describing its November1 release as one day before evaluation is incorrect.
