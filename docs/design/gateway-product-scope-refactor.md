@@ -3,6 +3,8 @@
 Status: proposed implementation sequence, authorized for planning; production migration requires a concrete staging result and approval.
 Date: 2026-11-01.
 
+Milestone 1 source inventory and bounded execution runbook: [inventory](gateway-product-scope-refactor-inventory.md) · [runbook](gateway-product-scope-refactor-runbook.md). These are read-only findings and future gated steps; they do not authorize deployment or provider activity.
+
 ## Product decision
 
 Reposition the gateway as a small policy, discovery and compatibility product built on maintained provider infrastructure. Mainline [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) is the backend foundation, with the native upstream [CLI Proxy API Management Center](https://github.com/router-for-me/Cli-Proxy-API-Management-Center) served at `/management.html`. The CLIProxyAPIPlus backend fork is not selected. Pin the mainline backend release and its compatible native dashboard artifact. Alternative dashboards and a custom management UI are out of scope. Implement customizations at the provider/executor/plugin level wherever possible. A runtime helper is an exception only after demonstrating that these extension points cannot reasonably implement the requirement; a desire to reuse an existing sidecar is not sufficient justification. The current Tokligence backend becomes a migration backend rather than the mandatory foundation.
