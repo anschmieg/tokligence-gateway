@@ -5,7 +5,7 @@ Date: 2026-11-01.
 
 ## Product decision
 
-Reposition the gateway as a small policy, discovery and compatibility product built on maintained provider infrastructure. Mainline [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) is the backend foundation, with its compatible management panel. The CLIProxyAPIPlus backend fork is not selected. Pin the mainline backend release and the separately identified panel artifact. Customizations belong in supported providers, executors or plugins wherever reasonable. A separate service is an exception requiring a demonstrated extension/runtime limitation. The current Tokligence backend becomes a migration backend rather than the mandatory foundation.
+Reposition the gateway as a small policy, discovery and compatibility product built on maintained provider infrastructure. Mainline [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) is the backend foundation, with the native upstream [CLI Proxy API Management Center](https://github.com/router-for-me/Cli-Proxy-API-Management-Center) served at `/management.html`. The CLIProxyAPIPlus backend fork is not selected. Pin the mainline backend release and its compatible native dashboard artifact. Alternative dashboards and a custom management UI are out of scope. Implement customizations at the provider/executor/plugin level wherever possible. A runtime helper is an exception only after demonstrating that these extension points cannot reasonably implement the requirement; a desire to reuse an existing sidecar is not sufficient justification. The current Tokligence backend becomes a migration backend rather than the mandatory foundation.
 
 Success means fewer independently maintained authentication flows, serializers, retry loops and session stores, while preserving the client workflows and specialist APIs users need. Merely replacing one large custom implementation with a fork of another does not satisfy the goal.
 
@@ -17,12 +17,11 @@ The plan does not assume that CLIProxyAPI supports every provider, that opencode
 flowchart LR
     C[Claude Code / Codex / other clients] --> Q[Mainline CLIProxyAPI native API]
     T[T3 Code hub integration] --> Q
-    M[Compatible native management panel] --> A[Mainline CLIProxyAPI management API]
+    M[Native CLIProxyAPI admin dashboard] --> A[Mainline CLIProxyAPI management API]
     A --> Q
     Q --> P[Maintained provider integrations]
     Q --> X[Custom providers / executors / plugins]
-    X --> N[Native runtime helper only where necessary]
-    N --> Z[OpenCode]
+    X --> Z[Provider upstreams including OpenCode]
 ```
 
 Keep CLIProxyAPI's native API available as a first-class integration surface, including the management/discovery operations required by T3 Code hubs. A custom façade must not become mandatory for T3 Code or ordinary clients. Network ingress/TLS and administrative access controls may protect these APIs without changing their contracts. Management access remains authenticated and scoped; availability does not mean anonymous public exposure.
@@ -39,15 +38,22 @@ Keep CLIProxyAPI's native API available as a first-class integration surface, in
 | Quota state | Dispatch owner persists provider rejection/reset; native management/API surfaces sanitized state without extending it |
 | Streaming and cancellation | End-to-end propagation; client disconnect cancels active upstream work |
 
-Use CLIProxyAPI's configuration and extension mechanisms for policy, authentication and transformations before adding a custom process. Retain a separate compatibility proxy only for a specific unsupported contract that cannot reasonably be implemented in an extension, with an explicit retirement condition. Do not maintain a competing dashboard or management API. Native runtime helpers may own provider-specific state, but are private implementation details of the provider integration.
+Use CLIProxyAPI's configuration and extension mechanisms for policy, authentication and transformations before adding a custom process. Retain a separate compatibility proxy only for a specific unsupported contract that cannot reasonably be implemented in an extension, with an explicit retirement condition. Do not maintain a competing dashboard or management API. A runtime helper is not part of the default architecture. Before proposing one, document the exact missing extension capability, evaluated provider/plugin implementation, native dependency constraints, maintenance trade-off and state owner. If justified, it remains private behind the provider integration.
 
 ## Configuration and management contract
 
+Version pairing is a release gate. The native dashboard's current documentation requires backend8.x and `/v8/management`, with no v0 fallback; the current gateway embeds7.3.20. Pin a compatible backend/dashboard pair, then verify the actual T3 Code API version and required operations. A successful v8 configuration write may migrate stored configuration: rehearse that migration before using a real installation. Do not attach a latest dashboard to the old backend or auto-update either artifact independently. See the [upstream dashboard documentation](https://github.com/router-for-me/Cli-Proxy-API-Management-Center).
+
+Dashboard provider tests, playgrounds, quota actions and plugin actions must be classified by actual network behavior. Disable inference-triggering actions until they traverse the same bounded dispatcher as normal traffic. The upstream dashboard documents a browser-originated provider test: verify the pinned version does not expose credentials or bypass server dispatch controls through direct browser-to-provider requests. Such a path must be disabled or minimally patched before enabling the relevant UI action; it cannot be counted as a guarded request. Management login, status, discovery and ordinary configuration must remain usable without inference.
+
+
 The selected backend's native configuration is the operational source of truth. Deployment provisions an initial configuration only for an empty installation; restart/redeployment must not overwrite accepted UI or T3 Code edits with a generated snapshot. Git holds defaults, schema, extension code and sanitized deployment manifests, never credentials or an independently authoritative live route policy.
+
+Use native locking/write semantics first. Hashes can identify a revision but do not themselves prevent lost updates; demonstrate concurrent writer behavior before promising conditional writes. If safe multi-writer updates are unsupported, serialize administrative writes through existing native controls or constrain writers operationally, and document the limitation. Do not invent a configuration-control subsystem merely to achieve optimistic concurrency.
 
 All supported management writers must use the backend's validated write path. Record a configuration revision/hash and reject conflicting writes, or serialize them where conditional writes are unavailable. Route activation must validate model eligibility, credential ownership, retry ceilings and extension compatibility before becoming effective. Define whether each setting is hot-applied or requires restart, and make the effective revision observable. A write that cannot be applied atomically must leave the prior valid revision active.
 
-Safety invariants (no paid fallback, no inference probes, bounded dispatch, credential ownership and required administrative access controls) are enforced within the backend/provider boundary and cannot be bypassed through another management endpoint or reload. Do not assume a configuration interceptor exists: Phase1 must prove a supported enforcement point. If the selected backend cannot enforce these rules for every writer, record the gap and choose a minimal maintained extension or upstream change before admitting it. A second configuration API/proxy is not the default solution.
+Safety invariants (no paid fallback, no inference probes, bounded dispatch, credential ownership and required administrative access controls) are enforced within the backend/provider boundary and cannot be bypassed through another management endpoint or reload. Do not assume a configuration interceptor exists: Phase1 must prove a supported enforcement point. If the selected backend cannot enforce these rules for every writer, record the gap and evaluate a minimal maintained extension or upstream change before admitting it. If neither is viable, block only the affected provider/operation and continue the verified platform slice; do not expand this into an unbounded core rewrite. A second configuration API/proxy is not the default solution.
 
 Inventory the actual T3 Code hub contract from its implementation or documented integration: HTTP paths/methods, request/response fields, API version, authentication, streaming, timeouts and write behavior. Include connection/setup, model/provider discovery, configuration edits, credential operations where used, status/errors and reconnect. Mark unused operations explicitly rather than inventing requirements. Turn this inventory into executable contract fixtures and a staging integration checklist.
 
@@ -73,7 +79,7 @@ Deliverables: requirements matrix, route inventory, current contract fixtures an
 
 ## Phase1 — Evaluate and pin the foundation
 
-Pin and inspect an exact router-for-me/CLIProxyAPI commit/release and its compatible management panel repository/artifact before executing either with credentials. Start with the upstream Cli-Proxy-API-Management-Center panel; verify compatibility and required workflows. Evaluate release maintenance, provider support, extension APIs and licenses. Do not substitute a Plus backend fork to obtain a panel or provider. A different panel can be selected independently after compatibility checks. The repository currently embeds v7.3.20 for Codex; this is a starting fact, not an instruction to retain or upgrade it blindly.
+Pin and inspect an exact router-for-me/CLIProxyAPI commit/release and its native upstream admin dashboard artifact before executing either with credentials. Use the upstream Cli-Proxy-API-Management-Center dashboard; verify compatibility and required workflows. Evaluate release maintenance, provider support, extension APIs and licenses. Do not substitute a Plus backend fork to obtain a panel or provider. Alternative dashboard selection is out of scope. The repository currently embeds v7.3.20 for Codex; this is a starting fact, not an instruction to retain or upgrade it blindly.
 
 Verify against source and isolated tests:
 
@@ -100,14 +106,14 @@ Deliverables: architecture decision record pinning backend/panel artifacts, exte
 
 Implement only a single ordinary supported provider first:
 
-1. Start the pinned mainline CLIProxyAPI backend and its compatible management panel in staging with explicit configuration and no unused providers/plugins. Expose native APIs through protected ingress without a mandatory custom inference façade.
+1. Start the pinned mainline CLIProxyAPI backend and the native admin dashboard in staging with explicit configuration and no unused providers/plugins. Expose native APIs through protected ingress without a mandatory custom inference façade.
 2. Implement identity, exact model selection, stable conversation scope and correlation IDs within the supported CLIProxyAPI boundary. Never trust a client-supplied internal principal header. Verify T3 Code can connect directly as a CLIProxyAPI hub.
 3. Bootstrap the authoritative native configuration store once, implement validated/revisioned writes and verify persistence across UI edits, T3 Code writes, reload and redeployment. Expose a sanitized effective revision and component versions; reject stale/conflicting writes without losing accepted changes.
 4. Disable unsafe defaults explicitly: automatic credential/tier fallback, quota retries, background inference checks and unbounded bootstrap attempts. Verify behavior by physical outbound request counts, not configuration inspection alone.
 5. Preserve existing public/admin authorization and rate/budget boundaries. Separate management credentials from inference credentials; protect management endpoints with their native authentication and network access policy.
 6. Add diagnostics for provider status/error type, reset, request ID, route/backend version, physical dispatch count and local versus upstream rejection. Redact credentials, prompts and raw reasoning by default.
 
-Choose extension placement here: a supported provider/executor/plugin is the default. A private runtime helper is allowed when native OAuth or runtime reuse requires it; a separate general proxy requires a documented exception. Avoid maintaining a CLIProxyAPI fork merely to add one provider.
+Choose extension placement here: a supported provider/executor/plugin is the default. Implement native OAuth and compatibility behavior in the provider/plugin where feasible. Native-runtime reuse does not automatically authorize a helper: first demonstrate why an in-process provider/plugin cannot reasonably meet the requirement. Any helper or separate proxy then needs a documented exception. Avoid maintaining a CLIProxyAPI fork merely to add one provider.
 
 Exit gate: synthetic tests exercise the full client-to-provider path, native panel management workflows, the inventoried direct T3 Code hub operations, conflicting configuration writes, reload/redeployment, process restart and rollback with no production changes. Prove forbidden dispatch remains blocked after UI/API edits and restart. Verify required native API paths, authentication, discovery, configuration and streaming remain compatible; do not infer hub compatibility from a successful chat request.
 
@@ -117,7 +123,7 @@ Evaluate opencode2api as a bounded component, not a preselected replacement. The
 
 Before implementing a prototype, draw its exact request and state ownership path: inbound API, protocol converter, native compiler, physical transport, credential store, conversation store and reasoning store. Reject candidates requiring competing authoritative histories, placeholder reasoning or duplicate schema conversion. CLIProxyAPI owns inbound conversion only when its executor contract preserves everything needed by native generation; otherwise choose a supported raw/native boundary rather than another translation chain. Native compilation is the final upstream serialization, not a second general API translation.
 
-Compare two prototypes offline: (A) adapting its front end around a native OpenCode component, and (B) retaining the smallest proven portions of the existing native bridge behind CLIProxyAPI. Score custom code, patches, request fidelity, upstream upgrade burden, resource usage, failure semantics and test coverage. Select one and retire the other; do not maintain parallel production implementations.
+First evaluate an in-process CLIProxyAPI provider/executor/plugin, using audited opencode2api and upstream OpenCode logic as references. Prototype only the uncertain seams needed to choose an implementation. Native runtime reuse and an opencode2api service front end are exception candidates, evaluated only if provider/plugin implementation has a demonstrated limitation; neither is a required default prototype. Score custom code, patches, request fidelity, upstream upgrade burden, resource usage, failure semantics and test coverage. Select one implementation and retire unused candidates; do not maintain parallel production implementations.
 
 Required implementation work regardless of choice:
 
@@ -125,7 +131,7 @@ Required implementation work regardless of choice:
 2. **Quota:** stop dispatch on401/403/429 or an uncertain terminal outcome. Preserve structured upstream errors and durable reset state across restarts. A local refusal never advances the provider reset. No anonymous fallback, credential rotation or retry after rejection.
 3. **Background work:** remove inference availability probes. Catalog refresh must be non-inference, bounded and observable. Inventory native discovery/refresh separately; distinguish these requests from inference counts.
 4. **Reasoning:** preserve actual returned reasoning and its tool-turn association through all supported protocols. Never fabricate reasoning to satisfy validation. Missing required history produces a specific error; any cache must be principal/session scoped, bounded and crash-safe. Missing live reasoning is untested coverage.
-5. **Request generation:** reuse upstream native compiler, model resolution, identifiers and transport in their original runtime where practical. Porting native logic into Go is a last resort requiring a documented maintenance cost and differential tests. Do not manually spoof a different version or inject fake tools.
+5. **Request generation:** prefer a provider/plugin implementation using upstream OpenCode request/authentication logic or maintained libraries where feasible. Compare the maintenance cost and fidelity of a narrow port/library integration against a private native-runtime helper only when an extension limitation is established. Neither a Go port nor a helper is presumed superior before evidence; track copied logic against pinned upstream versions with differential tests. Do not manually spoof a different version or inject fake tools.
 6. **Sessions:** define create/reference/resume/model-switch/expiry/delete semantics. Serialize allocation/eviction, protect active requests, delete corresponding native sessions, prevent cross-principal collisions and never replay stored agent work automatically after restart.
 7. **Tools:** caller owns execution unless the route explicitly selects a native agent product. Preserve IDs, parallel calls, results, failures and ordering. Withhold executable calls on length/filter/failure outcomes; never execute client tools inside the provider service implicitly.
 
@@ -172,7 +178,7 @@ Exit gate: required workflows work through the new architecture; the old generic
 
 ## Maintenance budget and completion evidence
 
-Start with one mainline CLIProxyAPI backend, one compatible management panel and zero custom general-purpose proxy services. Private runtime helpers are exceptions only where required by native provider code or isolation. Each custom provider/plugin/helper/patch must declare its purpose, code/state ownership, upstream dependency, tests, upgrade procedure and retirement condition. Keep this inventory beside the route capability matrix.
+Start with one mainline CLIProxyAPI backend, the native admin dashboard and zero custom general-purpose proxy services or runtime helpers by default. Provider/executor/plugin customization comes first; helpers require the documented exception process. Each custom provider/plugin/helper/patch must declare its purpose, code/state ownership, upstream dependency, tests, upgrade procedure and retirement condition. Keep this inventory beside the route capability matrix.
 
 Phase0 records a measured baseline: custom runtime services, authoritative stores, authentication implementations, protocol converters, core patches and custom modules. Every architecture decision includes the before/after count and maintenance cost. No second owner for the same concern is accepted to make a test pass. A proposal exceeding the starting service budget must demonstrate the extension limitation and explain why it reduces total maintenance. A permanent core fork requires an explicit product decision.
 
