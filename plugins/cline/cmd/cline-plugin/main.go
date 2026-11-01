@@ -73,13 +73,20 @@ func main() {}
 // hostTransport adapts the host.http.do callback to the handler Transport.
 type hostTransport struct{}
 
-func (hostTransport) Do(method, url string, headers map[string][]string, body []byte) (int, []byte, error) {
-	payload, err := json.Marshal(map[string]any{
+func (hostTransport) Do(hostCallbackID, method, url string, headers map[string][]string, body []byte) (int, []byte, error) {
+	request := map[string]any{
 		"method":  method,
 		"url":     url,
 		"headers": headers,
 		"body":    body,
-	})
+	}
+	// host_callback_id is per-RPC-call host context: the host validates it
+	// belongs to the calling plugin, so it must ride each request, not live in
+	// shared mutable state.
+	if hostCallbackID != "" {
+		request["host_callback_id"] = hostCallbackID
+	}
+	payload, err := json.Marshal(request)
 	if err != nil {
 		return 0, nil, err
 	}

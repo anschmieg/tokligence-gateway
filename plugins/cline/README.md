@@ -13,6 +13,7 @@ involved.
 | --- | --- | --- |
 | Auth provider | `auth.identifier`, `auth.parse`, `auth.refresh` | Implemented |
 | Model registrar | `model.register` | Implemented (config-backed catalog) |
+| Model provider | `model.static`, `model.for_auth` | Implemented (per-credential publication) |
 | Executor (chat, non-stream) | `executor.identifier`, `executor.execute` | Implemented |
 | Device login | `auth.login.start`, `auth.login.poll` | **Not implemented** (explicit 501) |
 | Streaming inference | `executor.execute_stream` | **Not implemented** (explicit 501) |
@@ -24,20 +25,43 @@ Details:
 - **Credential parsing** (`auth.parse`): recognizes a Cline credential file of
   the shape `{"accessToken","refreshToken","expiresAt"}` (the same shape the
   gateway adapter persists, so an existing credential file is reused without a
-  second credential owner). Foreign payloads are reported unhandled so other
-  parsers can run.
+  second credential owner). A request routed to another provider is refused
+  even when its file carries cline-shaped fields — claiming it would steal
+  another provider's credential. Non-cline payloads are reported unhandled so
+  other parsers can run. Auth IDs are namespaced per file (`cline:<file>`), so
+  multiple credential files stay distinct identities and a re-parse of one file
+  keeps the same ID.
 - **Refresh owner contract** (`auth.refresh`): the host's own auto-refresh loop
   is the single sequential refresh owner; the plugin rotates the credential via
   `POST {api_base_url}/api/v1/auth/refresh` through the host HTTP transport
   (`host.http.do`), retains the previous refresh token when the response rotates
-  only the access token, and returns `NextRefreshAfter` = expiry − 5 min
+  only the access token, preserves the host-assigned
+  `AuthID`/metadata/attributes (a refresh must never fork the credential into a
+  second identity), and returns `NextRefreshAfter` = expiry − 5 min
   (configurable). A 401/403/429/402 refresh outcome is terminal and is never
-  retried by the plugin.
+  retried by the plugin. A refresh request naming a foreign auth provider is
+  rejected before any upstream call.
 - **Request translation** (`executor.execute`): maps public `cline/` model ids
   to upstream ids, floors `max_tokens`/`max_completion_tokens` at 64, preserves
   every other JSON field untouched, sends with the `workos:` bearer prefix and
   the Cline client headers, and unwraps `{success,data}` response envelopes.
-  Unregistered models fail 404; missing credentials fail 401.
+  A `stream:true` request is rejected before any upstream call regardless of
+  which executor method delivered it. An HTTP 2xx body that is malformed, or
+  carries `success:false`, or is empty is an error — never a completion.
+  Missing host transport fails closed (503) instead of returning a fabricated
+  payload. Unregistered models fail 404; missing credentials fail 401.
+- **Per-credential model publication** (`model.for_auth`): the host publishes
+  credential-bound models through the model-provider capability when the
+  executor scope is `oauth` (the registrar's static path is skipped for
+  `oauth`-scoped executors). Answers only the plugin's own provider.
+- **Endpoint safety**: configured `api_base_url`/`workos_base_url` must be
+  HTTPS (loopback HTTP is allowed for isolated test deployments); anything else
+  is rejected at registration/reconfigure time. Configuration is applied
+  atomically: a rejected reconfigure leaves the previous state untouched.
+- **Host callback context**: the per-call `host_callback_id` from each RPC
+  request is forwarded on every `host.http.do` call so the host attributes the
+  request to this plugin instance; no callback ID is kept in global mutable
+  state.
 - **Error taxonomy**: the gateway's `classifyClineUpstreamError` contract
   (`cline_auth_error`, `cline_daily_free_quota_exhausted`, `cline_model_retired`,
   `cline_request_rejected`, `cline_upstream_error`) is preserved so quota and
@@ -91,9 +115,18 @@ performs any client-protocol translation itself.
   field names, and `[]byte` base64 encoding follow `sdk/pluginapi/types.go`,
   `sdk/pluginabi/types.go` and `internal/pluginhost/rpc_client.go` at `v8.0.49`
   (schema version 10).
-- **Verified by focused tests only.** The plugin has NOT been loaded by a live
-  CLIProxyAPI host yet — that is the next integration step (staged, offline,
-  credential-free; the parent deploys after review).
+- **Live-host verified (2026-11-01, credential-free, loopback-only):** the
+  built `cline.so` was loaded by the pinned aarch64 `v8.0.49` binary
+  (SHA-256 `685bbc0a…a5711b` per `checksums.txt`) on `127.0.0.1` with two
+  **fake** credential files. Verified on the real host: `plugin.register`
+  handshake, `/v0/management/plugins` registration
+  (`oauth_provider: cline`), `auth.parse` of both files with distinct
+  identities (`cline:cline.json`, `cline:cline-2.json`), ID stability across
+  a file re-parse, `model.for_auth` publication of `cline/gpt-x` into
+  `/v1/models` and the per-auth model list, and `executor.execute` failing
+  closed with the upstream classification (502) using the fake token —
+  with zero host-callback-context rejections (`host_callback_id` forwarding
+  works). No real credentials, accounts, or live upstreams were involved.
 - Upstream host behavior (cooldown persistence, dispatch accounting, retry
   ceilings) is the host's responsibility and configured at the platform level
   per the gateway refactor plan; this plugin does not add a second owner for
@@ -108,13 +141,16 @@ performs any client-protocol translation itself.
 3. No token counting or HTTP passthrough.
 4. Per-credential proxy (`AuthData.ProxyURL`) is not yet applied to upstream
    calls; the host transport already honors its own proxy policy.
-5. The static catalog is config-declared (fixtures), not discovered from the
-   Cline recommended-models feed — discovery is a later slice and must stay
+5. The catalog is config-declared (fixtures), not discovered from the Cline
+   recommended-models feed — discovery is a later slice and must stay
    non-inference.
+6. The live-host verification covered registration, parse, model publication,
+   and fail-closed execution with fake credentials only; a refresh cycle
+   against the real Cline endpoint has NOT been exercised (no live account,
+   by design) and awaits the parent's staged deployment.
 
 ## Next small step
 
-Load the built `cline.so` into the credential-free staged CLIProxyAPI 8.0.49
-instance (parent-deployed), assert `plugin.register` → `auth.identifier`
-handshake and `model.register` publication through the management API, and add
-`executor.execute_stream` via the host stream bridge.
+Deploy the built `cline.so` into the parent's credential-free staged
+CLIProxyAPI 8.0.49 instance, re-assert the registration/parse/publication
+handshake there, and add `executor.execute_stream` via the host stream bridge.

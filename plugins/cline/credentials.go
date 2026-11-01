@@ -107,6 +107,22 @@ func ParseTokenResponse(body []byte, fallbackRefreshToken string) (Storage, erro
 	}, nil
 }
 
+// authIDNamespace separates cline auth IDs from other providers' auth IDs
+// that could be derived from the same file name.
+const authIDNamespace = "cline"
+
+// AuthIDForFileName derives a stable, per-file auth ID. The host treats Auth.ID
+// as a unique credential identifier across providers, so a bare "cline" would
+// collide when more than one credential file exists; a namespaced, file-scoped
+// ID keeps distinct files distinct and repeated parses of one file stable.
+func AuthIDForFileName(fileName string) string {
+	name := strings.TrimSpace(fileName)
+	if name == "" {
+		name = "cline.json"
+	}
+	return authIDNamespace + ":" + name
+}
+
 // NextRefreshAfter returns the time the host should refresh this credential.
 // A credential that is already inside the refresh buffer refreshes at once.
 func (s Storage) NextRefreshAfter(buffer time.Duration) time.Time {

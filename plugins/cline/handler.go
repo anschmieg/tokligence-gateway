@@ -29,10 +29,12 @@ type RegistrationResponse struct {
 	Capabilities  RegistrationCapabilities `json:"capabilities"`
 }
 
-// RegistrationCapabilities declares auth_provider, model_registrar and executor.
+// RegistrationCapabilities declares auth_provider, model_registrar,
+// model_provider and executor.
 type RegistrationCapabilities struct {
 	AuthProvider          bool     `json:"auth_provider"`
 	ModelRegistrar        bool     `json:"model_registrar"`
+	ModelProvider         bool     `json:"model_provider"`
 	Executor              bool     `json:"executor"`
 	ExecutorModelScope    string   `json:"executor_model_scope"`
 	ExecutorInputFormats  []string `json:"executor_input_formats"`
@@ -76,13 +78,14 @@ type AuthParseResponse struct {
 
 // AuthData mirrors pluginapi.AuthData.
 type AuthData struct {
-	Provider         string         `json:"Provider"`
-	ID               string         `json:"ID,omitempty"`
-	FileName         string         `json:"FileName,omitempty"`
-	Label            string         `json:"Label,omitempty"`
-	StorageJSON      []byte         `json:"StorageJSON,omitempty"`
-	Metadata         map[string]any `json:"Metadata,omitempty"`
-	NextRefreshAfter time.Time      `json:"NextRefreshAfter,omitempty"`
+	Provider         string            `json:"Provider"`
+	ID               string            `json:"ID,omitempty"`
+	FileName         string            `json:"FileName,omitempty"`
+	Label            string            `json:"Label,omitempty"`
+	StorageJSON      []byte            `json:"StorageJSON,omitempty"`
+	Metadata         map[string]any    `json:"Metadata,omitempty"`
+	Attributes       map[string]string `json:"Attributes,omitempty"`
+	NextRefreshAfter time.Time         `json:"NextRefreshAfter,omitempty"`
 }
 
 // AuthRefreshRequest mirrors pluginapi.AuthRefreshRequest.
@@ -135,6 +138,38 @@ type AuthLoginPollResponse struct {
 	Auth    AuthData `json:"Auth,omitempty"`
 }
 
+// ModelRegistrationRequest mirrors pluginapi.ModelRegistrationRequest.
+type ModelRegistrationRequest struct {
+	Plugin               PluginMetadata `json:"Plugin"`
+	MultiProviderModels  bool           `json:"multi_provider_models,omitempty"`
+}
+
+// StaticModelRequest mirrors pluginapi.StaticModelRequest.
+type StaticModelRequest struct {
+	Plugin               PluginMetadata `json:"Plugin"`
+	Host                 HostState      `json:"Host"`
+	MultiProviderModels  bool           `json:"multi_provider_models,omitempty"`
+}
+
+// AuthModelRequest mirrors pluginapi.AuthModelRequest.
+type AuthModelRequest struct {
+	Plugin         PluginMetadata    `json:"Plugin"`
+	AuthID         string            `json:"AuthID"`
+	AuthProvider   string            `json:"AuthProvider"`
+	StorageJSON    []byte            `json:"StorageJSON"`
+	Metadata       map[string]any    `json:"Metadata"`
+	Attributes     map[string]string `json:"Attributes"`
+	Host           HostState         `json:"Host"`
+	HostCallbackID string            `json:"host_callback_id,omitempty"`
+}
+
+// ModelResponse mirrors pluginapi.ModelResponse.
+type ModelResponse struct {
+	Provider       string            `json:"Provider"`
+	Models         []RegisteredModel `json:"Models"`
+	AuthUpdate     AuthData          `json:"AuthUpdate"`
+}
+
 // Handler dispatches plugin RPC methods. Transport (host HTTP callback) is
 // injected so tests can drive refresh with fixtures without any network.
 type Handler struct {
@@ -147,8 +182,11 @@ type Handler struct {
 
 // Transport issues the plugin's upstream HTTP calls through the host callback.
 // The production implementation calls host.http.do; tests provide fixtures.
+// hostCallbackID is the per-call host callback context opened by the host for
+// the RPC method being served; it must be forwarded on every host.http.do
+// call so the host attributes the request to this plugin instance.
 type Transport interface {
-	Do(method, url string, headers map[string][]string, body []byte) (status int, responseBody []byte, err error)
+	Do(hostCallbackID, method, url string, headers map[string][]string, body []byte) (status int, responseBody []byte, err error)
 }
 
 // NewHandler builds a handler with defaults; tests override the transport.
@@ -163,7 +201,9 @@ func NewHandler(transport Transport) *Handler {
 
 // Configure applies the plugin configuration subtree. The host hands the
 // original YAML subtree (yaml.v3, the same library upstream itself uses); the
-// JSON fallback keeps harness fixtures readable.
+// JSON fallback keeps harness fixtures readable. All validation happens on a
+// copy first; the handler is only mutated after the whole config parses, so a
+// rejected reconfigure never leaves a half-applied state.
 func (h *Handler) Configure(raw []byte) error {
 	if len(strings.TrimSpace(string(raw))) == 0 {
 		return fmt.Errorf("cline plugin configuration is empty")
@@ -172,19 +212,33 @@ func (h *Handler) Configure(raw []byte) error {
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		return fmt.Errorf("cline plugin configuration is invalid: %w", err)
 	}
+	apiBaseURL := h.apiBaseURL
 	if strings.TrimSpace(cfg.APIBaseURL) != "" {
-		h.apiBaseURL = strings.TrimRight(strings.TrimSpace(cfg.APIBaseURL), "/")
+		validated, err := SecureBaseURL(cfg.APIBaseURL)
+		if err != nil {
+			return fmt.Errorf("cline api_base_url is rejected: %w", err)
+		}
+		apiBaseURL = validated
 	}
+	workosBaseURL := h.workosBaseURL
 	if strings.TrimSpace(cfg.WorkOSBaseURL) != "" {
-		h.workosBaseURL = strings.TrimRight(strings.TrimSpace(cfg.WorkOSBaseURL), "/")
+		validated, err := SecureBaseURL(cfg.WorkOSBaseURL)
+		if err != nil {
+			return fmt.Errorf("cline workos_base_url is rejected: %w", err)
+		}
+		workosBaseURL = validated
 	}
+	refreshBuffer := h.refreshBuffer
 	if cfg.RefreshBufferMs > 0 {
-		h.refreshBuffer = time.Duration(cfg.RefreshBufferMs) * time.Millisecond
+		refreshBuffer = time.Duration(cfg.RefreshBufferMs) * time.Millisecond
 	}
 	models, err := ParseModelConfig(mustJSON(cfg.Models))
 	if err != nil {
 		return err
 	}
+	h.apiBaseURL = apiBaseURL
+	h.workosBaseURL = workosBaseURL
+	h.refreshBuffer = refreshBuffer
 	h.catalog = &ModelCatalog{Models: models}
 	return nil
 }
@@ -208,6 +262,7 @@ func (h *Handler) Registration(schemaVersion uint32) RegistrationResponse {
 		Capabilities: RegistrationCapabilities{
 			AuthProvider:          true,
 			ModelRegistrar:        true,
+			ModelProvider:         true,
 			Executor:              true,
 			ExecutorModelScope:    "oauth",
 			ExecutorInputFormats:  []string{"openai"},
@@ -241,10 +296,14 @@ func (h *Handler) HandleMethod(method string, request []byte) ([]byte, error) {
 		return nil, withStatus(501, fmt.Errorf("cline device login polling is not implemented in this slice"))
 	case "model.register":
 		return h.handleModelRegister()
+	case "model.static":
+		return h.handleModelStatic()
+	case "model.for_auth":
+		return h.handleModelForAuth(request)
 	case "executor.identifier":
 		return okEnvelope(map[string]string{"identifier": ProviderKey})
 	case "executor.execute":
-		return h.handleExecute(request, false)
+		return h.handleExecute(request)
 	case "executor.execute_stream":
 		return nil, withStatus(501, fmt.Errorf("cline streaming inference is not implemented in this slice"))
 	case "executor.count_tokens":
@@ -261,7 +320,12 @@ func (h *Handler) handleAuthParse(request []byte) ([]byte, error) {
 	if err := decodeInto(request, &req); err != nil {
 		return nil, err
 	}
-	// A cline auth file is recognized by a parsable credential payload.
+	// A parser is invoked for its own provider only when the host routed by
+	// req.Provider; a foreign provider's file that merely looks like ours must
+	// never be claimed (it would steal another provider's credential).
+	if provider := strings.TrimSpace(req.Provider); provider != "" && provider != ProviderKey {
+		return okEnvelope(AuthParseResponse{Handled: false})
+	}
 	storage, err := ParseStorage(req.RawJSON)
 	if err != nil {
 		// Not ours: report unhandled so other parsers can run.
@@ -275,11 +339,15 @@ func (h *Handler) handleAuthParse(request []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Auth IDs must be unique per credential file, not per provider: the host
+	// deduplicates and dispatches by ID. Keep it stable for one file name so
+	// re-parses of the same credential stay the same identity.
+	authID := AuthIDForFileName(fileName)
 	return okEnvelope(AuthParseResponse{
 		Handled: true,
 		Auth: AuthData{
 			Provider:         ProviderKey,
-			ID:               ProviderKey,
+			ID:               authID,
 			FileName:         fileName,
 			Label:            "Cline (free)",
 			StorageJSON:      storageJSON,
@@ -301,6 +369,11 @@ func (h *Handler) handleAuthRefresh(request []byte) ([]byte, error) {
 	if h.transport == nil {
 		return nil, withStatus(500, fmt.Errorf("cline refresh has no host transport"))
 	}
+	// A refresh of one provider's credential must never be accepted for a
+	// request routed to a different provider.
+	if provider := strings.TrimSpace(req.AuthProvider); provider != "" && provider != ProviderKey {
+		return nil, withStatus(400, fmt.Errorf("cline refresh rejected: auth provider %q is not %q", provider, ProviderKey))
+	}
 	body, err := json.Marshal(map[string]any{
 		"refreshToken": storage.RefreshToken,
 		"grantType":    "refresh_token",
@@ -309,7 +382,7 @@ func (h *Handler) handleAuthRefresh(request []byte) ([]byte, error) {
 		return nil, err
 	}
 	headers := RequestHeaders("")
-	status, responseBody, err := h.transport.Do("POST", h.apiBaseURL+"/api/v1/auth/refresh", headers, body)
+	status, responseBody, err := h.transport.Do(req.HostCallbackID, "POST", h.apiBaseURL+"/api/v1/auth/refresh", headers, body)
 	if err != nil {
 		return nil, withStatus(502, fmt.Errorf("cline refresh transport failed: %v", err))
 	}
@@ -327,10 +400,19 @@ func (h *Handler) handleAuthRefresh(request []byte) ([]byte, error) {
 		return nil, err
 	}
 	next := rotated.NextRefreshAfter(h.refreshBuffer)
+	// Preserve the host-assigned identity: an auth record that loses its
+	// ID/FileName/metadata on refresh would fork into a second credential.
+	authID := strings.TrimSpace(req.AuthID)
+	if authID == "" {
+		authID = AuthIDForFileName(req.AuthProvider)
+	}
 	return okEnvelope(AuthRefreshResponse{
 		Auth: AuthData{
 			Provider:         ProviderKey,
+			ID:               authID,
 			StorageJSON:      storageJSON,
+			Metadata:         req.Metadata,
+			Attributes:       req.Attributes,
 			NextRefreshAfter: next,
 		},
 		NextRefreshAfter: next,
@@ -342,6 +424,33 @@ func (h *Handler) handleModelRegister() ([]byte, error) {
 		return nil, fmt.Errorf("cline plugin is not configured")
 	}
 	return okEnvelope(PluginModels{
+		Provider: ProviderKey,
+		Models:   h.catalog.Models,
+	})
+}
+
+// handleModelStatic answers model.static. With executor scope "oauth" the
+// host skips static publication anyway, so no static models are offered.
+func (h *Handler) handleModelStatic() ([]byte, error) {
+	return okEnvelope(ModelResponse{Provider: ProviderKey})
+}
+
+// handleModelForAuth answers model.for_auth: the per-credential model
+// publication path the host uses when the executor scope is "oauth". Only
+// the credential's own provider is answered; a foreign provider's credential
+// gets no models from this plugin.
+func (h *Handler) handleModelForAuth(request []byte) ([]byte, error) {
+	var req AuthModelRequest
+	if err := decodeInto(request, &req); err != nil {
+		return nil, err
+	}
+	if h.catalog == nil {
+		return nil, fmt.Errorf("cline plugin is not configured")
+	}
+	if provider := strings.TrimSpace(req.AuthProvider); provider != "" && provider != ProviderKey {
+		return okEnvelope(ModelResponse{})
+	}
+	return okEnvelope(ModelResponse{
 		Provider: ProviderKey,
 		Models:   h.catalog.Models,
 	})
@@ -367,13 +476,18 @@ type ExecutorResponse struct {
 	Headers map[string][]string `json:"Headers,omitempty"`
 }
 
-func (h *Handler) handleExecute(request []byte, stream bool) ([]byte, error) {
+func (h *Handler) handleExecute(request []byte) ([]byte, error) {
 	var req ExecutorRequest
 	if err := decodeInto(request, &req); err != nil {
 		return nil, err
 	}
 	if h.catalog == nil {
 		return nil, fmt.Errorf("cline plugin is not configured")
+	}
+	// A stream=true request must be rejected before any upstream call,
+	// regardless of which executor method the host used to deliver it.
+	if req.Stream {
+		return nil, withStatus(501, fmt.Errorf("cline streaming inference is not implemented in this slice"))
 	}
 	if !h.catalog.Contains(req.Model) {
 		return nil, withStatus(404, fmt.Errorf("cline model %q is not registered", req.Model))
@@ -385,25 +499,19 @@ func (h *Handler) handleExecute(request []byte, stream bool) ([]byte, error) {
 	// Translation happens against the already-translated chat-completions
 	// payload (the host translated the client format to the executor input
 	// format "openai" before calling us).
-	translated, upstreamModel, err := TranslateChatRequest(req.Model, req.Payload)
+	translated, _, err := TranslateChatRequest(req.Model, req.Payload)
 	if err != nil {
 		return nil, withStatus(400, err)
 	}
 	if h.transport == nil {
-		// Build-only mode: tests and offline verification stop here. The
-		// translated request is returned as the payload so a harness can
-		// assert it without contacting the provider.
-		return okEnvelope(ExecutorResponse{
-			Payload: translated,
-			Headers: map[string][]string{
-				"content-type":           {"application/json"},
-				"x-cline-upstream-model": {upstreamModel},
-			},
-		})
+		// Fail closed: without the host transport no upstream call is possible,
+		// and returning the translated request as a payload would fabricate a
+		// successful inference response.
+		return nil, withStatus(503, fmt.Errorf("cline upstream transport is unavailable"))
 	}
 	headers := RequestHeaders("")
 	headers["Authorization"] = []string{AuthorizationHeader(storage.AccessToken)}
-	status, responseBody, err := h.transport.Do("POST", h.apiBaseURL+"/api/v1/chat/completions", headers, translated)
+	status, responseBody, err := h.transport.Do(req.HostCallbackID, "POST", h.apiBaseURL+"/api/v1/chat/completions", headers, translated)
 	if err != nil {
 		return nil, withStatus(502, fmt.Errorf("cline upstream transport failed: %v", err))
 	}
@@ -411,23 +519,41 @@ func (h *Handler) handleExecute(request []byte, stream bool) ([]byte, error) {
 		classification := ClassifyUpstreamError(status, responseBody)
 		return nil, withStatus(classification.StatusCode, fmt.Errorf("cline upstream failed: %s", classification.Message))
 	}
-	// Normalize the Cline {success, data} envelope when present, matching the
-	// gateway adapter behavior.
-	normalized := normalizeClineResponse(responseBody)
+	// HTTP 200 with a body that is not the Cline success envelope must not be
+	// reported as a successful completion.
+	normalized, err := NormalizeSuccessResponse(responseBody)
+	if err != nil {
+		return nil, withStatus(502, err)
+	}
 	return okEnvelope(ExecutorResponse{
 		Payload: normalized,
 		Headers: map[string][]string{"content-type": {"application/json"}},
 	})
 }
 
-// normalizeClineResponse unwraps {"success":true,"data":...} bodies.
-func normalizeClineResponse(body []byte) []byte {
+// NormalizeSuccessResponse validates an HTTP-2xx upstream body and unwraps the
+// Cline {success,data} envelope when present. A malformed or unsuccessful
+// body is an error, never a completion payload.
+func NormalizeSuccessResponse(body []byte) ([]byte, error) {
+	if len(body) == 0 {
+		return nil, fmt.Errorf("cline upstream response body is empty")
+	}
 	var payload struct {
-		Success bool            `json:"success"`
+		Success *bool           `json:"success"`
 		Data    json.RawMessage `json:"data"`
 	}
-	if err := json.Unmarshal(body, &payload); err != nil || !payload.Success || len(payload.Data) == 0 {
-		return body
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("cline upstream response is not valid JSON: %w", err)
 	}
-	return payload.Data
+	if payload.Success == nil {
+		// Plain (non-enveloped) chat-completion body.
+		return body, nil
+	}
+	if !*payload.Success {
+		return nil, fmt.Errorf("cline upstream response reports failure")
+	}
+	if len(payload.Data) == 0 {
+		return nil, fmt.Errorf("cline upstream response has no data payload")
+	}
+	return payload.Data, nil
 }

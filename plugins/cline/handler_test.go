@@ -15,10 +15,11 @@ type fakeTransport struct {
 }
 
 type fakeCall struct {
-	method string
-	url    string
-	body   []byte
-	auth   string
+	hostCallbackID string
+	method         string
+	url            string
+	body           []byte
+	auth           string
 }
 
 type fakeResponse struct {
@@ -26,12 +27,12 @@ type fakeResponse struct {
 	body   []byte
 }
 
-func (f *fakeTransport) Do(method, url string, headers map[string][]string, body []byte) (int, []byte, error) {
+func (f *fakeTransport) Do(hostCallbackID, method, url string, headers map[string][]string, body []byte) (int, []byte, error) {
 	auth := ""
 	if values := headers["Authorization"]; len(values) > 0 {
 		auth = values[0]
 	}
-	f.calls = append(f.calls, fakeCall{method: method, url: url, body: body, auth: auth})
+	f.calls = append(f.calls, fakeCall{hostCallbackID: hostCallbackID, method: method, url: url, body: body, auth: auth})
 	if f.next < len(f.responses) {
 		resp := f.responses[f.next]
 		f.next++
@@ -103,6 +104,55 @@ func TestConfigureRejectsModelsListWithoutIds(t *testing.T) {
 	err := handler.Configure([]byte("models:\n  - display_name: NoId\n"))
 	if err == nil {
 		t.Fatal("expected error when no model carries an id")
+	}
+}
+
+func TestConfigureIsAtomicOnInvalidModels(t *testing.T) {
+	handler := newConfiguredHandler(t, nil)
+	originalURL := handler.apiBaseURL
+	// A reconfigure that fails mid-parse must not leave the earlier fields
+	// applied while the catalog stays stale.
+	err := handler.Configure([]byte("api_base_url: https://api.cline.example\nmodels:\n  - display_name: NoId\n"))
+	if err == nil {
+		t.Fatal("expected reconfigure failure")
+	}
+	if handler.apiBaseURL != originalURL {
+		t.Fatalf("failed reconfigure must not mutate api_base_url: %q", handler.apiBaseURL)
+	}
+	raw, err := handler.HandleMethod("model.register", nil)
+	if err != nil {
+		t.Fatalf("catalog must survive failed reconfigure: %v", err)
+	}
+	var models PluginModels
+	decodeResult(t, raw, &models)
+	if len(models.Models) != 1 || models.Models[0].ID != "cline/gpt-x" {
+		t.Fatalf("catalog was mutated by a failed reconfigure: %+v", models.Models)
+	}
+}
+
+func TestConfigureRejectsInsecureBaseURLs(t *testing.T) {
+	handler := newConfiguredHandler(t, nil)
+	err := handler.Configure([]byte("api_base_url: http://api.cline.bot\nmodels:\n  - id: gpt-x\n"))
+	if err == nil {
+		t.Fatal("plaintext non-loopback api_base_url must be rejected")
+	}
+	if !strings.Contains(err.Error(), "HTTPS") {
+		t.Fatalf("error = %v", err)
+	}
+	err = handler.Configure([]byte("api_base_url: ftp://api.cline.bot\nmodels:\n  - id: gpt-x\n"))
+	if err == nil {
+		t.Fatal("non-http scheme must be rejected")
+	}
+}
+
+func TestConfigureAllowsLoopbackHTTPForIsolatedTests(t *testing.T) {
+	handler := newConfiguredHandler(t, nil)
+	err := handler.Configure([]byte("api_base_url: http://127.0.0.1:8080\nmodels:\n  - id: gpt-x\n"))
+	if err != nil {
+		t.Fatalf("loopback http must be allowed for isolated tests: %v", err)
+	}
+	if handler.apiBaseURL != "http://127.0.0.1:8080" {
+		t.Fatalf("api base url = %q", handler.apiBaseURL)
 	}
 }
 
@@ -192,6 +242,9 @@ func TestAuthParseHandlesClineCredentialFile(t *testing.T) {
 	if response.Auth.FileName != "cline.json" {
 		t.Fatalf("file name = %q", response.Auth.FileName)
 	}
+	if response.Auth.ID != "cline:cline.json" {
+		t.Fatalf("auth id = %q, want per-file identity", response.Auth.ID)
+	}
 	var storage Storage
 	if err := json.Unmarshal(response.Auth.StorageJSON, &storage); err != nil {
 		t.Fatalf("storage json: %v", err)
@@ -204,10 +257,60 @@ func TestAuthParseHandlesClineCredentialFile(t *testing.T) {
 	}
 }
 
+func TestAuthParseIDsAreUniquePerFileAndStable(t *testing.T) {
+	handler := newConfiguredHandler(t, nil)
+	expiry := time.Now().UTC().Add(2 * time.Hour).Format(time.RFC3339)
+	credential := []byte(`{"accessToken":"at","refreshToken":"rt","expiresAt":"` + expiry + `"}`)
+	ids := map[string]bool{}
+	for _, fileName := range []string{"cline.json", "cline-2.json", "cline.json"} {
+		request := mustMarshal(t, AuthParseRequest{Provider: ProviderKey, FileName: fileName, RawJSON: credential})
+		raw, err := handler.HandleMethod("auth.parse", request)
+		if err != nil {
+			t.Fatalf("auth.parse: %v", err)
+		}
+		var response AuthParseResponse
+		decodeResult(t, raw, &response)
+		if !response.Handled {
+			t.Fatalf("expected %s to be handled", fileName)
+		}
+		if ids[response.Auth.ID] && fileName != "cline.json" {
+			t.Fatalf("auth id %q is not unique across files", response.Auth.ID)
+		}
+		if response.Auth.ID != AuthIDForFileName(fileName) {
+			t.Fatalf("auth id %q must stay stable for %s", response.Auth.ID, fileName)
+		}
+		ids[response.Auth.ID] = true
+	}
+	if len(ids) != 2 {
+		t.Fatalf("expected two distinct ids for two files, got %v", ids)
+	}
+}
+
+func TestAuthParseRefusesForeignProviderCredentialShapedData(t *testing.T) {
+	handler := newConfiguredHandler(t, nil)
+	expiry := time.Now().UTC().Add(2 * time.Hour).Format(time.RFC3339)
+	// A foreign provider's file that happens to carry cline-shaped tokens must
+	// not be claimed: that would steal another provider's credential.
+	request := mustMarshal(t, AuthParseRequest{
+		Provider: "codex",
+		FileName: "codex.json",
+		RawJSON:  []byte(`{"accessToken":"at","refreshToken":"rt","expiresAt":"` + expiry + `"}`),
+	})
+	raw, err := handler.HandleMethod("auth.parse", request)
+	if err != nil {
+		t.Fatalf("auth.parse: %v", err)
+	}
+	var response AuthParseResponse
+	decodeResult(t, raw, &response)
+	if response.Handled {
+		t.Fatal("foreign provider's cline-shaped data must not be handled")
+	}
+}
+
 func TestAuthParsePassesOnForeignCredential(t *testing.T) {
 	handler := newConfiguredHandler(t, nil)
 	request := mustMarshal(t, AuthParseRequest{
-		Provider: "codex",
+		Provider: ProviderKey,
 		RawJSON:  []byte(`{"id_token":"x","refresh_token":"y"}`),
 	})
 	raw, err := handler.HandleMethod("auth.parse", request)
@@ -262,6 +365,60 @@ func TestAuthRefreshRotatesCredential(t *testing.T) {
 	}
 	if response.NextRefreshAfter.Format(time.RFC3339) != "2030-11-01T12:55:00Z" {
 		t.Fatalf("next refresh = %v", response.NextRefreshAfter)
+	}
+}
+
+func TestAuthRefreshPreservesHostIdentityAndForwardsCallbackID(t *testing.T) {
+	transport := &fakeTransport{
+		responses: []fakeResponse{
+			{status: 200, body: []byte(`{"success":true,"data":{"accessToken":"at2","refreshToken":"rt2","expiresAt":"2030-11-01T13:00:00Z"}}`)},
+		},
+	}
+	handler := newConfiguredHandler(t, transport)
+	request := mustMarshal(t, AuthRefreshRequest{
+		AuthID:         "cline:cline.json",
+		AuthProvider:   ProviderKey,
+		StorageJSON:    []byte(`{"accessToken":"at1","refreshToken":"rt1","expiresAt":"2030-11-01T12:00:00Z"}`),
+		Metadata:       map[string]any{"type": ProviderKey, "oauth_provider": ProviderKey},
+		Attributes:     map[string]string{"path": "/auths/cline.json"},
+		HostCallbackID: "cb-42",
+	})
+	raw, err := handler.HandleMethod("auth.refresh", request)
+	if err != nil {
+		t.Fatalf("auth.refresh: %v", err)
+	}
+	var response AuthRefreshResponse
+	decodeResult(t, raw, &response)
+	// The refreshed record must keep the host-assigned identity; a collapsed
+	// identity would fork the credential into a second auth record.
+	if response.Auth.ID != "cline:cline.json" {
+		t.Fatalf("refresh must preserve AuthID, got %q", response.Auth.ID)
+	}
+	if response.Auth.Metadata["oauth_provider"] != ProviderKey {
+		t.Fatalf("refresh must preserve metadata, got %v", response.Auth.Metadata)
+	}
+	if response.Auth.Attributes["path"] != "/auths/cline.json" {
+		t.Fatalf("refresh must preserve attributes, got %v", response.Auth.Attributes)
+	}
+	if len(transport.calls) != 1 || transport.calls[0].hostCallbackID != "cb-42" {
+		t.Fatalf("host callback id must be forwarded to host.http.do, calls = %+v", transport.calls)
+	}
+}
+
+func TestAuthRefreshRejectsForeignProvider(t *testing.T) {
+	transport := &fakeTransport{}
+	handler := newConfiguredHandler(t, transport)
+	request := mustMarshal(t, AuthRefreshRequest{
+		AuthID:       "cline:cline.json",
+		AuthProvider: "codex",
+		StorageJSON:  []byte(`{"accessToken":"at1","refreshToken":"rt1","expiresAt":"2030-11-01T12:00:00Z"}`),
+	})
+	_, err := handler.HandleMethod("auth.refresh", request)
+	if err == nil {
+		t.Fatal("expected refresh rejection for foreign auth provider")
+	}
+	if len(transport.calls) != 0 {
+		t.Fatalf("a rejected refresh must not contact the provider, calls = %d", len(transport.calls))
 	}
 }
 
@@ -372,35 +529,173 @@ func TestModelRegisterPublishesConfiguredCatalog(t *testing.T) {
 	}
 }
 
-func TestExecuteTranslatesRequestWithoutTransport(t *testing.T) {
-	// Build-only mode (nil transport): the translated upstream payload is
-	// returned so a harness can assert it without contacting the provider.
+func TestRegistrationDeclaresModelProviderCapability(t *testing.T) {
 	handler := newConfiguredHandler(t, nil)
-	payload := []byte(`{"model":"cline/gpt-x","messages":[{"role":"user","content":"hi"}],"max_tokens":8}`)
+	raw, err := handler.HandleMethod("plugin.register", mustMarshal(t, LifecycleRequest{
+		ConfigYAML:    []byte(`{"models":[{"id":"gpt-x"}]}`),
+		SchemaVersion: 10,
+	}))
+	if err != nil {
+		t.Fatalf("plugin.register: %v", err)
+	}
+	var registration RegistrationResponse
+	decodeResult(t, raw, &registration)
+	if !registration.Capabilities.ModelProvider {
+		t.Fatal("model_provider capability must be declared for oauth-scope per-auth publication")
+	}
+}
+
+func TestModelStaticOffersNoStaticModels(t *testing.T) {
+	// Executor scope is "oauth": the host skips static publication, and the
+	// plugin must not offer static models through model.static either.
+	handler := newConfiguredHandler(t, nil)
+	raw, err := handler.HandleMethod("model.static", nil)
+	if err != nil {
+		t.Fatalf("model.static: %v", err)
+	}
+	var response ModelResponse
+	decodeResult(t, raw, &response)
+	if len(response.Models) != 0 {
+		t.Fatalf("model.static must offer no static models, got %+v", response.Models)
+	}
+}
+
+func TestModelForAuthPublishesCatalogForOwnProvider(t *testing.T) {
+	handler := newConfiguredHandler(t, nil)
+	request := mustMarshal(t, AuthModelRequest{
+		AuthID:       "cline:cline.json",
+		AuthProvider: ProviderKey,
+		StorageJSON:  []byte(`{"accessToken":"at","refreshToken":"rt","expiresAt":"2030-11-01T12:00:00Z"}`),
+	})
+	raw, err := handler.HandleMethod("model.for_auth", request)
+	if err != nil {
+		t.Fatalf("model.for_auth: %v", err)
+	}
+	var response ModelResponse
+	decodeResult(t, raw, &response)
+	if response.Provider != ProviderKey {
+		t.Fatalf("provider = %q", response.Provider)
+	}
+	if len(response.Models) != 1 || response.Models[0].ID != "cline/gpt-x" {
+		t.Fatalf("models = %+v", response.Models)
+	}
+}
+
+func TestModelForAuthRefusesForeignProvider(t *testing.T) {
+	handler := newConfiguredHandler(t, nil)
+	request := mustMarshal(t, AuthModelRequest{
+		AuthID:       "codex:codex.json",
+		AuthProvider: "codex",
+		StorageJSON:  []byte(`{"accessToken":"at","refreshToken":"rt","expiresAt":"2030-11-01T12:00:00Z"}`),
+	})
+	raw, err := handler.HandleMethod("model.for_auth", request)
+	if err != nil {
+		t.Fatalf("model.for_auth: %v", err)
+	}
+	var response ModelResponse
+	decodeResult(t, raw, &response)
+	if len(response.Models) != 0 {
+		t.Fatalf("a foreign provider's credential must get no cline models, got %+v", response.Models)
+	}
+}
+
+func TestExecuteFailsClosedWithoutTransport(t *testing.T) {
+	// Without the host transport no upstream call is possible; returning the
+	// translated request would fabricate a successful inference response.
+	handler := newConfiguredHandler(t, nil)
 	request := mustMarshal(t, ExecutorRequest{
 		AuthID:      ProviderKey,
 		Model:       "cline/gpt-x",
-		Payload:     payload,
+		Payload:     []byte(`{"model":"cline/gpt-x","messages":[{"role":"user","content":"hi"}],"max_tokens":8}`),
 		StorageJSON: []byte(`{"accessToken":"at","refreshToken":"rt","expiresAt":"2030-11-01T12:00:00Z"}`),
 	})
-	raw, err := handler.HandleMethod("executor.execute", request)
-	if err != nil {
-		t.Fatalf("executor.execute: %v", err)
+	_, err := handler.HandleMethod("executor.execute", request)
+	if err == nil {
+		t.Fatal("expected fail-closed error without transport")
 	}
-	var response ExecutorResponse
-	decodeResult(t, raw, &response)
-	var body map[string]any
-	if err := json.Unmarshal(response.Payload, &body); err != nil {
-		t.Fatalf("payload: %v", err)
+	if !strings.Contains(err.Error(), "transport is unavailable") {
+		t.Fatalf("error = %v", err)
 	}
-	if body["model"] != "gpt-x" {
-		t.Fatalf("model = %v", body["model"])
+}
+
+func TestExecuteStreamRequestFailsBeforeAnyHTTP(t *testing.T) {
+	// A stream=true request must fail regardless of which executor method the
+	// host used to deliver it, and before any upstream call is attempted.
+	transport := &fakeTransport{}
+	handler := newConfiguredHandler(t, transport)
+	request := mustMarshal(t, ExecutorRequest{
+		AuthID:      ProviderKey,
+		Model:       "cline/gpt-x",
+		Stream:      true,
+		Payload:     []byte(`{"model":"cline/gpt-x","messages":[],"stream":true}`),
+		StorageJSON: []byte(`{"accessToken":"at","refreshToken":"rt","expiresAt":"2030-11-01T12:00:00Z"}`),
+	})
+	_, err := handler.HandleMethod("executor.execute", request)
+	if err == nil {
+		t.Fatal("expected stream rejection through executor.execute")
 	}
-	if body["max_tokens"] != float64(MinTokenFloor) {
-		t.Fatalf("max_tokens = %v", body["max_tokens"])
+	if !strings.Contains(err.Error(), "not implemented") {
+		t.Fatalf("error = %v", err)
 	}
-	if response.Headers["x-cline-upstream-model"][0] != "gpt-x" {
-		t.Fatalf("upstream model header = %v", response.Headers)
+	if len(transport.calls) != 0 {
+		t.Fatalf("stream request must not contact upstream, calls = %d", len(transport.calls))
+	}
+}
+
+func TestExecuteRejectsHTTP200ErrorBody(t *testing.T) {
+	transport := &fakeTransport{
+		responses: []fakeResponse{
+			{status: 200, body: []byte(`{"success":false,"error":{"message":"denied"}}`)},
+		},
+	}
+	handler := newConfiguredHandler(t, transport)
+	request := mustMarshal(t, ExecutorRequest{
+		AuthID:      ProviderKey,
+		Model:       "cline/gpt-x",
+		Payload:     []byte(`{"model":"cline/gpt-x","messages":[]}`),
+		StorageJSON: []byte(`{"accessToken":"at","refreshToken":"rt","expiresAt":"2030-11-01T12:00:00Z"}`),
+	})
+	_, err := handler.HandleMethod("executor.execute", request)
+	if err == nil {
+		t.Fatal("HTTP 200 with success=false must not count as success")
+	}
+}
+
+func TestExecuteRejectsMalformedHTTP200Body(t *testing.T) {
+	transport := &fakeTransport{
+		responses: []fakeResponse{
+			{status: 200, body: []byte(`not json at all`)},
+		},
+	}
+	handler := newConfiguredHandler(t, transport)
+	request := mustMarshal(t, ExecutorRequest{
+		AuthID:      ProviderKey,
+		Model:       "cline/gpt-x",
+		Payload:     []byte(`{"model":"cline/gpt-x","messages":[]}`),
+		StorageJSON: []byte(`{"accessToken":"at","refreshToken":"rt","expiresAt":"2030-11-01T12:00:00Z"}`),
+	})
+	_, err := handler.HandleMethod("executor.execute", request)
+	if err == nil {
+		t.Fatal("malformed HTTP 200 body must not count as success")
+	}
+}
+
+func TestExecuteRejectsEmptyHTTP200Body(t *testing.T) {
+	transport := &fakeTransport{
+		responses: []fakeResponse{
+			{status: 200, body: nil},
+		},
+	}
+	handler := newConfiguredHandler(t, transport)
+	request := mustMarshal(t, ExecutorRequest{
+		AuthID:      ProviderKey,
+		Model:       "cline/gpt-x",
+		Payload:     []byte(`{"model":"cline/gpt-x","messages":[]}`),
+		StorageJSON: []byte(`{"accessToken":"at","refreshToken":"rt","expiresAt":"2030-11-01T12:00:00Z"}`),
+	})
+	_, err := handler.HandleMethod("executor.execute", request)
+	if err == nil {
+		t.Fatal("empty HTTP 200 body must not count as success")
 	}
 }
 
@@ -525,6 +820,34 @@ func TestExecuteUpstreamAuthErrorSurfacesClassification(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "Cline login is missing or expired") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestUpstreamErrorsNeverEchoAccessToken(t *testing.T) {
+	// Terminal and quota failures classify into fixed messages; the credential
+	// token values must never reach error strings.
+	transport := &fakeTransport{
+		responses: []fakeResponse{
+			{status: 401, body: []byte(`{"error":"at"}`)},
+			{status: 429, body: []byte(`{"message":"free limit reached on model gpt-x"}`)},
+			{status: 500, body: []byte(`Bearer workos:at`)},
+		},
+	}
+	handler := newConfiguredHandler(t, transport)
+	request := mustMarshal(t, ExecutorRequest{
+		AuthID:      ProviderKey,
+		Model:       "cline/gpt-x",
+		Payload:     []byte(`{"model":"cline/gpt-x","messages":[]}`),
+		StorageJSON: []byte(`{"accessToken":"secret-access-token","refreshToken":"rt","expiresAt":"2030-11-01T12:00:00Z"}`),
+	})
+	for i := 0; i < 3; i++ {
+		_, err := handler.HandleMethod("executor.execute", request)
+		if err == nil {
+			t.Fatalf("call %d: expected upstream failure", i)
+		}
+		if strings.Contains(err.Error(), "secret-access-token") || strings.Contains(err.Error(), "workos:secret") {
+			t.Fatalf("call %d: error leaks the access token: %v", i, err)
+		}
 	}
 }
 
