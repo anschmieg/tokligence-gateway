@@ -5,7 +5,7 @@ Date: 2026-11-01.
 
 ## Product decision
 
-Reposition the gateway as a small policy, discovery and compatibility product built on maintained provider infrastructure. A selected CLIProxyAPI Plus distribution becomes the primary API and provider foundation, using its compatible native management panel. Plus is a backend variant, not a separate management UI layered over stock CLIProxyAPI. Pin one backend repository/release and one compatible panel artifact; do not run stock and Plus as competing foundations. Customizations belong in supported providers, executors or plugins wherever reasonable. A separate service is an exception requiring a demonstrated extension/runtime limitation. The current Tokligence backend becomes a migration backend rather than the mandatory foundation.
+Reposition the gateway as a small policy, discovery and compatibility product built on maintained provider infrastructure. Mainline [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) is the backend foundation, with its compatible management panel. The CLIProxyAPIPlus backend fork is not selected. Pin the mainline backend release and the separately identified panel artifact. Customizations belong in supported providers, executors or plugins wherever reasonable. A separate service is an exception requiring a demonstrated extension/runtime limitation. The current Tokligence backend becomes a migration backend rather than the mandatory foundation.
 
 Success means fewer independently maintained authentication flows, serializers, retry loops and session stores, while preserving the client workflows and specialist APIs users need. Merely replacing one large custom implementation with a fork of another does not satisfy the goal.
 
@@ -15,9 +15,9 @@ The plan does not assume that CLIProxyAPI supports every provider, that opencode
 
 ```mermaid
 flowchart LR
-    C[Claude Code / Codex / other clients] --> Q[Selected Plus native API]
+    C[Claude Code / Codex / other clients] --> Q[Mainline CLIProxyAPI native API]
     T[T3 Code hub integration] --> Q
-    M[Compatible native management panel] --> A[Selected Plus management API]
+    M[Compatible native management panel] --> A[Mainline CLIProxyAPI management API]
     A --> Q
     Q --> P[Maintained provider integrations]
     Q --> X[Custom providers / executors / plugins]
@@ -73,7 +73,7 @@ Deliverables: requirements matrix, route inventory, current contract fixtures an
 
 ## Phase1 — Evaluate and pin the foundation
 
-Select and inspect one exact CLIProxyAPI Plus backend repository/commit/release and its compatible native panel repository/artifact before executing either with credentials. Compare its divergence from stock CLIProxyAPI, release maintenance, provider support, extension APIs and licenses. Do not infer compatibility from a shared project name. The repository currently embeds v7.3.20 for Codex; this is a starting fact, not an instruction to retain or upgrade it blindly.
+Pin and inspect an exact router-for-me/CLIProxyAPI commit/release and its compatible management panel repository/artifact before executing either with credentials. Start with the upstream Cli-Proxy-API-Management-Center panel; verify compatibility and required workflows. Evaluate release maintenance, provider support, extension APIs and licenses. Do not substitute a Plus backend fork to obtain a panel or provider. A different panel can be selected independently after compatibility checks. The repository currently embeds v7.3.20 for Codex; this is a starting fact, not an instruction to retain or upgrade it blindly.
 
 Verify against source and isolated tests:
 
@@ -100,7 +100,7 @@ Deliverables: architecture decision record pinning backend/panel artifacts, exte
 
 Implement only a single ordinary supported provider first:
 
-1. Start the selected Plus backend and its compatible native panel in staging with explicit configuration and no unused providers/plugins. Expose native APIs through protected ingress without a mandatory custom inference façade.
+1. Start the pinned mainline CLIProxyAPI backend and its compatible management panel in staging with explicit configuration and no unused providers/plugins. Expose native APIs through protected ingress without a mandatory custom inference façade.
 2. Implement identity, exact model selection, stable conversation scope and correlation IDs within the supported CLIProxyAPI boundary. Never trust a client-supplied internal principal header. Verify T3 Code can connect directly as a CLIProxyAPI hub.
 3. Bootstrap the authoritative native configuration store once, implement validated/revisioned writes and verify persistence across UI edits, T3 Code writes, reload and redeployment. Expose a sanitized effective revision and component versions; reject stale/conflicting writes without losing accepted changes.
 4. Disable unsafe defaults explicitly: automatic credential/tier fallback, quota retries, background inference checks and unbounded bootstrap attempts. Verify behavior by physical outbound request counts, not configuration inspection alone.
@@ -172,11 +172,11 @@ Exit gate: required workflows work through the new architecture; the old generic
 
 ## Maintenance budget and completion evidence
 
-Start with one Plus backend, one native management panel and zero custom general-purpose proxy services. Private runtime helpers are exceptions only where required by native provider code or isolation. Each custom provider/plugin/helper/patch must declare its purpose, code/state ownership, upstream dependency, tests, upgrade procedure and retirement condition. Keep this inventory beside the route capability matrix.
+Start with one mainline CLIProxyAPI backend, one compatible management panel and zero custom general-purpose proxy services. Private runtime helpers are exceptions only where required by native provider code or isolation. Each custom provider/plugin/helper/patch must declare its purpose, code/state ownership, upstream dependency, tests, upgrade procedure and retirement condition. Keep this inventory beside the route capability matrix.
 
 Phase0 records a measured baseline: custom runtime services, authoritative stores, authentication implementations, protocol converters, core patches and custom modules. Every architecture decision includes the before/after count and maintenance cost. No second owner for the same concern is accepted to make a test pass. A proposal exceeding the starting service budget must demonstrate the extension limitation and explain why it reduces total maintenance. A permanent core fork requires an explicit product decision.
 
-Completion requires a report showing which old services/modules/stores were removed, which remain for specialist routes, how many patches remain and who owns upgrades. Retaining the old general gateway indefinitely alongside Plus does not count as completing the shift. Record external provider blockers separately from platform migration completion and from provider live acceptance.
+Completion requires a report showing which old services/modules/stores were removed, which remain for specialist routes, how many patches remain and who owns upgrades. Retaining the old general gateway indefinitely alongside mainline CLIProxyAPI does not count as completing the shift. Record external provider blockers separately from platform migration completion and from provider live acceptance.
 
 ## Execution order and stopping rules
 
