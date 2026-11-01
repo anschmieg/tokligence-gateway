@@ -2,9 +2,7 @@
 
 **Parent review: experimental candidate, NOT admitted for deployment.**
 Component tests/build do not establish working host dispatch. Blocking findings:
-host callbacks omit per-request callback IDs; the cgo shim/bridge envelope
-contract needs reconciliation; stream close/cancellation and successful terminal
-validation are incomplete; buffered execution returns SSE rather than a validated
+successful terminal validation is incomplete; buffered execution returns SSE rather than a validated
 completed response. Trusted caller principal scope must be
 proven through the host (auth-ID fallback is credential scope only). Console GET
 passthrough now admits only the parsed same-origin native config path and never
@@ -26,6 +24,13 @@ Reconfiguration is atomic and refuses active buffered/async requests; unchanged
 state paths reuse their lock, failed acquisition leaves the old state untouched,
 and replaced idle registries close. Refresh preserves the host credential ID,
 metadata and attributes; foreign provider requests are rejected before HTTP.
+
+Host transport now consumes the cgo shim's raw result exactly once and all HTTP
+handler paths forward their per-request callback IDs. Stream handles close once;
+cancellation closes the host stream even while stream_read is blocked, and
+abandonment unblocks pending sends. Fake-RPC handler/bridge tests cover these
+contracts, malformed results and pre-dispatch cancellation; actual-host smoke
+is still pending.
 
 Corrected implementation slice for the OpenCode Zen provider at the
 provider/executor level of the pinned mainline

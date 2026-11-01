@@ -390,7 +390,7 @@ func (h *Handler) handleAuthRefresh(request []byte) ([]byte, error) {
 		"accept":       {"application/json"},
 		"user-agent":   {UserAgent(h.cfg.App())},
 	}
-	result, err := h.transport.Do(context.Background(), "POST", server+"/auth/device/token", headers, body)
+	result, err := h.transport.Do(WithHostCallbackID(context.Background(), req.HostCallbackID), "POST", server+"/auth/device/token", headers, body)
 	if err != nil {
 		return nil, withStatus(502, fmt.Errorf("opencode refresh transport failed: %v", err))
 	}
@@ -581,7 +581,7 @@ func (h *Handler) handleExecute(request []byte, stream bool) ([]byte, error) {
 	}
 	headers := InferenceHeaders(h.cfg.App(), sessionID, affinity, h.cfg.ProjectID, credential.Authorization())
 	if !stream {
-		result, errDo := h.transport.Do(context.Background(), "POST", endpoint, headers, payload)
+		result, errDo := h.transport.Do(WithHostCallbackID(context.Background(), req.HostCallbackID), "POST", endpoint, headers, payload)
 		if errDo != nil {
 			return nil, withStatus(502, fmt.Errorf("opencode upstream transport failed: %v", errDo))
 		}
@@ -609,7 +609,7 @@ func (h *Handler) handleExecute(request []byte, stream bool) ([]byte, error) {
 // stream with a structured error_detail (status + retry-after) so streamed
 // and buffered requests record cooldown identically.
 func (h *Handler) handleExecuteStream(req ExecutorRequest, endpoint string, headers map[string][]string, payload []byte, release func()) ([]byte, error) {
-	result, err := h.transport.DoStream(context.Background(), "POST", endpoint, headers, payload)
+	result, err := h.transport.DoStream(WithHostCallbackID(context.Background(), req.HostCallbackID), "POST", endpoint, headers, payload)
 	if err != nil {
 		closeStreamWithError(req.StreamID, err)
 		return nil, withStatus(502, fmt.Errorf("opencode upstream stream transport failed: %v", err))
@@ -758,12 +758,13 @@ func (h *Handler) releaseSessionLease(req ExecutorRequest) {
 // (config discovery). Arbitrary upstream HTTP is refused.
 func (h *Handler) handleExecutorHTTPRequest(request []byte) ([]byte, error) {
 	var req struct {
-		AuthProvider string              `json:"AuthProvider"`
-		Method       string              `json:"Method"`
-		URL          string              `json:"URL"`
-		Headers      map[string][]string `json:"Headers"`
-		Body         wireBytes           `json:"Body"`
-		StorageJSON  wireBytes           `json:"StorageJSON"`
+		HostCallbackID string              `json:"host_callback_id,omitempty"`
+		AuthProvider   string              `json:"AuthProvider"`
+		Method         string              `json:"Method"`
+		URL            string              `json:"URL"`
+		Headers        map[string][]string `json:"Headers"`
+		Body           wireBytes           `json:"Body"`
+		StorageJSON    wireBytes           `json:"StorageJSON"`
 	}
 	if err := decodeInto(request, &req); err != nil {
 		return nil, err
@@ -804,7 +805,7 @@ func (h *Handler) handleExecutorHTTPRequest(request []byte) ([]byte, error) {
 	for name, value := range consoleHeaders {
 		headerMap[name] = []string{value}
 	}
-	result, err := h.transport.Do(context.Background(), "GET", req.URL, headerMap, nil)
+	result, err := h.transport.Do(WithHostCallbackID(context.Background(), req.HostCallbackID), "GET", req.URL, headerMap, nil)
 	if err != nil {
 		return nil, withStatus(502, fmt.Errorf("opencode console transport failed: %v", err))
 	}
