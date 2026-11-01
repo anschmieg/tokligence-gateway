@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -45,7 +46,6 @@ REQUIRED_SHAPES = [
     "config-version: 8",
     f'host: "{base.BIND_HOST}"',
     f"port: {base.BIND_PORT}",
-    "allow-remote: false",
     "disable-auto-update-panel: true",
     'catalog: ""',
     "enabled: false",
@@ -54,9 +54,7 @@ REQUIRED_SHAPES = [
 # make documented provider entries prevent an ordinary staging restart.
 # These string checks are only a bootstrap-shape sanity check, not a YAML
 # parser or security boundary against an administrator editing the config.
-FORBIDDEN_SHAPES = [
-    ("allow-remote: true", "remote management access"),
-]
+FORBIDDEN_SHAPES = []
 
 
 def die(message: str) -> None:
@@ -77,6 +75,9 @@ def config_ok(config: Path) -> None:
         die("staging config is missing or unreadable; run bootstrap first")
     if any(item not in data for item in REQUIRED_SHAPES):
         die("config does not match the expected loopback staging shape; refusing to operate")
+    expected_remote = "true" if base.BIND_HOST != "127.0.0.1" else "false"
+    if f"allow-remote: {expected_remote}" not in data:
+        die("management access setting does not match the selected private listener")
     for pattern, label in FORBIDDEN_SHAPES:
         if re.search(pattern, data):
             die(f"config contains {label}; this loopback staging tool refuses to operate")
@@ -430,6 +431,7 @@ def main() -> None:
     p_smoke = sub.add_parser("smoke", help="health, dashboard, auth boundary, one-restart persistence")
     for p in (p_start, p_stop, p_status, p_smoke):
         p.add_argument("--root", default=base.DEFAULT_ROOT, help=f"staging root (default: {base.DEFAULT_ROOT})")
+        p.add_argument("--listen-host", default=base.BIND_HOST, help="127.0.0.1 or this node's literal Tailscale IPv4 address")
     p_stop.add_argument("--force", action="store_true", help="escalate to SIGKILL if SIGTERM is ignored")
     p_start.set_defaults(func=cmd_start)
     p_stop.set_defaults(func=cmd_stop)
@@ -437,6 +439,14 @@ def main() -> None:
     p_smoke.set_defaults(func=cmd_smoke)
 
     args = parser.parse_args()
+    try:
+        address = ipaddress.ip_address(args.listen_host)
+    except ValueError:
+        die("listen host must be a literal loopback or Tailscale IPv4 address")
+    if str(address) != "127.0.0.1" and address not in ipaddress.ip_network("100.64.0.0/10"):
+        die("listen host must be loopback or Tailscale IPv4")
+    base.BIND_HOST = str(address)
+    REQUIRED_SHAPES[1] = f'host: "{base.BIND_HOST}"'
     raise SystemExit(args.func(args))
 
 
