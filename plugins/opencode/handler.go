@@ -2,6 +2,8 @@ package opencode
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -155,23 +157,43 @@ type Handler struct {
 	nowMs     NowMs
 	cfg       PluginConfig
 	catalog   []RegisteredModel
+	registry  *SessionRegistry
 }
 
-// NewHandler builds a handler with the given transport and clock.
+// NewHandler builds a handler with the given transport and clock. The
+// registry starts in-memory; AttachRegistry upgrades it to persistent
+// before serving traffic.
 func NewHandler(transport Transport, nowMs NowMs) *Handler {
 	if nowMs == nil {
 		nowMs = func() int64 { return time.Now().UnixMilli() }
 	}
-	return &Handler{transport: transport, nowMs: nowMs}
+	registry, _ := NewSessionRegistry(RegistryOptions{NowMs: nowMs})
+	return &Handler{transport: transport, nowMs: nowMs, registry: registry}
 }
 
-// Configure applies the plugin configuration subtree.
+// AttachRegistry replaces the handler's registry with a persistent one.
+// Called by the cgo entry point after the config supplies the state path.
+func (h *Handler) AttachRegistry(registry *SessionRegistry) {
+	if registry != nil {
+		h.registry = registry
+	}
+}
+
+// Configure applies the plugin configuration subtree. A configured
+// session_state_path upgrades the registry to persistent form.
 func (h *Handler) Configure(raw []byte) error {
 	cfg, err := DecodeConfig(raw)
 	if err != nil {
 		return err
 	}
 	h.cfg = cfg
+	if path := cfg.registryStatePath(); path != "" {
+		registry, err := NewSessionRegistry(RegistryOptions{Path: path, NowMs: h.nowMs})
+		if err != nil {
+			return err
+		}
+		h.registry = registry
+	}
 	catalog, err := BuildModelCatalog(cfg)
 	if err != nil {
 		// An empty model list is a valid not-yet-configured state; the
@@ -243,6 +265,8 @@ func (h *Handler) HandleMethod(method string, request []byte) ([]byte, error) {
 		return nil, withStatus(501, fmt.Errorf("opencode token counting is not implemented in this slice; no fabricated counts"))
 	case "executor.http_request":
 		return h.handleExecutorHTTPRequest(request)
+	case "session.stats":
+		return h.handleSessionStats()
 	default:
 		return nil, fmt.Errorf("unknown method: %s", method)
 	}
@@ -383,16 +407,30 @@ func (h *Handler) handleModelForAuth(request []byte) ([]byte, error) {
 	return okEnvelope(PluginModels{Provider: ProviderKey, Models: h.catalog})
 }
 
-// sessionIDFromMetadata reads the caller-supplied OpenCode session identity
-// from the host request metadata. The host's canonical_session_id is the
-// reconciled conversation identity (explicit client headers/body fields,
-// caller-scoped); an OpenCode-shaped value names a real created session.
-// The host's own derived/affinity namespaces (derived:, affinity:, header:,
-// ctx:v1:, ...) are NOT OpenCode sessions and are never forwarded.
-func sessionIDFromMetadata(metadata map[string]any) (sessionID, affinity string) {
-	if metadata == nil {
-		return "", ""
+// sessionIDFromHeaders reads a caller-supplied OpenCode session identity
+// from the request headers the host forwards. Only the exact native shape is
+// accepted; the host's affinity/session headers may carry other namespaces.
+func sessionIDFromHeaders(headers map[string][]string) (sessionID string) {
+	for _, name := range []string{"x-opencode-session-id", "x-session-affinity", "x-opencode-session"} {
+		for _, value := range headers[name] {
+			trimmed := strings.TrimSpace(value)
+			if ValidSessionID(trimmed) {
+				return trimmed
+			}
+		}
 	}
+	return ""
+}
+
+// sessionIDFromMetadata reads a caller-supplied native session id from the
+// host metadata. Only an exact native shape (optionally as the suffix after
+// the last ':' in a host namespace) is returned; foreign identities yield ""
+// so the registry path resolves the conversation instead.
+func sessionIDFromMetadata(headers map[string][]string, metadata map[string]any) string {
+	if metadata == nil {
+		return ""
+	}
+	_ = headers
 	for _, key := range []string{"canonical_session_id", "derived_session_id"} {
 		value, _ := metadata[key].(string)
 		value = strings.TrimSpace(value)
@@ -400,26 +438,16 @@ func sessionIDFromMetadata(metadata map[string]any) (sessionID, affinity string)
 			continue
 		}
 		if ValidSessionID(value) {
-			if sessionID == "" {
-				sessionID = value
-			}
-			continue
+			return value
 		}
-		// Affinity namespaces may carry the native ses_ id under a host
-		// prefix; accept only the exact native shape after unwrapping.
 		if idx := strings.LastIndex(value, ":"); idx >= 0 {
 			candidate := strings.TrimSpace(value[idx+1:])
 			if ValidSessionID(candidate) {
-				if sessionID == "" {
-					sessionID = candidate
-				}
+				return candidate
 			}
 		}
 	}
-	if sessionID != "" {
-		return sessionID, sessionID
-	}
-	return "", ""
+	return ""
 }
 
 // handleExecute is the single inference seam for buffered and streaming
@@ -456,13 +484,22 @@ func (h *Handler) handleExecute(request []byte, stream bool) ([]byte, error) {
 		// the upstream. The error names the actual state and the owner.
 		return nil, withStatus(401, fmt.Errorf("opencode access token is expired (expires %d, now %d); the credential must be refreshed by its single sequential refresh owner (the host auto-refresh loop drives auth.refresh; if it is not scheduled, seed a valid credential or arrange the refresh-owner handoff)", credential.Expiry(), nowMs))
 	}
-	metadataSessionID, _ := sessionIDFromMetadata(req.Metadata)
-	sessionID, affinity, errSession := SessionIdentity(
-		conversationID(req.Metadata), sessionIDFromHeaders(req.Headers), metadataSessionID,
-	)
-	if errSession != nil {
-		// The precise session-lifecycle gap, never a minted identity.
-		return nil, withStatus(428, errSession)
+	metadataSessionID := sessionIDFromMetadata(req.Headers, req.Metadata)
+	var sessionID, affinity string
+	if metadataSessionID != "" || sessionIDFromHeaders(req.Headers) != "" {
+		sessionID, affinity = SessionIdentity(sessionIDFromHeaders(req.Headers), metadataSessionID)
+	} else {
+		// No caller-supplied native identity: resolve (or mint) the
+		// conversation's persistent provider session from the registry,
+		// keyed by principal digest + host conversation identity.
+		resolved, errResolve := h.sessionForRequest(req)
+		if errResolve != nil {
+			return nil, withStatus(422, errResolve)
+		}
+		sessionID, affinity = resolved, resolved
+	}
+	if !ValidSessionID(sessionID) {
+		return nil, withStatus(422, fmt.Errorf("opencode dispatch session identity %q is not a native OpenCode session id; only caller-supplied native ids or registry-minted ids are forwarded", sessionID))
 	}
 	payload, err := shapeInferenceRequest(req.Payload.bytes(), upstreamModel)
 	if err != nil {
@@ -479,6 +516,7 @@ func (h *Handler) handleExecute(request []byte, stream bool) ([]byte, error) {
 	headers := InferenceHeaders(h.cfg.App(), sessionID, affinity, h.cfg.ProjectID, credential.Authorization())
 	if !stream {
 		result, errDo := h.transport.Do(context.Background(), "POST", endpoint, headers, payload)
+		h.releaseSessionLease(req)
 		if errDo != nil {
 			return nil, withStatus(502, fmt.Errorf("opencode upstream transport failed: %v", errDo))
 		}
@@ -526,6 +564,7 @@ func (h *Handler) handleExecuteStream(req ExecutorRequest, endpoint string, head
 			if recovered := recover(); recovered != nil {
 				closeStreamWithError(req.StreamID, fmt.Errorf("opencode stream relay panic: %v", recovered))
 			}
+			h.releaseSessionLease(req)
 		}()
 		for chunk := range result.Chunks {
 			if chunk.Err != nil {
@@ -588,19 +627,63 @@ func conversationID(metadata map[string]any) string {
 	return ""
 }
 
-// sessionIDFromHeaders reads a caller-supplied OpenCode session identity
-// from the request headers the host forwards. Only the exact native shape is
-// accepted; the host's affinity/session headers may carry other namespaces.
-func sessionIDFromHeaders(headers map[string][]string) (sessionID string) {
-	for _, name := range []string{"x-opencode-session-id", "x-session-affinity", "x-opencode-session"} {
-		for _, value := range headers[name] {
-			trimmed := strings.TrimSpace(value)
-			if ValidSessionID(trimmed) {
-				return trimmed
-			}
-		}
+// principalDigest derives the registry principal from the executor request:
+// a sha256 digest over the caller's authorization value (the same convention
+// the gateway uses for principal-scoped keys). The raw secret is never
+// stored, logged or persisted. An empty authorization yields an empty
+// digest, which the registry rejects.
+func principalDigest(req ExecutorRequest) string {
+	authorization := ""
+	if values := req.Headers["authorization"]; len(values) > 0 {
+		authorization = strings.TrimSpace(values[0])
 	}
-	return ""
+	if authorization == "" {
+		// The host stores the caller credential in StorageJSON metadata in
+		// some lanes; the auth id is the stable per-credential identity.
+		authorization = strings.TrimSpace(req.AuthID)
+	}
+	if authorization == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(authorization))
+	return "sha256-" + hex.EncodeToString(sum[:])
+}
+
+// sessionForRequest resolves the persistent provider session for a request
+// through the registry: (principal digest, host conversation identity) ->
+// minted session id. It wraps the dispatch in a Reference/Release lease so
+// the mapping cannot be evicted mid-flight.
+func (h *Handler) sessionForRequest(req ExecutorRequest) (string, error) {
+	conversation := conversationID(req.Metadata)
+	if strings.TrimSpace(conversation) == "" {
+		return "", fmt.Errorf("opencode dispatch requires the host conversation identity (canonical_session_id metadata) to resolve the persistent provider session; the request carries none")
+	}
+	principal := principalDigest(req)
+	if principal == "" {
+		return "", fmt.Errorf("opencode dispatch requires a caller principal (authorization header or auth id) to bind the provider session to its owner; the request carries none")
+	}
+	if h.registry == nil {
+		return "", fmt.Errorf("opencode session registry is unavailable")
+	}
+	sessionID, err := h.registry.Create(principal, conversation)
+	if err != nil {
+		return "", err
+	}
+	if err := h.registry.Reference(principal, conversation); err != nil {
+		return "", err
+	}
+	return sessionID, nil
+}
+
+// releaseSessionLease releases the dispatch lease after the upstream call
+// completes (buffered) or the stream ends (the relay releases it).
+func (h *Handler) releaseSessionLease(req ExecutorRequest) {
+	conversation := conversationID(req.Metadata)
+	principal := principalDigest(req)
+	if conversation == "" || principal == "" || h.registry == nil {
+		return
+	}
+	_ = h.registry.Release(principal, conversation)
 }
 
 // handleExecutorHTTPRequest bridges only the native Console API GET surface
@@ -663,6 +746,14 @@ func (h *Handler) handleExecutorHTTPRequest(request []byte) ([]byte, error) {
 		"Headers":    result.Headers,
 		"Body":       result.Body,
 	})
+}
+
+// handleSessionStats reports bounded registry diagnostics.
+func (h *Handler) handleSessionStats() ([]byte, error) {
+	if h.registry == nil {
+		return okEnvelope(RegistryStats{})
+	}
+	return okEnvelope(h.registry.Stats())
 }
 
 // WithConfigured is a test helper returning the handler's effective config.

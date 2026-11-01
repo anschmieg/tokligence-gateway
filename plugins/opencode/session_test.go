@@ -7,7 +7,7 @@ import (
 
 // TestValidSessionIDMatchesNativeShape pins the native session id shape from
 // packages/schema/src/session-id.ts + identifier.ts: "ses_" + descending()
-// where descending() is 6 lowercase hex chars (bit-inverted ms-timestamp
+// where descending() is 12 lowercase hex chars (bit-inverted ms-timestamp
 // counter) followed by 14 chars of the 62-char alphabet. The known working
 // sessions follow it (e.g. ses_e6983cfa5ffejQiSHP0zl9KfzV,
 // ses_e69be2426ffemndjU4cCW5nKtB, ses_e7e28fa42ffex6qBXbtGHzwLKe).
@@ -42,85 +42,51 @@ func TestValidSessionIDMatchesNativeShape(t *testing.T) {
 	}
 }
 
-// TestSessionIdentityAcceptsOnlyCallerSuppliedNativeIDs pins the central
-// correction to the rejected candidate: the plugin NEVER mints a session id.
-// It accepts only a caller-supplied native-shaped identity; everything else
-// fails with the exact gap.
-func TestSessionIdentityAcceptsOnlyCallerSuppliedNativeIDs(t *testing.T) {
+// TestSessionIdentityAppliesNativeBinding pins the pure binding rules: a
+// valid session id stands as the session id and becomes its own affinity
+// when no affinity is supplied (affinity.ts: a session with no parent/fork
+// is its own affinity root); a distinct affinity is preserved; the 64-hex
+// affinity variant sets the affinity headers without inventing a session id.
+func TestSessionIdentityAppliesNativeBinding(t *testing.T) {
 	const realSession = "ses_e6983cfa5ffejQiSHP0zl9KfzV"
+	const other = "ses_e69be2426ffemndjU4cCW5nKtB"
 
-	sessionID, affinity, err := SessionIdentity("conv-1", realSession, "")
-	if err != nil || sessionID != realSession || affinity != realSession {
-		t.Errorf("SessionIdentity(real id) = %q/%q %v, want accepted with affinity fallback", sessionID, affinity, err)
+	sessionID, affinity := SessionIdentity(realSession, "")
+	if sessionID != realSession || affinity != realSession {
+		t.Errorf("SessionIdentity(real id) = %q/%q, want accepted with affinity fallback", sessionID, affinity)
 	}
 
-	sessionID, affinity, err = SessionIdentity("conv-1", "", realSession)
-	if err != nil || sessionID != realSession || affinity != realSession {
-		t.Errorf("SessionIdentity(affinity only) = %q/%q %v, want session derived from affinity", sessionID, affinity, err)
+	sessionID, affinity = SessionIdentity("", realSession)
+	if sessionID != realSession || affinity != realSession {
+		t.Errorf("SessionIdentity(affinity only) = %q/%q, want session derived from affinity", sessionID, affinity)
 	}
 
-	// Distinct affinity: the native set sends both; affinity wins for the
-	// affinity headers, session id for x-opencode-session-id.
-	sessionID, affinity, err = SessionIdentity("conv-1", realSession, "ses_e69be2426ffemndjU4cCW5nKtB")
-	if err != nil || sessionID != realSession || affinity != "ses_e69be2426ffemndjU4cCW5nKtB" {
-		t.Errorf("SessionIdentity(distinct affinity) = %q/%q %v, want both preserved", sessionID, affinity, err)
+	sessionID, affinity = SessionIdentity(realSession, other)
+	if sessionID != realSession || affinity != other {
+		t.Errorf("SessionIdentity(distinct affinity) = %q/%q, want both preserved", sessionID, affinity)
 	}
-}
 
-// TestSessionIdentityNamesTheExactGap pins the failure mode: when no identity
-// names a created OpenCode session, dispatch fails with a precise error that
-// (a) names the requirement, (b) names the framework gap (Session.create
-// needs the native runtime's project resolver / event bus / session store,
-// not hostable in a dynamic plugin), and (c) never fabricates an id.
-func TestSessionIdentityNamesTheExactGap(t *testing.T) {
-	for _, tc := range []struct {
-		name, sessionID, affinity string
-	}{
-		{"no identity", "", ""},
-		{"foreign namespace", "ctx:v1:abcdef", ""},
-		{"host canonical form", "0f4a6f1a-2b3c-4d5e-8f9a-1a2b3c4d5e6f", ""},
-		{"wrong shape", "not-a-session", ""},
-		{"affinity wrong shape", "", "affinity:xyz"},
-	} {
-		_, _, err := SessionIdentity("conv-1", tc.sessionID, tc.affinity)
-		if err == nil {
-			t.Errorf("SessionIdentity(%s) succeeded, want the precise gap error", tc.name)
-			continue
-		}
-		sessionErr, ok := err.(*SessionIdentityError)
-		if !ok {
-			t.Errorf("SessionIdentity(%s) error type = %T, want *SessionIdentityError", tc.name, err)
-			continue
-		}
-		message := sessionErr.Error()
-		if !strings.Contains(message, "Session.create") {
-			t.Errorf("%s: gap error does not name the native session creation requirement: %q", tc.name, message)
-		}
-		if !strings.Contains(message, "does not mint") {
-			t.Errorf("%s: gap error does not state the no-minting rule: %q", tc.name, message)
-		}
-		if !strings.Contains(message, "cannot host") {
-			t.Errorf("%s: gap error does not name the framework limitation: %q", tc.name, message)
-		}
-		if sessionErr.ConversationID != "conv-1" {
-			t.Errorf("%s: conversation id = %q, want conv-1 for diagnostics", tc.name, sessionErr.ConversationID)
-		}
+	// 64-hex affinity variant: affinity passes, no session id is invented.
+	hex64 := "ses_" + strings.Repeat("a", 64)
+	sessionID, affinity = SessionIdentity("", hex64)
+	if sessionID != "" || affinity != hex64 {
+		t.Errorf("SessionIdentity(64-hex affinity) = %q/%q, want empty session id with the affinity preserved", sessionID, affinity)
+	}
+
+	// Foreign namespaces are not native identities: values pass through
+	// unchanged for the caller; the registry path decides usability.
+	sessionID, affinity = SessionIdentity("header:0f4a6f1a", "affinity:xyz")
+	if sessionID != "header:0f4a6f1a" || affinity != "affinity:xyz" {
+		t.Errorf("SessionIdentity(foreign) = %q/%q, want values passed through untouched", sessionID, affinity)
 	}
 }
 
-// TestSessionIdentityRejectsForeignHeaderNamespace pins that the host's own
-// canonical/derived identities (which carry host namespaces like "header:",
-// "affinity:", "derived:", "ctx:v1:") are never forwarded upstream as if
-// they were native OpenCode sessions. Only the exact native shape passes.
-func TestSessionIdentityRejectsForeignHeaderNamespace(t *testing.T) {
-	for _, value := range []string{
-		"header:0f4a6f1a-2b3c-4d5e-8f9a-1a2b3c4d5e6f",
-		"affinity:xyz",
-		"derived:ctx:v1:whatever",
-		"execution:abc123",
-	} {
-		if _, _, err := SessionIdentity("conv-1", value, ""); err == nil {
-			t.Errorf("SessionIdentity(%q) succeeded, want rejection of foreign namespace", value)
-		}
+// TestSessionIdentityNoLongerFailsClosed pins the corrected contract: the
+// pure resolver never errors; when no caller identity exists, the handler
+// resolves identity through the registry instead (sessionForRequest).
+func TestSessionIdentityNoLongerFailsClosed(t *testing.T) {
+	sessionID, affinity := SessionIdentity("", "")
+	if sessionID != "" || affinity != "" {
+		t.Errorf("SessionIdentity(empty) = %q/%q, want empty values (registry path handles it)", sessionID, affinity)
 	}
 }
