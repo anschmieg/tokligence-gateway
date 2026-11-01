@@ -14,6 +14,7 @@ Staging only; no wrapper proxy, helper, custom dashboard, or Plus fork.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -130,10 +131,11 @@ def resolve_root(raw: str) -> Path:
     if not path.is_absolute():
         die(f"--root must be an absolute path, got {raw!r}")
     root = path.resolve()
-    if str(root) in FORBIDDEN_ROOTS:
+    protected_trees = [Path(p) for p in ("/data", "/etc", "/usr", "/var", "/boot", "/root", "/home/agent/tokligence", "/home/agent/tokligence-staging")]
+    if str(root) in FORBIDDEN_ROOTS or any(root.is_relative_to(p) for p in protected_trees):
         die(f"refusing to use {root}: forbidden or production location")
     repo = Path(__file__).resolve().parent.parent.parent
-    if root == repo or root in repo.parents:
+    if root == repo or root in repo.parents or root.is_relative_to(repo):
         die(f"refusing to use {root}: staging root must not be the repository or one of its ancestors")
     return root
 
@@ -237,6 +239,14 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
     if not dashboard_path.is_file():
         die(f"{dashboard_path} is missing; run 'install' first (bootstrap never downloads)")
 
+    # Lock survives process failure automatically; never unlink it.
+    lock = open(root / ".bootstrap.lock", "a")
+    try:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        die("another bootstrap owns this root")
+    # Keep descriptor alive through return/exit.
+    args._bootstrap_lock = lock
     config_path = root / "config" / "config.yaml"
     launch = f"{binary_path} --config {config_path} --local-model"
     if config_path.exists():
@@ -295,11 +305,12 @@ oauth:
 plugins:
   enabled: false
 """
-    write_private(config_path, config_text)
     # The backend hashes management.secret-key inside config.yaml on first
     # startup, so the only durable plaintext copies live here, mode 0600.
     write_private(secrets_dir / "management.key", management_key + "\n")
     write_private(secrets_dir / "client-api-key", client_key + "\n")
+    # Publish config last: a partial bootstrap must not look complete.
+    write_private(config_path, config_text)
 
     print(f"wrote config  {config_path} (0600, keys not printed)")
     print(f"wrote keys    {secrets_dir / 'management.key'} (0600)")

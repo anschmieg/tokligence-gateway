@@ -77,3 +77,9 @@ config keeps explicit sources empty. The management panel is at
 No wrapper proxy, no helper service, no custom/patched dashboard, no Plus
 fork, no lifecycle scripts (start/stop are assigned separately). The tool
 downloads public releases to verify hashes; it does not execute the backend.
+
+## Bootstrap recovery
+
+Bootstrap holds an OS descriptor lock and publishes configuration after private key files. Interrupted initialization may leave partial private files and fails closed on retry; inspect only this new, unused staging root before manually removing it and reinstalling. Never apply cleanup to a root that has accepted credentials or configuration edits. Protected production/OpenCode trees and repository descendants are rejected.
+
+The pinned panel asset prevents the normal missing-asset fetch while present; it is not a blanket network isolation guarantee. Native background behavior is reviewed separately before adding credentials.
