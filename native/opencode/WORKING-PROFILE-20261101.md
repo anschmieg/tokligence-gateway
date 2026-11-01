@@ -134,3 +134,12 @@ or tool-only null-versus-empty differences. These must now match directly.
 Explicit max_tokens budgeting and the external tool loop/context ownership are
 still declared integration differences. No live request was sent during this
 comparison, and no existing rejection/report/ledger/run ID was modified.
+
+## Current access token identity verified
+
+One read-only `GET https://opencode.ai/console/api/user` with staging's existing
+access token returned200. The returned email and user ID both match the saved
+credential metadata. No token refresh, login, credential write or model inference
+was performed; no raw token, headers or user response was logged. This excludes
+a stale email/account-ID label as the explanation for staging's current identity.
+It still does not identify the scope of historical inference quota counters.
