@@ -134,8 +134,8 @@ def resolve_root(raw: str) -> Path:
     protected_trees = [Path(p) for p in ("/data", "/etc", "/usr", "/var", "/boot", "/root", "/home/agent/tokligence", "/home/agent/tokligence-staging")]
     if str(root) in FORBIDDEN_ROOTS or any(root.is_relative_to(p) for p in protected_trees):
         die(f"refusing to use {root}: forbidden or production location")
-    repo = Path(__file__).resolve().parent.parent.parent
-    if root == repo or root in repo.parents or root.is_relative_to(repo):
+    repo = next((p for p in Path(__file__).resolve().parents if (p / ".git").exists()), None)
+    if repo is not None and (root == repo or root in repo.parents or root.is_relative_to(repo)):
         die(f"refusing to use {root}: staging root must not be the repository or one of its ancestors")
     return root
 
