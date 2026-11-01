@@ -192,3 +192,11 @@ Use Mistral GLM-5.3-Flash for bounded implementation tasks; no Codex implementat
 The earlier inventory and source evaluation are sufficient to start foundation implementation. Resolve remaining unknowns just in time; document and block only the affected operation. Stop for a material architectural change, irreducible safety/ownership conflict, paid access or production promotion—not routine reversible staging choices.
 
 Completion means the required routes/client workflows are accepted, native management and T3 access work, ownership is singular and the custom maintenance surface is reduced. The unresolved OpenCode provider restriction remains separate from platform migration progress and cannot be declared fixed from documentation or fixtures.
+
+## Live test authorization — November1 update
+
+After implementation and parent review, the user authorizes one live inference per provider; a second is authorized only when helpful to diagnose the first failure. This budget counts physical dispatches, not test invocations; no hidden retries. Existing cooldowns and exclusive refresh ownership remain binding. A fresh authentication/quota rejection stops that provider's traffic; the second allowance does not authorize bypassing a reset or changing accounts/IP/auth lanes. Parent admits and records each run; implementation children do not consume these allowances implicitly.
+
+## OpenCode plugin first-slice review
+
+Candidate f49de3d/f0cc3be is NOT integrated or deployed. Parent rejected legacy request construction, random presentation session IDs/arbitrary eviction, unproven org/header injection and non-native credential shape. Buildability/unit-test counts are not native parity. Correction is delegated against pinned actual OpenCode source. OAuth refresh can be implemented with fake transports without activating another owner; live credential handoff remains separate.
