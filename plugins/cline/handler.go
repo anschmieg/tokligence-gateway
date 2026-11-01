@@ -178,6 +178,7 @@ type Handler struct {
 	workosBaseURL string
 	refreshBuffer time.Duration
 	catalog       *ModelCatalog
+	streamDeps    *StreamDeps
 }
 
 // Transport issues the plugin's upstream HTTP calls through the host callback.
@@ -305,7 +306,7 @@ func (h *Handler) HandleMethod(method string, request []byte) ([]byte, error) {
 	case "executor.execute":
 		return h.handleExecute(request)
 	case "executor.execute_stream":
-		return nil, withStatus(501, fmt.Errorf("cline streaming inference is not implemented in this slice"))
+		return h.handleExecuteStream(request)
 	case "executor.count_tokens":
 		return nil, withStatus(501, fmt.Errorf("cline token counting is not implemented in this slice"))
 	case "executor.http_request":
@@ -454,6 +455,13 @@ func (h *Handler) handleModelForAuth(request []byte) ([]byte, error) {
 		Provider: ProviderKey,
 		Models:   h.catalog.Models,
 	})
+}
+
+// SetStreamDeps injects the streaming collaborators (upstream client and
+// host stream bridge). It must be called before executor.execute_stream;
+// without it the method fails closed with 503.
+func (h *Handler) SetStreamDeps(deps *StreamDeps) {
+	h.streamDeps = deps
 }
 
 // ExecutorRequest mirrors pluginapi.ExecutorRequest (fields used by this slice).

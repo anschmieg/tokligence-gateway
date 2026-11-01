@@ -854,11 +854,10 @@ func TestUpstreamErrorsNeverEchoAccessToken(t *testing.T) {
 func TestUnsupportedOperationsFailExplicitly(t *testing.T) {
 	handler := newConfiguredHandler(t, nil)
 	unsupported := map[string][]byte{
-		"auth.login.start":        mustMarshal(t, AuthLoginStartRequest{Provider: ProviderKey}),
-		"auth.login.poll":         mustMarshal(t, AuthLoginPollRequest{Provider: ProviderKey}),
-		"executor.execute_stream": mustMarshal(t, ExecutorRequest{Model: "cline/gpt-x"}),
-		"executor.count_tokens":   mustMarshal(t, ExecutorRequest{Model: "cline/gpt-x"}),
-		"executor.http_request":   mustMarshal(t, ExecutorRequest{Model: "cline/gpt-x"}),
+		"auth.login.start":      mustMarshal(t, AuthLoginStartRequest{Provider: ProviderKey}),
+		"auth.login.poll":       mustMarshal(t, AuthLoginPollRequest{Provider: ProviderKey}),
+		"executor.count_tokens": mustMarshal(t, ExecutorRequest{Model: "cline/gpt-x"}),
+		"executor.http_request": mustMarshal(t, ExecutorRequest{Model: "cline/gpt-x"}),
 	}
 	for method, request := range unsupported {
 		if _, err := handler.HandleMethod(method, request); err == nil {
