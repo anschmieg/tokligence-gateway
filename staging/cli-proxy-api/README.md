@@ -232,11 +232,11 @@ The correction passed the isolated host fixture; its live effect is untested.
 
 ## First native free OpenRouter route
 
-Once the explicitly requested Hermes read ACL is granted:
+Once an authorized export of the actual deployment credentials is available:
 
 ```sh
-python3 staging/cli-proxy-api/activate_openrouter.py
-python3 staging/cli-proxy-api/activate_openrouter.py --apply
+python3 staging/cli-proxy-api/activate_openrouter.py --env-file <private-deployment-export>
+python3 staging/cli-proxy-api/activate_openrouter.py --env-file <private-deployment-export> --apply
 ```
 
 The first command is read-only admission. It reads only the existing OpenRouter

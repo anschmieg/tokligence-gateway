@@ -11,7 +11,7 @@ SSH=['ssh','-F','/home/t3/.ssh/fra-agent.conf','fra-agent']
 
 def read_key(path):
  try:lines=path.read_text().splitlines()
- except PermissionError:raise RuntimeError('Credential access blocked: requested Hermes ACL has not been granted')
+ except PermissionError:raise RuntimeError('Credential source is not readable by this process')
  found=[]
  for line in lines:
   match=re.match(r'^\s*(?:export\s+)?OPENROUTER_API_KEY\s*=\s*(.*)$',line)
@@ -36,7 +36,7 @@ def free_model():
  return {'source':CATALOG,'checked_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'model':MODEL,'pricing':prices}
 
 def main():
- parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--env-file',type=pathlib.Path,default=pathlib.Path('/home/t3/workspace/tokligence/.env'));parser.add_argument('--apply',action='store_true');args=parser.parse_args()
+ parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--env-file',required=True,type=pathlib.Path,help='Authorized export from the actual deployed gateway; no assumed workspace credential source');parser.add_argument('--apply',action='store_true');args=parser.parse_args()
  key=read_key(args.env_file);evidence=free_model()
  if not args.apply:print(json.dumps({'ready':True,'provider':'openrouter','model':MODEL,'zero_price_verified':True,'key_present':True,'inference_requests':0}));return
  helper=pathlib.Path(__file__).with_name('apply_openrouter.py')
