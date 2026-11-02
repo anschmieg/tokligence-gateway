@@ -75,10 +75,14 @@ the host HTTP bridge (`host.http.do` / `host.http.do_stream`).
   scoped registry lease. Different callers cannot bypass the registry with an
   identical header ID; changing upstream credentials does not change ownership.
   Focused tests pass; actual-host verification remains required.
-- **Org identity is never injected.** `x-org-id` comes only from the
-  credential's recorded metadata and is sent only on Console API calls
-  (config discovery, the bounded GET passthrough), matching the native
-  `console-access.ts`. Native inference requests carry no org header.
+- **Console provider headers are a separate native layer.** Console API calls
+  use `x-org-id`; the actual Console configuration can additionally supply
+  `x-opencode-org-id` for inference. `console_headers` holds that reviewed
+  provider overlay. Its org value must match the credential metadata, or
+  dispatch fails locally. Caller headers cannot replace it. This corrects the
+  earlier false claim that the session header block was the whole header set.
+  Current deployment uses a private Console snapshot; automatic overlay refresh,
+  other model/body/package transformations are not implemented by this slice.
 - **The user agent reports configured runtime identity**, not a fabricated
   one: `opencode/<channel>/<version>/<name>` from the plugin configuration,
   which must describe the OpenCode runtime this deployment actually
@@ -91,10 +95,9 @@ the host HTTP bridge (`host.http.do` / `host.http.do_stream`).
   behalf and returns the rotated credential. Implementing the grant does not
   activate a token owner: activating an existing credential into this host
   requires the separate staged handoff.
-- **No reasoning replay coverage yet.** Reasoning fields pass through
-  untouched on both the request and response paths, but this slice has no
-  reasoning-preservation fixtures specific to this plugin. Missing live
-  reasoning replay remains untested, never claimed.
+- **Synthetic reasoning replay verified.** The actual host/plugin continuation
+  fixture preserves returned unsigned thinking with the explicit host compat
+  setting. Live reasoning replay remains untested, never claimed.
 - **No tool execution.** Caller tool schemas pass through byte-for-byte; the
   caller owns execution. The plugin never injects fake tools and never adds
   manual header workarounds.

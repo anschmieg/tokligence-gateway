@@ -15,7 +15,8 @@ import (
 //   - zai compatibility: packages/ai/src/protocols/zai-chat.ts (the compatibility
 //     record the Console's opencode provider configures for GLM-family models)
 //
-// The header set is the native 2.x set exactly: no x-org-id on inference
+// The base session header set follows native 2.x. Console provider overlays
+// are applied separately; x-opencode-org-id may be supplied there. No x-org-id on inference
 // (that header belongs to Console API calls; model-request.ts does not send
 // it), and the session headers name identities a real OpenCode session owns.
 
@@ -187,4 +188,27 @@ func validateDispatchControls(body map[string]json.RawMessage) error {
 		}
 	}
 	return nil
+}
+
+// Apply the Console provider overlay separately from the session header block,
+// matching Provider.mergeHeaders -> ModelResolver -> route compilation. In
+// particular x-opencode-org-id is an inference header when Console returns it;
+// x-org-id on Console API calls is a different header at a different boundary.
+func consoleInferenceHeaders(base map[string][]string, overlay map[string]string, credential Credential) (map[string][]string, error) {
+	metadata, err := credential.CredentialMetadata()
+	if err != nil {
+		return nil, fmt.Errorf("Console credential metadata invalid")
+	}
+	for name, value := range overlay {
+		if name == "x-opencode-org-id" && (metadata.OrgID == "" || value != metadata.OrgID) {
+			return nil, fmt.Errorf("Console inference organization differs from credential; reload its Console configuration")
+		}
+		for existing, values := range base {
+			if strings.EqualFold(existing, name) && (len(values) != 1 || values[0] != value) {
+				return nil, fmt.Errorf("Console header conflicts with native session/transport identity")
+			}
+		}
+		base[name] = []string{value}
+	}
+	return base, nil
 }

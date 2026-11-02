@@ -156,6 +156,7 @@ class MockHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(payload)
             return
+        assert self.headers.get("x-opencode-org-id") == "smoke-org", "Console inference organization overlay missing"
         summary["mock"]["chat_completions_dispatches"] += 1
         summary["mock"]["last_authorization"] = self.headers.get("Authorization")
         try:
@@ -283,6 +284,7 @@ def write_backend_config(work, profile, session_state_path):
             "cooldown": {"save-cooldown-status": True}},
         "plugins": {"enabled": True, "dir": str(plugins_dir), "configs": {
             "opencode": {"enabled": True, "preserve_unsigned_thinking": True,
+                "console_headers": {"x-opencode-org-id":"smoke-org"},
                 "inference_base_url": "http://127.0.0.1:%d" % MOCK_PORT,
                 "models": [MODEL_ID], "app_name": "cli", "version": "2.0.32",
                 "channel": "latest", "project_id": "global",

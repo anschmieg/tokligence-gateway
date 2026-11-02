@@ -614,7 +614,10 @@ func (h *Handler) handleExecute(request []byte, stream bool) ([]byte, error) {
 	if h.transport == nil {
 		return nil, withStatus(503, fmt.Errorf("opencode host transport is unavailable"))
 	}
-	headers := InferenceHeaders(h.cfg.App(), sessionID, affinity, h.cfg.ProjectID, credential.Authorization())
+	headers, err := consoleInferenceHeaders(InferenceHeaders(h.cfg.App(), sessionID, affinity, h.cfg.ProjectID, credential.Authorization()), h.cfg.ConsoleHeaders, credential)
+	if err != nil {
+		return nil, withStatus(503, err)
+	}
 	if !stream {
 		result, errDo := h.transport.Do(WithHostCallbackID(context.Background(), req.HostCallbackID), "POST", endpoint, headers, payload)
 		if errDo != nil {
@@ -857,5 +860,9 @@ func (h *Handler) WithConfigured() PluginConfig {
 	defer h.mu.RUnlock()
 	cfg := h.cfg
 	cfg.Models = append([]string(nil), cfg.Models...)
+	cfg.ConsoleHeaders = make(map[string]string, len(h.cfg.ConsoleHeaders))
+	for k, v := range h.cfg.ConsoleHeaders {
+		cfg.ConsoleHeaders[k] = v
+	}
 	return cfg
 }

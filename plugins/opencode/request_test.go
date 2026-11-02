@@ -20,7 +20,8 @@ import (
 //
 // The rejected candidate injected an x-opencode-org-id header and a
 // configurable "client_version" user agent; the native set has neither, and
-// inference never carries the org id (x-org-id is Console-API-only).
+// this BASE header block excludes provider overlays; Console may separately
+// supply x-opencode-org-id. x-org-id is Console-API-only.
 func TestInferenceHeadersMatchNative(t *testing.T) {
 	app := AppInfo{Name: "cli", Version: "2.0.32", Channel: "latest"}
 	headers := InferenceHeaders(app, "ses_e6983cfa5ffejQiSHP0zl9KfzV", "ses_e6983cfa5ffejQiSHP0zl9KfzV", "prj_1", "Bearer token")
@@ -41,7 +42,7 @@ func TestInferenceHeadersMatchNative(t *testing.T) {
 	}
 	for _, forbidden := range []string{"x-org-id", "x-opencode-org-id", "cookie"} {
 		if _, exists := headers[forbidden]; exists {
-			t.Errorf("inference headers contain %q; native inference never sends the org header", forbidden)
+			t.Errorf("inference headers contain %q; base session header block must exclude provider overlays", forbidden)
 		}
 	}
 }

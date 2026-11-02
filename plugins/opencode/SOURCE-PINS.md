@@ -47,7 +47,7 @@ from the pinned source behavior (not from the plugin's own output):
   server normalization, Console header set, expiry window, refresh rotation
   (org metadata handling), SignedOut terminality.
 - `request_test.go`: the exact native header set (including the absence of
-  org headers on inference), the useragent format across channels, body
+  org headers in the base session block; Console provider overlays apply separately), the useragent format across channels, body
   compilation rules, no-tool-injection, endpoint join.
 - `session_test.go`: the native id shape against the known working session
   ids, the no-minting rule, the precise gap error, foreign-namespace
@@ -58,3 +58,11 @@ from the pinned source behavior (not from the plugin's own output):
   refresh grant with a fake transport (no network), expiry admission before
   dispatch, session-identity gating, dispatch headers, rejection preservation,
   stream relay/error-close, bounded Console GET passthrough.
+
+Console overlay correction Nov2: plugin/provider/opencode.ts provider.transform
+merges remote providers[providerID].headers; model-resolver.ts carries resolved
+headers into the runtime route. The session/model-request.ts header block alone
+is not the complete inference header set. Actual staging Console config returned
+x-opencode-org-id matching the same credential org. console_headers applies that
+reviewed snapshot with account-scope/transport-header refusal. This is a narrow
+snapshot implementation, not the entire dynamic Console provider transform.

@@ -1,6 +1,7 @@
 package opencode
 
 import (
+	"fmt"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -11,6 +12,10 @@ import (
 // files; the credential arrives only through the host auth-dir parse and the
 // executor request StorageJSON.
 type PluginConfig struct {
+	// ConsoleHeaders is the provider header overlay returned by the native
+	// Console configuration. It is not a caller header passthrough.
+	ConsoleHeaders map[string]string `yaml:"console_headers"`
+
 	Enabled bool `yaml:"enabled"`
 
 	// InferenceBaseURL is the OpenCode inference endpoint root, for example
@@ -104,6 +109,27 @@ func DecodeConfig(raw []byte) (PluginConfig, error) {
 		}
 		cfg.Models = models
 	}
+	headers := make(map[string]string, len(cfg.ConsoleHeaders))
+	for key, value := range cfg.ConsoleHeaders {
+		name := strings.ToLower(key)
+		if name == "" || strings.ContainsAny(value, "\r\n\x00") {
+			return PluginConfig{}, fmt.Errorf("invalid Console header")
+		}
+		for _, r := range name {
+			if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || strings.ContainsRune("!#$%&'*+-.^_`|~", r)) {
+				return PluginConfig{}, fmt.Errorf("invalid Console header name")
+			}
+		}
+		if _, duplicate := headers[name]; duplicate {
+			return PluginConfig{}, fmt.Errorf("duplicate Console header")
+		}
+		switch name {
+		case "authorization", "cookie", "host", "connection", "content-length", "transfer-encoding", "proxy-authorization":
+			return PluginConfig{}, fmt.Errorf("Console overlay cannot replace transport authentication or framing")
+		}
+		headers[name] = value
+	}
+	cfg.ConsoleHeaders = headers
 	return cfg, nil
 }
 
