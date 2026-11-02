@@ -61,3 +61,13 @@ Do not start another host runtime or re-enable quarantined OpenCode to test logi
 After the personal Cloudflare login check, OpenCode free-model compatibility
 returns to top priority. Additional providers and speculative parity work remain
 deferred.
+
+## Login correction after initial alpha deployment
+
+The first real login revealed production `CLOUDFLARE_ACCESS_TEAM=my-company`;
+preview had `nothingpink` and had been incorrectly treated as production evidence.
+Production is now corrected and the restarted process's actual environment was
+verified. Fix deployment `yjxuec0qlcz6h2gyg2j7iq2t` finished at revision `fe33bfc`.
+The panel now clears only local auth on API401, preserving Cloudflare login.
+Explicit Logout still ends SSO. Five custom auth-state tests and the panel build
+pass; a successful personal browser login still awaits the user's retry.
