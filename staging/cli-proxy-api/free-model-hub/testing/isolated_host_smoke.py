@@ -66,11 +66,12 @@ def inner(outer_ns):
     report = {'verdict': 'fail', 'failures': [], 'gates': {}, 'counts': {
         'catalog_get': 0, 'stream_origin': 0, 'redirect_origin': 0,
         'inference_posts': 0, 'redirect_target': 0, 'unexpected_http': 0,
-        'denied_connect': 0, 'blocked_native_metadata': 0}, 'namespace': {'outer': outer_ns}}
+        'denied_connect': 0, 'blocked_native_metadata': 0, 'quota_origin': 0}, 'namespace': {'outer': outer_ns}}
     counts, gates = report['counts'], report['gates']
     backend = None
     servers = []
     stage = 'namespace'
+    quota_mode = (WORK/'quota-mode').exists()
     mode = {'redirect': False}
     lock = threading.Lock()
 
@@ -129,6 +130,10 @@ def inner(outer_ns):
                     or self.headers.get('Authorization')):
                 count('unexpected_http')
                 self.reply(500)
+                return
+            if mode.get('quota'):
+                count('quota_origin')
+                self.reply(429, b'{"error":{"message":"fixture quota exceeded"}}', 'application/json')
                 return
             if mode['redirect']:
                 count('redirect_origin')
@@ -324,16 +329,18 @@ def inner(outer_ns):
             and ''.join(c.get('delta', {}).get('content', '') or '' for c in choices) == 'fixture-inert-text'
             and any(c.get('finish_reason') == 'stop' for c in choices))
         gate('stream_single_dispatch', counts['stream_origin'] == 1 and counts['inference_posts'] == 1)
-        stage = 'redirect'
-        mode['redirect'] = True
+        stage = 'quota' if quota_mode else 'redirect'
+        mode['redirect'] = not quota_mode
+        mode['quota'] = quota_mode
         status, raw = api('/v1/chat/completions', CLIENT_KEY, request)
-        # Host may surface the upstream 307 as a non-2xx error or SSE error.
-        # Physical counts below are the redirect and retry evidence.
-        gate('redirect_rejected', status >= 300 or (status == 200 and b'error' in raw
-            and b'fixture-inert-text' not in raw))
-        time.sleep(.3)
-        gate('redirect_origin_once_target_zero', counts['redirect_origin'] == 1
-            and counts['redirect_target'] == 0)
+        if quota_mode:
+            gate('quota_http_status_preserved', status == 429)
+            gate('quota_single_dispatch', counts['quota_origin'] == 1)
+        else:
+            gate('redirect_rejected', status >= 300 or (status == 200 and b'error' in raw
+                and b'fixture-inert-text' not in raw))
+            gate('redirect_origin_once_target_zero', counts['redirect_origin'] == 1
+                and counts['redirect_target'] == 0)
         gate('exactly_two_inference_posts', counts['inference_posts'] == 2)
         gate('no_unexpected_provider_requests', counts['unexpected_http'] == 0 and counts['denied_connect'] == 0)
         gate('final_auth_ownership', auth_gate())
@@ -352,8 +359,8 @@ def inner(outer_ns):
         # turn a previously passing snapshot into unnoticed extra dispatches.
         if not report['failures']:
             try:
-                gate('stopped_host_exact_counts', counts['inference_posts'] == 2
-                    and counts['stream_origin'] == 1 and counts['redirect_origin'] == 1
+                gate('stopped_host_exact_counts', counts['inference_posts'] == 2 and counts['quota_origin'] == int(quota_mode)
+                    and counts['stream_origin'] == 1 and counts['redirect_origin'] == int(not quota_mode)
                     and counts['redirect_target'] == 0 and counts['unexpected_http'] == 0
                     and counts['denied_connect'] == 0)
                 gate('stopped_host_auth_ownership', auth_gate(check_runtime=False))
@@ -377,6 +384,7 @@ def main():
     parser.add_argument('--plugin', required=True, help='Exact Free Model Hub .so')
     parser.add_argument('--opencode-plugin', required=True, help='Exact native OpenCode .so')
     parser.add_argument('--output', required=True, help='NEW private evidence directory')
+    parser.add_argument('--quota-error', action='store_true', help='Test upstream429 instead of redirect, in a fresh host')
     args = parser.parse_args()
     os.umask(0o077)
     bwrap = shutil.which('bwrap')
@@ -391,6 +399,8 @@ def main():
         parser.error('output must be NEW; prior evidence is never overwritten')
     out.mkdir(mode=0o700)
     out = out.resolve(strict=True)
+    if args.quota_error:
+        (out/'quota-mode').touch()
     verdict = out/'verdict.json'
     write_verdict(verdict, {'verdict': 'fail', 'failures': ['fixture_not_completed']})
     inputs = {name: digest(path) for name, path in

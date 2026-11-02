@@ -36,23 +36,27 @@ def main():
     parser.add_argument('--plugin-sha256', required=True)
     parser.add_argument('--source', required=True)
     parser.add_argument('--plugin-only', action='store_true', help='Reviewed 0.1.0 to 0.1.1 file-identity correction')
+    parser.add_argument('--stream-status', action='store_true', help='Reviewed 0.1.1 to 0.1.2 structured stream errors')
+    parser.add_argument('--provider-acceptance', action='store_true', help='Native OAuth request budget plus structured FreeHub errors')
     args = parser.parse_args()
+    if args.stream_status: args.plugin_only = True
     token = json.load(sys.stdin)['token']
     key = (ROOT/'secrets/management.key').read_text().strip()
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     lock = (ROOT/'state/freehub-deployment.lock').open('a')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    journal = ROOT/('freehub-identity-deployment-v1.json' if args.plugin_only else 'freehub-deployment-v1.json')
+    journal = ROOT/('provider-acceptance-safety-deployment-v1.json' if args.provider_acceptance else 'freehub-stream-status-deployment-v1.json' if args.stream_status else 'freehub-identity-deployment-v1.json' if args.plugin_only else 'freehub-deployment-v1.json')
     binary = ROOT/'bin/cli-proxy-api'
     pending = ROOT/'freehub-backend.pending'
     library = ROOT/'plugins/free-model-hub.so'
     pending_library = ROOT/'freehub-plugin.pending.so'
-    backup = ROOT/('freehub-before-identity.so' if args.plugin_only else 'bin/cli-proxy-api-before-freehub')
-    if journal.exists() or backup.exists() or (library.exists() and not args.plugin_only):
+    backup = ROOT/('bin/cli-proxy-api-before-provider-acceptance' if args.provider_acceptance else 'freehub-before-stream-status.so' if args.stream_status else 'freehub-before-identity.so' if args.plugin_only else 'bin/cli-proxy-api-before-freehub')
+    library_backup = ROOT/'freehub-before-provider-acceptance.so'
+    if journal.exists() or backup.exists() or (args.provider_acceptance and library_backup.exists()) or (library.exists() and not (args.plugin_only or args.provider_acceptance)):
         raise RuntimeError('existing operation evidence; inspect instead of replay')
     expected_backend = OLD
-    if args.plugin_only:
-        prior = json.loads((ROOT/'freehub-deployment-v1.json').read_text())
+    if args.plugin_only or args.provider_acceptance:
+        prior = json.loads((ROOT/('freehub-identity-deployment-v1.json' if args.stream_status or args.provider_acceptance else 'freehub-deployment-v1.json')).read_text())
         if prior['phase'] != 'deployed' or digest(library) != prior['plugin_sha256']:
             raise RuntimeError('previous plugin identity differs')
         expected_backend = prior['backend_sha256']
@@ -127,7 +131,7 @@ def main():
     hashes = {str(p):digest(p) for p in preserved}
     native_config = api('/v8/management/config/plugins/configs/opencode')[0]
     configs = api('/v8/management/config/plugins/configs')[0]
-    if args.plugin_only:
+    if args.plugin_only or args.provider_acceptance:
         if configs.get('free-model-hub') != dict(CONFIG, enabled=True):
             raise RuntimeError('previous scoped configuration differs')
     elif 'free-model-hub' in configs: raise RuntimeError('Free Hub already configured')
@@ -138,10 +142,22 @@ def main():
     with journal.open('x') as output: json.dump(result, output)
     swapped = False
     try:
+        if args.provider_acceptance:
+            policy_root = api('/v8/management/config')[0].get('oauth', {}).get('request-scoped-errors', {})
+            result['previous_request_error_policy'] = {p:policy_root.get(p) for p in ('antigravity','codex','freehub')}
+            rule = {'status':401,'match-regexr':['(?s).*'],'action':'stop-and-cooldown'}
+            for provider in ('antigravity','codex','freehub'):
+                old = policy_root.get(provider, [])
+                if old and not isinstance(old,list): raise RuntimeError('unexpected existing policy')
+                rules = [rule]+[entry for entry in old if entry != rule]
+                _, etag = api('/v8/management/config')
+                api('/v8/management/config/oauth/request-scoped-errors/'+provider,'PUT',rules,etag)
         write_config(CONFIG)
         result['phase']='configured_disabled'; save()
         stop()
         shutil.copyfile(library if args.plugin_only else binary, backup); backup.chmod(0o700)
+        if args.provider_acceptance:
+            shutil.copyfile(library,library_backup); library_backup.chmod(0o700)
         if not args.plugin_only:
             os.replace(pending, binary); binary.chmod(0o700)
         os.replace(pending_library, library); library.chmod(0o700)
@@ -168,7 +184,7 @@ def main():
         ids = {v['id'] for v in vendors}
         if ids.intersection({'opencodezen','opencodego','openrouter'}) or not {'kilo','cline','github'} <= ids:
             raise RuntimeError('vendor admission differs')
-        if args.plugin_only:
+        if args.plugin_only or args.provider_acceptance:
             entries = api('/v8/management/credentials')[0]['files']
             if sum(f.get('name') == 'kilo-free.json' for f in entries) != 1:
                 raise RuntimeError('Kilo credential identity duplicated')

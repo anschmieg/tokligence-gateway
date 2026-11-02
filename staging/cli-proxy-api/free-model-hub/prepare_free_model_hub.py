@@ -48,6 +48,10 @@ SHARED_SOURCES = [
 # never rewritten in place afterwards (re-prepare deletes only the output).
 
 EDITS = [
+    {"id":"structured-stream-error-status","file":"internal/app/executor.go",
+     "why":"Preserve upstream quota/auth HTTP status through native schema10 stream close.",
+     "find":"closeStream(callbackID, streamID, streamFailureMessage(errForward))",
+     "replace":"closeStreamFailure(callbackID, streamID, errForward)"},
     {
         "id": "native-host-auth-id-retains-extension",
         "file": "internal/app/authprovider.go",
@@ -513,6 +517,8 @@ EDITS.extend([{'file': 'internal/admin/config.go',
 
 # --- New files (copied from staging patches) ------------------------------
 NEW_FILES = [
+    "internal/app/stream_error.go",
+    "internal/app/stream_error_test.go",
     "internal/app/auth_identity_test.go",
     "go.sum",
     "internal/admin/config_yaml.go",
