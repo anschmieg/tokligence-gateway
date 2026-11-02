@@ -10,7 +10,7 @@ import (
 // Clone the client value: never mutate shared policy or alter other providers.
 func providerDispatchClient(client *http.Client, provider string) *http.Client {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "opencode", "cline":
+	case "opencode", "cline", "freehub":
 		copy := *client
 		copy.CheckRedirect = func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse

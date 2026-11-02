@@ -10,7 +10,7 @@ import (
 )
 
 func TestProviderDispatchBudget(t *testing.T) {
-	for _, provider := range []string{"opencode", "cline", " OPENCODE ", "unrelated"} {
+	for _, provider := range []string{"opencode", "cline", "freehub", " OPENCODE ", "unrelated"} {
 		t.Run(provider, func(t *testing.T) {
 			var originCalls, targetCalls, policyCalls atomic.Int64
 			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

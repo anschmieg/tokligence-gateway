@@ -79,7 +79,7 @@ def main():
         "input_http_sha256": HTTP_SHA,
         "patched_http_sha256": digest(patched),
         "additions": {name: digest(body) for name, body in additions.items()},
-        "providers": ["opencode", "cline"],
+        "providers": ["opencode", "cline", "freehub"],
         "unsigned_thinking_compat": args.unsigned_thinking_compat,
         "patched_adapter_sha256": digest(adapter_patched) if adapter_raw is not None else None,
         "built": False,
