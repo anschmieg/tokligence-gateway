@@ -148,3 +148,23 @@ FreeHub account pool/routes), OpenCode (existing429 quarantine through at least
 November3 07:42:08.980115UTC). A representative-model success is not validation
 of every model or every duplicate credential. Groq/Mistral/Cline have no ready
 published route, so no inference was sent to them.
+
+
+## Cline restored — November 2, 16:47 UTC
+
+FreeHub0.1.4 fixes filename attribution: a leading provider prefix now takes
+precedence over vendor words embedded in an account label. A Cline account with
+an embedded GitHub description had previously been parsed as GitHub. No saved
+credential was renamed or manually rewritten. Explicit persisted vendor ownership
+still takes precedence. Focused real-parser and ownership regressions passed.
+
+The deployed host now lists the Cline account and four free models. One refresh
+through the native credential owner renewed its expired access token; one live
+streaming request to `cline-cline-free/solar-mini4` returned200, nonempty text,
+`stop` and `[DONE]` in1.58seconds. No inference retry, redirects, fallback, credential
+rotation or OpenCode state change. Journals `cline-refresh-v1.json` and
+`cline-live-v1.json` are completed; do not replay them. Native backend.6 unchanged;
+FreeHub0.1.4 SHAcdab08acb6eac6367c6f646ef94770cf5ac01c882b5e2ca2e3711958fee2bb08,
+Coolify deployment `m5v4iyyaaocrdorbbwjo5ejm` finished.
+
+Upstream attribution bug: [free-model-hub issue#1](https://github.com/Yousha-dev/free-model-hub/issues/1).

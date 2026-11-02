@@ -129,6 +129,26 @@
       "upstream_status": 429,
       "upstream_code": "1113",
       "reason": "Insufficient balance or no resource package."
+    },
+    {
+      "provider": "cline",
+      "model": "cline-cline-free/solar-mini4",
+      "phase": "pass",
+      "caller_posts": 1,
+      "automatic_retries": 0,
+      "redirects": false,
+      "fallback": false,
+      "started_utc": "2026-11-02T16:46:43Z",
+      "http_status": 200,
+      "done": true,
+      "nonempty_text": true,
+      "finish_reasons": [
+        "stop"
+      ],
+      "embedded_error": false,
+      "response_bytes": 4739,
+      "elapsed_seconds": 1.58,
+      "protected_state_unchanged": true
     }
   ],
   "discovery": {
@@ -285,5 +305,28 @@
     "glm-4.6v-flash"
   ],
   "zai_pricing_source": "https://docs.z.ai/guides/overview/pricing",
-  "zai_initial_model_paid": true
+  "zai_initial_model_paid": true,
+  "cline_registration_fix": {
+    "cause": "Embedded GitHub description marker outranked leading Cline filename prefix.",
+    "deployment": {
+      "phase": "deployed",
+      "source_commit": "0152ea83fdc9e3c09553123a6d6b78cbc9720947",
+      "backend_sha256": "a8359602b94cb042a5b812750d3742f6ad146bda743b16726ade159e1167bfc0",
+      "plugin_sha256": "cdab08acb6eac6367c6f646ef94770cf5ac01c882b5e2ca2e3711958fee2bb08",
+      "deployment_uuid": "m5v4iyyaaocrdorbbwjo5ejm",
+      "protected_state_unchanged": true,
+      "inference_requests": 0
+    },
+    "refresh": {
+      "provider": "cline",
+      "phase": "pass",
+      "native_refresh_posts": 1,
+      "inference_posts": 0,
+      "http_status": 200,
+      "valid_access_after": true,
+      "protected_state_unchanged": true
+    },
+    "published_free_model_count": 4,
+    "upstream_issue": "https://github.com/Yousha-dev/free-model-hub/issues/1"
+  }
 }
