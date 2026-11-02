@@ -95,6 +95,13 @@ func UpstreamModelID(model string) string {
 // Caller tools, messages, tool_choice and every other semantic field are
 // preserved untouched; the plugin never injects or fabricates tools.
 func shapeInferenceRequest(payload []byte, upstreamModel string) ([]byte, error) {
+	return shapeInferenceRequestWithTokenField(payload, upstreamModel, "max_completion_tokens")
+}
+
+func shapeInferenceRequestWithTokenField(payload []byte, upstreamModel, tokenField string) ([]byte, error) {
+	if tokenField != "max_tokens" && tokenField != "max_completion_tokens" {
+		return nil, fmt.Errorf("invalid native output token field")
+	}
 	if len(strings.TrimSpace(string(payload))) == 0 {
 		return nil, fmt.Errorf("opencode request payload is empty")
 	}
@@ -107,6 +114,15 @@ func shapeInferenceRequest(payload []byte, upstreamModel string) ([]byte, error)
 	}
 	if err := validateDispatchControls(body); err != nil {
 		return nil, err
+	}
+	// Native openai-chat.ts selects from compatibility, defaulting to
+	// max_completion_tokens for opencode.ai. Preserve the caller's numeric
+	// limit, emit one field, and never invent a limit when none was supplied.
+	for _, key := range []string{"max_tokens", "max_completion_tokens"} {
+		if raw, ok := body[key]; ok && key != tokenField {
+			delete(body, key)
+			body[tokenField] = raw
+		}
 	}
 	modelJSON, err := json.Marshal(upstreamModel)
 	if err != nil {

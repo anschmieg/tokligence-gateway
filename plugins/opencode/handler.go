@@ -295,7 +295,7 @@ func (h *Handler) Registration(schemaVersion uint32) RegistrationResponse {
 		SchemaVersion: schemaVersion,
 		Metadata: PluginMetadata{
 			Name:             "tokligence-opencode",
-			Version:          "0.3.0",
+			Version:          "0.3.1",
 			Author:           "tokligence",
 			GitHubRepository: "https://github.com/tokligence/tokligence",
 			ConfigFields:     []any{},
@@ -612,7 +612,7 @@ func (h *Handler) handleExecute(request []byte, stream bool) ([]byte, error) {
 			release()
 		}
 	}()
-	payload, err := shapeInferenceRequest(req.Payload.bytes(), upstreamModel)
+	payload, err := shapeInferenceRequestWithTokenField(req.Payload.bytes(), upstreamModel, h.cfg.MaxTokensField)
 	if err != nil {
 		return nil, withStatus(400, err)
 	}

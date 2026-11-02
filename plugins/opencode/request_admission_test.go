@@ -57,6 +57,9 @@ func TestValidDispatchControlsKeepCallerSemantics(t *testing.T) {
 		json.Unmarshal([]byte(payload), &before)
 		json.Unmarshal(shaped, &after)
 		for key, want := range before {
+			if key == "max_tokens" {
+				key = "max_completion_tokens"
+			}
 			if string(after[key]) != string(want) {
 				t.Fatalf("rewrote %s: got %s want %s", key, after[key], want)
 			}

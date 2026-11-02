@@ -71,6 +71,18 @@ the host HTTP bridge (`host.http.do` / `host.http.do_stream`).
 
 ## Honest boundaries (not gaps that silently fall back)
 
+- **Native output-token compatibility.** `max_tokens_field` defaults to
+  `max_completion_tokens`, matching the pinned OpenCode OpenAI-chat compiler
+  for `opencode.ai`. An explicitly reviewed compatibility override may select
+  `max_tokens`. Either caller spelling retains its numeric value; two limits
+  are rejected, and an absent limit is never invented. The frozen Console
+  snapshot does not dynamically ingest arbitrary compatibility/body changes.
+- **Native stream extensions.** Unknown provider choice/delta fields are
+  tolerated, `reasoning_text` is retained, and native finish aliases `end` and
+  `function_call` normalize to `stop` and `tool_calls`. This does not add legacy
+  `delta.function_call` execution or opaque reasoning-details replay; tool
+  validation and clean DONE/EOF remain required.
+
 - **Plugin-owned persistent sessions.** The registry maps a host conversation
   to a native-shaped ID using the pinned identifier algorithm. This is a local
   plugin mapping, not native database/event-bus lifecycle parity. No evidence

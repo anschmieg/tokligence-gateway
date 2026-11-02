@@ -156,12 +156,18 @@ func (p *responseDecoder) decode(raw []byte) (responseEvent, error) {
 			continue
 		}
 		if key == "id" || key == "model" {
+			if nullJSON(value) {
+				continue
+			}
 			var text *string
 			if json.Unmarshal(value, &text) != nil || text == nil {
 				return responseEvent{}, p.fail("invalid response identity")
 			}
 		}
 		if key == "created" {
+			if nullJSON(value) {
+				continue
+			}
 			var created *int64
 			if json.Unmarshal(value, &created) != nil || created == nil {
 				return responseEvent{}, p.fail("invalid response timestamp")
@@ -190,6 +196,7 @@ func (p *responseDecoder) decode(raw []byte) (responseEvent, error) {
 	if len(choices) == 0 && !hold {
 		return responseEvent{}, p.fail("frame lacks choice or usage")
 	}
+	normalizedFinish := false
 	for _, choice := range choices {
 		if p.finish != "" {
 			return responseEvent{}, p.fail("choice after finish reason")
@@ -198,11 +205,8 @@ func (p *responseDecoder) decode(raw []byte) (responseEvent, error) {
 		if json.Unmarshal(choice["index"], &index) != nil || index == nil || *index != 0 {
 			return responseEvent{}, p.fail("choice index must be zero")
 		}
-		for key, value := range choice {
-			if key != "index" && key != "delta" && key != "finish_reason" && !nullJSON(value) {
-				return responseEvent{}, p.fail("unsupported choice field")
-			}
-		}
+		// Native OpenAIChatChoice uses StructWithRest: extension fields are
+		// tolerated, while the choice/delta/tool structures remain validated.
 		var delta map[string]json.RawMessage
 		if !nullJSON(choice["delta"]) && json.Unmarshal(choice["delta"], &delta) != nil {
 			return responseEvent{}, p.fail("invalid delta")
@@ -214,7 +218,7 @@ func (p *responseDecoder) decode(raw []byte) (responseEvent, error) {
 				if json.Unmarshal(value, &role) != nil || role != "assistant" {
 					return responseEvent{}, p.fail("delta role must be assistant")
 				}
-			case "content", "refusal", "reasoning_content", "reasoning":
+			case "content", "refusal", "reasoning_content", "reasoning", "reasoning_text":
 				if nullJSON(value) {
 					continue
 				}
@@ -243,12 +247,28 @@ func (p *responseDecoder) decode(raw []byte) (responseEvent, error) {
 					}
 				}
 			default:
-				return responseEvent{}, p.fail("unsupported delta field")
+				// Native OpenAIChatDelta permits unknown provider extensions.
+				// Legacy executable function deltas need an explicit translator;
+				// never forward those as unvalidated tools.
+				if key == "function_call" && !nullJSON(value) {
+					return responseEvent{}, p.fail("legacy function delta unsupported")
+				}
 			}
 		}
 		if !nullJSON(choice["finish_reason"]) {
 			if json.Unmarshal(choice["finish_reason"], &p.finish) != nil {
 				return responseEvent{}, p.fail("invalid finish reason")
+			}
+			switch p.finish {
+			case "end":
+				p.finish = "stop"
+				normalizedFinish = true
+			case "function_call":
+				p.finish = "tool_calls"
+				normalizedFinish = true
+			}
+			if normalizedFinish {
+				choice["finish_reason"], _ = json.Marshal(p.finish)
 			}
 			switch p.finish {
 			case "stop", "tool_calls", "length", "content_filter":
@@ -257,6 +277,10 @@ func (p *responseDecoder) decode(raw []byte) (responseEvent, error) {
 			}
 			hold = true
 		}
+	}
+	if normalizedFinish {
+		body["choices"], _ = json.Marshal(choices)
+		raw, _ = json.Marshal(body)
 	}
 	return responseEvent{data: append([]byte(nil), raw...), hold: hold}, nil
 }

@@ -3,6 +3,7 @@ package opencode
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -118,7 +119,7 @@ func TestShapeInferenceRequestMatchesNative(t *testing.T) {
 		t.Errorf("stream_options.include_usage = false, want default true")
 	}
 	// Caller semantics preserved byte-for-byte.
-	for _, key := range []string{"messages", "tools", "tool_choice", "max_tokens", "temperature", "reasoning_effort"} {
+	for _, key := range []string{"messages", "tools", "tool_choice", "max_completion_tokens", "temperature", "reasoning_effort"} {
 		if _, exists := body[key]; !exists {
 			t.Errorf("caller field %q was dropped; native compilation preserves it", key)
 		}
@@ -217,5 +218,47 @@ func TestUpstreamModelID(t *testing.T) {
 		if got := UpstreamModelID(in); got != want {
 			t.Errorf("UpstreamModelID(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestNativeOutputTokenFieldPolicy(t *testing.T) {
+	for _, field := range []string{"max_tokens", "max_completion_tokens"} {
+		for _, inputField := range []string{"max_tokens", "max_completion_tokens"} {
+			body, err := shapeInferenceRequestWithTokenField([]byte(`{"messages":[{"role":"user","content":"hi"}],"`+inputField+`":1024}`), "glm-5.3-flash-free", field)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var value map[string]json.RawMessage
+			_ = json.Unmarshal(body, &value)
+			other := "max_tokens"
+			if field == other {
+				other = "max_completion_tokens"
+			}
+			if string(value[field]) != "1024" || value[other] != nil {
+				t.Fatalf("incorrect native token field: %s", body)
+			}
+		}
+	}
+	body, err := shapeInferenceRequest([]byte(`{"messages":[]}`), "big-pickle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "max_tokens") || strings.Contains(string(body), "max_completion_tokens") {
+		t.Fatal("invented output limit")
+	}
+	if _, err := shapeInferenceRequest([]byte(`{"max_tokens":1024,"max_completion_tokens":1024}`), "beam-free"); err == nil {
+		t.Fatal("dual limit admitted")
+	}
+	for _, field := range []string{"", "max_tokens", "max_completion_tokens"} {
+		cfg, err := DecodeConfig([]byte("max_tokens_field: " + field))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if field == "" && cfg.MaxTokensField != "max_completion_tokens" {
+			t.Fatal("not native OpenCode default")
+		}
+	}
+	if _, err := DecodeConfig([]byte("max_tokens_field: guessed-field")); err == nil {
+		t.Fatal("unknown compatibility policy admitted")
 	}
 }

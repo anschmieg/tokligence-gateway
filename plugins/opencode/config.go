@@ -27,6 +27,10 @@ type PluginConfig struct {
 	// <InferenceBaseURL>/chat/completions.
 	InferenceBaseURL string `yaml:"inference_base_url"`
 
+	// MaxTokensField freezes the reviewed native OpenAI-chat compatibility.
+	// OpenCode's default is max_completion_tokens, not a GLM-name heuristic.
+	MaxTokensField string `yaml:"max_tokens_field"`
+
 	// Models is the explicit bare model allowlist (for example beam-free).
 	// No model is served when the list is empty.
 	Models []string `yaml:"models"`
@@ -97,6 +101,13 @@ func DecodeConfig(raw []byte) (PluginConfig, error) {
 	cfg.Version = strings.TrimSpace(cfg.Version)
 	cfg.Channel = strings.TrimSpace(cfg.Channel)
 	cfg.ProjectID = strings.TrimSpace(cfg.ProjectID)
+	cfg.MaxTokensField = strings.TrimSpace(cfg.MaxTokensField)
+	if cfg.MaxTokensField == "" {
+		cfg.MaxTokensField = "max_completion_tokens"
+	}
+	if cfg.MaxTokensField != "max_tokens" && cfg.MaxTokensField != "max_completion_tokens" {
+		return PluginConfig{}, fmt.Errorf("invalid native output token field")
+	}
 	if cfg.Models != nil {
 		seen := make(map[string]struct{}, len(cfg.Models))
 		models := make([]string, 0, len(cfg.Models))

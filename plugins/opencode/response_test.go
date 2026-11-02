@@ -231,3 +231,47 @@ func TestEmbeddedQuotaPreservesHostHeaderCasingAndRequestID(t *testing.T) {
 		t.Fatalf("lost quota diagnostics: %v", err)
 	}
 }
+
+func TestResponseNativeExtensionsAndFinishAliases(t *testing.T) {
+	body := `data: {"id":null,"model":null,"created":null,"provider_extension":true,"choices":[{"index":0,"native_finish_reason":null,"provider_extension":{},"delta":{"reasoning_text":"think","reasoning_details":[],"vendor_info":{"a":1},"content":"hi"}}]}` + "\n\n" +
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"end"}]}` + "\n\ndata: [DONE]\n\n"
+	raw, err := CollectOpenCodeSSE([]byte(body), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Choices []struct {
+			Finish  string         `json:"finish_reason"`
+			Message map[string]any `json:"message"`
+		} `json:"choices"`
+	}
+	if err = json.Unmarshal(raw, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Choices[0].Finish != "stop" || result.Choices[0].Message["reasoning_text"] != "think" {
+		t.Fatalf("native aliases lost: %s", raw)
+	}
+	frames, err := runResponseRelay(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(frames[len(frames)-1]), `"finish_reason":"end"`) {
+		t.Fatal("stream finish not normalized")
+	}
+	tools := toolResponseSSE("function_call")
+	raw, err = CollectOpenCodeSSE([]byte(tools), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"finish_reason":"tool_calls"`) {
+		t.Fatal("function_call finish alias not normalized")
+	}
+	frames, err = runResponseRelay(strings.TrimSuffix(tools, "data: [DONE]\n\n"))
+	if err == nil || len(frames) != 0 {
+		t.Fatal("alias weakened DONE/EOF tool commit")
+	}
+	legacy := `data: {"choices":[{"index":0,"delta":{"function_call":{"name":"unvalidated","arguments":"{}"}}}]}` + "\n\n"
+	if _, err := runResponseRelay(legacy); err == nil {
+		t.Fatal("unvalidated legacy executable delta admitted")
+	}
+}

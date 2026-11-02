@@ -16,7 +16,10 @@ import time
 import urllib.request
 
 ROOT = Path('/home/agent/cliproxy-staging')
-OLD_SHA = '736569b12097cfcc4c361954fb9c4aa9abc574001ef53a9f7c7fde9bf2ac5291'
+RELEASES = {
+    'device-login': ('736569b12097cfcc4c361954fb9c4aa9abc574001ef53a9f7c7fde9bf2ac5291', '0.3.0'),
+    'native-parity-031': ('65eb953a979c6cfd66e83b68445236e77982db12f9d650055ee5d189eb98be66', '0.3.1'),
+}
 
 
 def digest(path): return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -25,14 +28,17 @@ def digest(path): return hashlib.sha256(path.read_bytes()).hexdigest()
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--sha256', required=True); p.add_argument('--source', required=True)
+    p.add_argument('--release', choices=RELEASES, default='device-login')
     args = p.parse_args()
     r = ROOT
     lock = (r/'state/opencode-device-login-deployment.lock').open('a')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    journal = r/'opencode-device-login-deployment.json'
-    target, pending, backup = r/'plugins/opencode.so', r/'opencode-device-login.pending.so', r/'opencode-pre-device-login.so'
+    old_sha, version = RELEASES[args.release]
+    stem = 'opencode-'+args.release
+    journal = r/(stem+'-deployment.json')
+    target, pending, backup = r/'plugins/opencode.so', r/(stem+'.pending.so'), r/('opencode-pre-'+args.release+'.so')
     if journal.exists() or backup.exists(): raise RuntimeError('existing deployment evidence; inspect instead of replay')
-    if digest(target) != OLD_SHA or digest(pending) != args.sha256: raise RuntimeError('artifact identity differs')
+    if digest(target) != old_sha or digest(pending) != args.sha256: raise RuntimeError('artifact identity differs')
     runtime = (r/'state/coolify-runtime.lock').open('r')
     try:
         fcntl.flock(runtime, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -88,7 +94,7 @@ def main():
         while True:
             plugins = api('/v8/management/plugins')[0]['plugins']
             item = next((x for x in plugins if x['id'] == 'opencode'), {})
-            if item.get('registered') and (item.get('metadata') or {}).get('version') == '0.3.0': break
+            if item.get('registered') and (item.get('metadata') or {}).get('version') == version: break
             if time.monotonic() >= deadline: raise RuntimeError('new plugin did not register')
             time.sleep(.2)
         current = {x['name']:x for x in entries()}
@@ -96,7 +102,7 @@ def main():
         if api('/v8/management/config/plugins/configs/opencode')[0] != plugin_config: raise RuntimeError('plugin configuration changed concurrently')
         if any(digest(Path(path)) != sha for path,sha in hashes.items()): raise RuntimeError('live evidence changed')
         api('/healthz')
-        result.update(phase='deployed',version='0.3.0',credential_quarantine_preserved=True,live_reports_unchanged=True,plugin_config_unchanged=True)
+        result.update(phase='deployed',version=version,credential_quarantine_preserved=True,live_reports_unchanged=True,plugin_config_unchanged=True)
     except Exception as error:
         result.update(phase='failed',error_type=type(error).__name__)
         if changed:
@@ -110,7 +116,7 @@ def main():
                     except BlockingIOError:
                         if time.monotonic() >= deadline: raise RuntimeError('rollback drain blocked; plugin stays disabled')
                         time.sleep(.1)
-            os.replace(target, r/'opencode-device-login.failed.so')
+            os.replace(target, r/(stem+'.failed.so'))
             os.replace(backup,target)
             enabled(True)
         elif disabled: enabled(True)
