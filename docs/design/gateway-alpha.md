@@ -433,3 +433,46 @@ reports/ledger/hash checks pass. Provider settings/accounts were preserved apart
 from explicit priority and redirect policy changes. Model-ID matching was not
 changed. No Nous/Vercel configured credential was observed at inventory time.
 See [live evidence](provider-rotation-acceptance-20261102.json).
+
+
+## Automatic free-only model discovery
+
+The user selected automatic additions of **free models only**. Native compatible
+providers use an opt-in metadata GET every15minutes; Free Model Hub's existing
+vendor-specific catalog callbacks run every30minutes. The service owns scheduling;
+there is no separate proxy, cron process, inference probe or credential store.
+
+New native models need explicit zero pricing or a recognized provider's free-ID
+contract. Requesty price bands must all be free. Unknown pricing is not admitted.
+Manual models/aliases remain configured, including existing explicit paid routes;
+this does not retrospectively classify every imported manual route as free.
+Successful refresh removes automatic entries that disappear or become paid;
+errors retain the last good snapshot, so catalog admission is not a billing cap.
+Per-account quota/suspension state is retained when publishing refreshed catalogs.
+
+FreeHub LLM7 now excludes Pro/usage-based entries: current metadata identifies
+7turbo/free models versus63Pro entries. Vercel automatic admission requires
+explicit zero pricing. Other FreeHub policies retain their provider-specific free
+account allowances. OpenCode is excluded from callbacks and stays quarantined.
+Model-ID matching remains a separate follow-up; discovery preserves native IDs.
+
+Focused custom tests cover pricing schemas, manual alias preservation, price-change
+withdrawal, metadata fidelity, bounded GET/no redirects, stale-publication rejection
+and cooldown preservation. The exact native.8/FreeHub.1.6 actual-host fixture passed
+inside a mandatory isolated network namespace: 2catalogGETs, no startup inference,
+1deliberate mock dispatch of the automatically discovered model. No real inference
+was needed for this deployment. See deployment evidence for actual rollout status.
+
+LLM7 account pooling is not recommended. Its current terms prohibit coordinating
+accounts/tokens to increase quotas and describe tokens as non-transferable. Her
+own use differs from adding her allowance to a shared gateway pool; obtain written
+provider approval before doing the latter. Extra keys do not establish independent
+allowances. Source: https://github.com/chigwell/llm7.io/blob/main/TERMS.md .
+
+Deployment completed with native.8/FreeHub.1.6, source`7d25458`, Coolify
+`z6ilpohsr7ddl8lffumoottf`. All4native groups persisted free-only discovery;
+FreeHub periodic callbacks persisted. The actual catalog contains953IDs with
+18new IDs (16new OpenRouter contributions);63nonfreeLLM7 entries intentionally
+retired, all other original IDs retained. Protected state/accounts preserved and
+zero real inference/login requests. Exact hashes and rollout checks:
+[deployment evidence](model-discovery-deployment-20261102.json).

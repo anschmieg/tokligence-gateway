@@ -1,0 +1,27 @@
+{
+  "phase": "deployed",
+  "source_commit": "7d25458",
+  "backend_sha256": "6d3e3525aacf372b02cce8bebd770b983e9728afe27361c95977422c5c52f7a6",
+  "plugin_sha256": "51fc4af90894999977ceb2c3f8fd0cdaf1302e669743021194d2c1b44dc093c9",
+  "provider_inference_requests": 0,
+  "login_requests": 0,
+  "deployment_uuid": "z6ilpohsr7ddl8lffumoottf",
+  "model_count": 953,
+  "all_original_ids_preserved": false,
+  "canonical_id": "nemotron-3.5-lightning",
+  "canonical_providers": [
+    "freehub",
+    "openai-compatible-openrouter"
+  ],
+  "all_owners_disclosed": true,
+  "gemini_generation_methods_correct": true,
+  "protected_state_unchanged": true,
+  "existing_accounts_preserved": true,
+  "automatic_model_refresh": true,
+  "catalog_refresh_seconds": 900,
+  "plugin_refresh_seconds": 1800,
+  "new_openrouter_catalog_contributions": 16,
+  "new_model_ids": 18,
+  "retired_nonfree_llm7_models": 63,
+  "all_other_original_ids_preserved": true
+}
