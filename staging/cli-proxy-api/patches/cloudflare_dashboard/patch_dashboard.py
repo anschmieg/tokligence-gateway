@@ -25,6 +25,7 @@ def main():
  t=replace(t,"const rememberPassword = credentials.rememberPassword ?? get().rememberPassword ?? false;", "const rememberPassword = isCloudflareAccessHost() ? false : (credentials.rememberPassword ?? get().rememberPassword ?? false);")
  t=replace(t,"localStorage.removeItem('isLoggedIn');\n      },", "localStorage.removeItem('isLoggedIn');\n        if (isCloudflareAccessHost()) window.location.assign('/cdn-cgi/access/logout');\n      },")
  t=replace(t,"if (!managementKey || !apiBase) {", "if ((!managementKey && !isCloudflareAccessHost()) || !apiBase) {")
+ t=replace(t,"set({ connectionStatus: 'error' });", "set({ connectionStatus: 'error', ...(isCloudflareAccessHost() ? {isAuthenticated:false, managementKey:''} : {}) });")
  s.write_text(t)
  f=a.output/'src/pages/LoginPage.tsx';t=f.read_text();anchor="export function LoginPage()" if 'export function LoginPage()' in t else None
  t="import { isCloudflareAccessHost } from '@/utils/cloudflareAccess';\n"+t
