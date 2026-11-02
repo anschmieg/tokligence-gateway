@@ -66,7 +66,7 @@ the host HTTP bridge (`host.http.do` / `host.http.do_stream`).
 | Executor (chat, buffered) | `executor.identifier`, `executor.execute` | Implemented |
 | Executor (chat, streaming) | `executor.execute_stream` | Implemented: async relay through `host.stream.emit`/`host.stream.close` with structured error detail |
 | Console API passthrough | `executor.http_request` | Implemented, bounded: GET-only, limited to the credential's Console server, with the native Console headers (`x-org-id` from credential metadata) |
-| Device login | `auth.login.start`, `auth.login.poll` | **Not implemented** (explicit 501): a login here would create a second refresh owner; seed the auth-dir credential from its existing single owner |
+| Device login | `auth.login.start`, `auth.login.poll` | Implemented: native Console device authorization, paced host polling, user/org discovery and host-owned credential persistence/refresh. Existing account files are not overwritten by new logins. |
 | Token counting | `executor.count_tokens` | **Not implemented** (explicit 501): no fabricated counts |
 
 ## Honest boundaries (not gaps that silently fall back)

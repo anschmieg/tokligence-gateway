@@ -136,9 +136,8 @@ func base64Config(config string) string {
 	return string(encoded[1 : len(encoded)-1])
 }
 
-// TestAuthIdentifierAndLoginBoundary pins the provider key and the explicit
-// login refusal: a login here would create a second refresh owner, so both
-// login methods fail closed with 501.
+// TestAuthIdentifierAndLoginBoundary pins the provider key and refuses login
+// RPCs without the provider and host callback context.
 func TestAuthIdentifierAndLoginBoundary(t *testing.T) {
 	h := newTestHandler(t, nil)
 	result, err := h.HandleMethod("auth.identifier", nil)
@@ -154,8 +153,8 @@ func TestAuthIdentifierAndLoginBoundary(t *testing.T) {
 	}
 	if _, err := h.HandleMethod("auth.login.start", nil); err == nil {
 		t.Errorf("auth.login.start succeeded, want explicit refusal")
-	} else if statusOf(err) != 501 {
-		t.Errorf("auth.login.start status = %d, want 501", statusOf(err))
+	} else if statusOf(err) != 400 {
+		t.Errorf("auth.login.start status = %d, want 400", statusOf(err))
 	}
 	if _, err := h.HandleMethod("auth.login.poll", nil); err == nil {
 		t.Errorf("auth.login.poll succeeded, want explicit refusal")

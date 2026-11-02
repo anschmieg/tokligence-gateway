@@ -20,10 +20,9 @@ import (
 //   - expiry admission: packages/core/src/integration.ts expiring():
 //     refresh when expires <= now + 5min
 //
-// Login (auth.login.start/poll) is NOT implemented: a login here would create
-// a second refresh owner against the account, and the audited work requires
-// single sequential refresh ownership. The host surfaces an explicit 501 and
-// the operator seeds the auth-dir credential from the existing owner.
+// Device login is operator initiated through the host's native OAuth API.
+// The plugin returns credentials to that host for persistence and refresh;
+// it does not start a second process or copy an existing credential store.
 //
 // Refresh IS implemented per the reviewed plan: the host's own auto-refresh
 // loop is the single sequential owner (it calls auth.refresh on schedule;
@@ -164,6 +163,7 @@ type Handler struct {
 	cfg               PluginConfig
 	catalog           []RegisteredModel
 	registry          *SessionRegistry
+	deviceLogin       *DeviceLoginManager
 }
 
 // The host closes HTTP callback resources BEFORE plugin shutdown (pinned
@@ -180,6 +180,9 @@ func (h *Handler) ShutdownComplete() bool { return h.shutdownComplete.Load() }
 
 func (h *Handler) closeIfDrainedLocked() {
 	if h.shutdownRequested.Load() && h.activeStreams.Load() == 0 {
+		if h.deviceLogin != nil {
+			h.deviceLogin.Close()
+		}
 		if h.registry != nil {
 			h.registry.Close()
 		}
@@ -203,7 +206,7 @@ func NewHandler(transport Transport, nowMs NowMs) *Handler {
 		nowMs = func() int64 { return time.Now().UnixMilli() }
 	}
 	registry, _ := NewSessionRegistry(RegistryOptions{NowMs: nowMs})
-	return &Handler{transport: transport, nowMs: nowMs, registry: registry}
+	return &Handler{transport: transport, nowMs: nowMs, registry: registry, deviceLogin: NewDeviceLoginManager(transport)}
 }
 
 // AttachRegistry replaces the handler's registry with a persistent one.
@@ -275,6 +278,11 @@ func (h *Handler) Configure(raw []byte) error {
 	}
 	old := h.registry
 	h.cfg, h.catalog, h.registry = cfg, catalog, registry
+	if h.deviceLogin != nil {
+		h.deviceLogin.mu.Lock()
+		h.deviceLogin.app = cfg.App()
+		h.deviceLogin.mu.Unlock()
+	}
 	if old != nil && old != registry {
 		old.Close()
 	}
@@ -287,7 +295,7 @@ func (h *Handler) Registration(schemaVersion uint32) RegistrationResponse {
 		SchemaVersion: schemaVersion,
 		Metadata: PluginMetadata{
 			Name:             "tokligence-opencode",
-			Version:          "0.2.0",
+			Version:          "0.3.0",
 			Author:           "tokligence",
 			GitHubRepository: "https://github.com/tokligence/tokligence",
 			ConfigFields:     []any{},
@@ -334,9 +342,9 @@ func (h *Handler) HandleMethod(method string, request []byte) ([]byte, error) {
 	case "auth.refresh":
 		return h.handleAuthRefresh(request)
 	case "auth.login.start":
-		return nil, withStatus(501, fmt.Errorf("opencode device login is not implemented in this slice; seed the auth-dir credential from its existing single owner instead of creating a second refresh owner"))
+		return h.handleDeviceLogin(request, false)
 	case "auth.login.poll":
-		return nil, withStatus(501, fmt.Errorf("opencode device login polling is not implemented in this slice"))
+		return h.handleDeviceLogin(request, true)
 	case "model.register", "model.static":
 		return h.handleModelStatic()
 	case "model.for_auth":
