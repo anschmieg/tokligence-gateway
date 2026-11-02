@@ -42,6 +42,10 @@ def main():
   }
 
 '''+t[pos:];f.write_text(t)
- (a.output/'cloudflare-dashboard-manifest.json').write_text(json.dumps({'source_commit':PIN,'access_host':'code.nothing.pink','auth_store_input_sha256':before,'patched':{str(f.relative_to(a.output)):hashlib.sha256(f.read_bytes()).hexdigest(),str(s.relative_to(a.output)):hashlib.sha256(s.read_bytes()).hexdigest()},'management_key_in_browser':False},indent=2))
+ resources=a.output/'src/features/plugins/pluginResources.ts';t=resources.read_text()
+ t="import { isCloudflareAccessHost } from '@/utils/cloudflareAccess';\n"+t
+ t=replace(t,"  const base = normalizeApiBase(apiBase);", "  // /admin protects management calls; plugin resources are native origin-root routes.\n  if (isCloudflareAccessHost() && trimmed.startsWith('/v0/resource/plugins/')) {\n    return window.location.origin + trimmed;\n  }\n  const base = normalizeApiBase(apiBase);")
+ resources.write_text(t)
+ (a.output/'cloudflare-dashboard-manifest.json').write_text(json.dumps({'source_commit':PIN,'access_host':'code.nothing.pink','auth_store_input_sha256':before,'patched':{str(resources.relative_to(a.output)):hashlib.sha256(resources.read_bytes()).hexdigest(),str(f.relative_to(a.output)):hashlib.sha256(f.read_bytes()).hexdigest(),str(s.relative_to(a.output)):hashlib.sha256(s.read_bytes()).hexdigest()},'management_key_in_browser':False},indent=2))
  print(json.dumps({'prepared':str(a.output),'source':PIN}))
 if __name__=='__main__':main()
