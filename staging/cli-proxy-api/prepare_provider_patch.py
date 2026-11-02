@@ -11,6 +11,8 @@ import tempfile
 PIN = "250d598175db61a4e99ac38b9164ed04745754e5"
 HTTP_SHA = "1fdcc543624398284c48d1600227452457046fe42f7b7830cf020d0c35946f3d"
 REL = "internal/pluginhost/http_bridge.go"
+CALLBACK_REL = "internal/pluginhost/host_callbacks.go"
+CALLBACK_SHA = "94f18e35b3d9050d8f18cd7a5c18c48f42db0aa7bbec8003349b42f895ae1f64"
 ANCHOR = "\tcliproxyexecutor.MarkUpstreamAttempt(ctx)\n\tresp, errDo := client.Do(httpReq)"
 REPLACEMENT = """\t// Local provider budget policy: no hidden redirect dispatches.
 \tbudgetProvider := strings.TrimSpace(c.provider)
@@ -41,6 +43,15 @@ def main():
     raw = subprocess.check_output(["git", "-C", str(source), "show", f"{PIN}:{REL}"])
     if digest(raw) != HTTP_SHA or raw.decode().count(ANCHOR) != 1:
         parser.error("pinned source/input mismatch")
+    callback_raw = subprocess.check_output(["git", "-C", str(source), "show", f"{PIN}:{CALLBACK_REL}"])
+    callback_edits = {
+        "h.newHTTPClientWithProxy(nil, oauthProxyURLFromContext(operation.ctx)).Do(operation.ctx, httpReq)":
+        "h.newHTTPClientWithProxy(nil, oauthProxyURLFromContext(operation.ctx), operation.pluginID).Do(operation.ctx, httpReq)",
+        "h.newHTTPClientWithProxy(nil, oauthProxyURLFromContext(streamCtx)).DoStream(streamCtx, httpReq)":
+        "h.newHTTPClientWithProxy(nil, oauthProxyURLFromContext(streamCtx), operation.pluginID).DoStream(streamCtx, httpReq)",
+    }
+    if digest(callback_raw) != CALLBACK_SHA or any(callback_raw.decode().count(a) != 1 for a in callback_edits):
+        parser.error("pinned HTTP callback input mismatch")
     artifacts = Path(__file__).resolve().parent / "patches"
     additions = {}
     for name in ("provider_dispatch_budget.go", "provider_dispatch_budget_test.go"):
@@ -66,6 +77,10 @@ def main():
         raise RuntimeError("exported source mismatch; output not ready")
     patched = raw.decode().replace(ANCHOR, REPLACEMENT).encode()
     http_file.write_bytes(patched)
+    callback_patched = callback_raw.decode()
+    for anchor, replacement in callback_edits.items():
+        callback_patched = callback_patched.replace(anchor, replacement)
+    (output / CALLBACK_REL).write_text(callback_patched)
     for name, body in additions.items():
         target = output / "internal/pluginhost" / name
         if target.exists():
@@ -78,6 +93,8 @@ def main():
         "base_commit": PIN,
         "input_http_sha256": HTTP_SHA,
         "patched_http_sha256": digest(patched),
+        "input_callbacks_sha256": CALLBACK_SHA,
+        "patched_callbacks_sha256": digest(callback_patched.encode()),
         "additions": {name: digest(body) for name, body in additions.items()},
         "providers": ["opencode", "cline", "freehub"],
         "unsigned_thinking_compat": args.unsigned_thinking_compat,
