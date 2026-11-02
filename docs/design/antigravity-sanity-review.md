@@ -47,3 +47,14 @@ Conclusion: no reason for a broad reimplementation or full upstream test matrix.
 The single-dispatch policy gaps should be resolved/admitted explicitly before
 claiming that a one-call live smoke has a one-physical-request bound. Antigravity
 remains connected but live acceptance untested. No changes were deployed.
+
+
+## Resolution and live acceptance — November 2, 14:10 UTC
+
+The two request-budget gaps were resolved before testing: native Antigravity and
+Codex client constructors now apply a scoped no-redirect client clone; the native
+per-provider request-scoped 401 stop-and-cooldown rule suppresses refresh/replay.
+Focused redirect tests pass; TLS and transport behavior remain intact. Deployed
+backend is .6, source219b7d3. One Chat inference using gemini-3.1-flash-lite passed
+200/nonempty output/stop, with no retry/fallback. Header-only Retry-After handling
+remains an identified edge case. No claim of broad model/tool/reasoning parity.

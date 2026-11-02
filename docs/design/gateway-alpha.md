@@ -106,3 +106,19 @@ on the same free model and returned text with `stop` and `[DONE]`. Two total
 caller POSTs, no automatic retries, redirects or fallback. No other new vendor's
 live functionality is claimed. Both reports and the original OpenCode cooldown
 remain preserved.
+
+
+## Additional account acceptance — November 2, 14:10 UTC
+
+One live request per ready provider passed for Antigravity
+(`gemini-3.1-flash-lite`), Codex (`gpt-6-luna`) and LLM7
+(`llm7-llm7/mistral-Nemo-Instruct-2407`). NVIDIA's selected Gemma model returned
+404; SambaNova returned high-demand429; Z.ai returned no-balance/resource-package429.
+Groq discovery returned403 and Mistral401. Cline account registration remains an
+integration gap: its native credential is visible but no FreeHub route is published.
+Duplicate keys were not individually tested; no account rotation was used.
+
+Backend .6 and FreeHub0.1.2 now preserve streamed upstream error statuses and
+bound native OAuth requests against redirects and automatic401 replay. Existing
+accounts/settings, dashboard, OpenCode quarantine and prior evidence were preserved.
+See [sanitized acceptance report](configured-provider-acceptance-20261102.json).

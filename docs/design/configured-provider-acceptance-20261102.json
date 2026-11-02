@@ -1,0 +1,232 @@
+{
+  "live": [
+    {
+      "provider": "antigravity",
+      "model": "gemini-3.1-flash-lite",
+      "phase": "pass",
+      "caller_posts": 1,
+      "automatic_retries": 0,
+      "redirects": false,
+      "fallback": false,
+      "started_utc": "2026-11-02T14:09:36Z",
+      "http_status": 200,
+      "nonempty_text": true,
+      "finish_reasons": [
+        "stop"
+      ],
+      "embedded_error": false,
+      "response_bytes": 334,
+      "elapsed_seconds": 1.05,
+      "prior_evidence_unchanged": true
+    },
+    {
+      "provider": "codex",
+      "model": "gpt-6-luna",
+      "phase": "pass",
+      "caller_posts": 1,
+      "automatic_retries": 0,
+      "redirects": false,
+      "fallback": false,
+      "started_utc": "2026-11-02T14:09:37Z",
+      "http_status": 200,
+      "nonempty_text": true,
+      "finish_reasons": [
+        "stop"
+      ],
+      "embedded_error": false,
+      "response_bytes": 540,
+      "elapsed_seconds": 2.79,
+      "prior_evidence_unchanged": true
+    },
+    {
+      "provider": "llm7",
+      "model": "llm7-llm7/mistral-Nemo-Instruct-2407",
+      "phase": "pass",
+      "caller_posts": 1,
+      "credential_count": 1,
+      "automatic_retries": 0,
+      "redirects": false,
+      "fallback": false,
+      "started_utc": "2026-11-02T13:53:52Z",
+      "http_status": 200,
+      "retry_after_present": false,
+      "done": true,
+      "nonempty_text": true,
+      "finish_reasons": [
+        "stop"
+      ],
+      "embedded_error": false,
+      "response_bytes": 1336,
+      "elapsed_seconds": 1.64,
+      "prior_evidence_unchanged": true
+    },
+    {
+      "provider": "nvidia",
+      "model": "nvidia-nvidia/google/gemma-3-4b-it",
+      "phase": "failed",
+      "caller_posts": 1,
+      "credential_count": 2,
+      "automatic_retries": 0,
+      "redirects": false,
+      "fallback": false,
+      "started_utc": "2026-11-02T13:53:51Z",
+      "http_status": 500,
+      "retry_after_present": false,
+      "done": false,
+      "nonempty_text": false,
+      "finish_reasons": [],
+      "embedded_error": false,
+      "response_bytes": 272,
+      "error_code": "internal_server_error",
+      "elapsed_seconds": 0.21,
+      "prior_evidence_unchanged": true,
+      "upstream_status": 404,
+      "reason": "Selected model/function unavailable for selected account; key validity for other models not established."
+    },
+    {
+      "provider": "sambanova",
+      "model": "sambanova-sambanova/Meta-Llama-3.3-70B-Instruct",
+      "phase": "failed",
+      "caller_posts": 1,
+      "credential_count": 1,
+      "automatic_retries": 0,
+      "redirects": false,
+      "fallback": false,
+      "started_utc": "2026-11-02T13:53:53Z",
+      "http_status": 500,
+      "retry_after_present": false,
+      "done": false,
+      "nonempty_text": false,
+      "finish_reasons": [],
+      "embedded_error": false,
+      "response_bytes": 323,
+      "error_code": "internal_server_error",
+      "elapsed_seconds": 3.87,
+      "prior_evidence_unchanged": true,
+      "upstream_status": 429,
+      "reason": "Selected model reports high demand."
+    },
+    {
+      "provider": "zai",
+      "model": "zai-zai/glm-5.3-flash",
+      "phase": "failed",
+      "caller_posts": 1,
+      "credential_count": 1,
+      "automatic_retries": 0,
+      "redirects": false,
+      "fallback": false,
+      "started_utc": "2026-11-02T13:53:57Z",
+      "http_status": 500,
+      "retry_after_present": false,
+      "done": false,
+      "nonempty_text": false,
+      "finish_reasons": [],
+      "embedded_error": false,
+      "response_bytes": 213,
+      "error_code": "internal_server_error",
+      "elapsed_seconds": 0.23,
+      "prior_evidence_unchanged": true,
+      "upstream_status": 429,
+      "upstream_code": "1113",
+      "reason": "Insufficient balance or no resource package."
+    }
+  ],
+  "discovery": {
+    "groq": {
+      "catalog_gets": 1,
+      "status": 403,
+      "model_count": 0,
+      "error_code": "",
+      "credential_has_internal_whitespace": false
+    },
+    "mistral": {
+      "catalog_gets": 1,
+      "status": 401,
+      "model_count": 0,
+      "error_code": "",
+      "credential_has_internal_whitespace": false
+    },
+    "freehub_accounts": [
+      {
+        "vendor_id": "groq",
+        "status": "active",
+        "disabled": false,
+        "auth_mode": "apikey"
+      },
+      {
+        "vendor_id": "groq",
+        "status": "active",
+        "disabled": false,
+        "auth_mode": "apikey"
+      },
+      {
+        "vendor_id": "kilo",
+        "status": "active",
+        "disabled": false,
+        "auth_mode": "anonymous"
+      },
+      {
+        "vendor_id": "llm7",
+        "status": "active",
+        "disabled": false,
+        "auth_mode": "apikey"
+      },
+      {
+        "vendor_id": "mistral",
+        "status": "active",
+        "disabled": false,
+        "auth_mode": "apikey"
+      },
+      {
+        "vendor_id": "nvidia",
+        "status": "active",
+        "disabled": false,
+        "auth_mode": "apikey"
+      },
+      {
+        "vendor_id": "nvidia",
+        "status": "active",
+        "disabled": false,
+        "auth_mode": "apikey"
+      },
+      {
+        "vendor_id": "sambanova",
+        "status": "active",
+        "disabled": false,
+        "auth_mode": "apikey"
+      },
+      {
+        "vendor_id": "zai",
+        "status": "active",
+        "disabled": false,
+        "auth_mode": "apikey"
+      }
+    ]
+  },
+  "scope": "One request per ready provider, not every configured credential.",
+  "caller_inference_posts": 6,
+  "not_retested": [
+    "kilo",
+    "openrouter"
+  ],
+  "held": {
+    "opencode": "Existing same-account quarantine/cooldown, no inference."
+  },
+  "blocked": {
+    "cline": "Native account exists, but Free Model Hub account view and model publication do not recognize it. No inference attempted."
+  },
+  "deployment": {
+    "source_commit": "219b7d3",
+    "coolify_deployment": "jivk5feyhvb2jzcuxy9oy0c4",
+    "backend_version": "8.0.49-tokligence.6",
+    "backend_sha256": "a8359602b94cb042a5b812750d3742f6ad146bda743b16726ade159e1167bfc0",
+    "freehub_version": "0.1.2-tokligence",
+    "freehub_sha256": "06e0b25651f77d94b63db180397ffe74d24cd640af64e47f4e6f3ee2d75190ac",
+    "fixes": [
+      "Structured streamed HTTP errors preserve quota/auth status instead of generic500.",
+      "Native Antigravity/Codex client redirects refused.",
+      "Native per-provider401 stop-and-cooldown policy prevents refresh/replay."
+    ],
+    "protected_state_unchanged": true
+  }
+}
