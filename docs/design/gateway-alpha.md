@@ -329,3 +329,64 @@ passing. See [post-deployment catalog/evidence](gateway-model-catalog-fixed-2026
 The native dashboard's AI Providers Codex page reads `config.codexApiKeys`; OAuth
 Codex accounts are shown under Auth Files. Its empty API-key resource list does
 not imply missing OAuth accounts. No account migration or relogin is needed.
+
+
+## Dashboard customization, routing boundaries and provider leads — November 2
+
+The deployed panel has language/theme/navigation preferences but no supported
+configuration for renaming built-in sections or combining API-key resources with
+OAuth credentials. `MainLayout.tsx` declares the navigation; `useProviderWorkbench.ts`
+reads `config.codexApiKeys` for the Codex resource page. The supported
+`management.panel-github-repository` selects a whole `management.html` release
+asset, not a layout configuration. Replacing that static asset does not require
+backend changes or a separate UI server. A different panel must preserve the
+existing same-origin Cloudflare login bootstrap and plugin console support.
+Recommendation: a small upstream UI labeling/link fix, rather than replacing the
+management stack just to clarify API Keys versus OAuth Credentials. No UI changed.
+Source: https://cliproxyapi.gh.miniasp.com/management/webui.html .
+
+Routing is native credential/provider selection, not a second router process.
+OpenRouter's new alias is stock compatible-provider model configuration. FreeHub
+already had vendor-scoped reverse aliases; our patch retains qualified IDs and
+adds one approved Kilo alias in `canonical_aliases.go`. The shared contract
+intersection and rich model serialization are native source patches. Therefore
+this is not entirely stock/configuration-only. There is no new same-request
+failover: one physical attempt, then a refusal is returned; native cooldowns can
+change selection on a subsequent independent request. Two-provider isolated
+mock routing is verified, not a newly repeated live acceptance.
+
+Provider research used only official docs and anonymous public metadata GETs;
+no accounts/keys, inference, settings or deployment changes:
+
+- OrcaRouter currently lists GLM5.3Flash-free, DeepSeekV4Flash-free and
+  V4.1Flash-free, Hy3-free, Hy4-preview-free, OrcaVerify-free and the virtual
+  `orcarouter/free` difficulty router. Public `/api/free-package/public` reports
+  default tiers min_paid_usd0:10RPM/50RPD and min_paid_usd20:20RPM/800RPD.
+  Hy4 has separate tier overrides250/4000RPD; OrcaVerify override5RPM/50RPD.
+  Its current free-model docs explicitly describe daily/minute windows, lower-tier
+  prompt-size caps and established-GitHub-or-paid eligibility. No cumulative
+  lifetime credit quota must not be paraphrased as no daily quota. General
+  rate limits are workspace-scoped, keys do not multiply them. Free suffixes
+  must be preserved; the base IDs bill. No full-context free allowance promised.
+  Sources: https://docs.orcarouter.ai/routing/free-models ,
+  https://docs.orcarouter.ai/operations/rate-limits ,
+  https://api.orcarouter.ai/api/free-package/public .
+- UnoRouter's current official limits page confirms1successful request/minute
+  per free model/user, plus upstream caps, token/minute limits and daily token
+  budgets on some pools. Certain free trials cap prompt size. No inference proof.
+  https://unorouter.com/en/docs/platform/errors-and-rate-limits .
+- Requesty's official pricing confirms200free requests/day, no credit card;
+  official free catalog lists13models including Nemotron3Ultra and Lightning.
+  https://www.requesty.ai/pricing , https://www.requesty.ai/models/free .
+- Nous Portal's official catalog lists a zero-price Step3.7Flash variant (and
+  Beam/SolarMini4 zero-price variants), Free plan with unspecified standard
+  limits. API keys are distinguished from Hermes included subscription usage;
+  generic gateway API-key access/limits for the zero-price route remain unverified.
+  https://portal.nousresearch.com/ . Don't present a portal Free plan as proven
+  gateway entitlement or copy Hermes OAuth into a second refresh owner.
+
+OrcaRouter and Requesty are worthwhile next API-key candidates using native
+OpenAI-compatible configuration. No additional plugin is needed for basic access;
+free-only exact model admission and quota handling still require verification.
+Nous/Uno add independent gateway limits but are aggregators, so upstream capacity
+may overlap with other providers. No claim of multiplied shared upstream quota.
