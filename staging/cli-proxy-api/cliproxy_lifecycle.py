@@ -262,6 +262,8 @@ def terminate_verified(pid: int, force: bool) -> bool:
 
 def cmd_start(args: argparse.Namespace) -> int:
     root, binary, config = paths(args.root)
+    if (root / "state/coolify-owner.ready").exists():
+        die("runtime ownership belongs to Coolify; use its application lifecycle, not a second host process")
     if not binary.is_file() or not os.access(binary, os.X_OK):
         die(f"native executable {binary} is missing or not executable; run install first")
     if not config.is_file():
