@@ -139,3 +139,20 @@ func (s Storage) NextRefreshAfter(buffer time.Duration) time.Time {
 	}
 	return next.UTC()
 }
+
+// Inference admission never refreshes or switches credentials. The host owns
+// refresh; expired credentials fail locally instead of burning an upstream 401.
+func admitInferenceCredential(provider string, raw []byte, now time.Time) (Storage, error) {
+	if provider = strings.TrimSpace(provider); provider != "" && provider != ProviderKey {
+		return Storage{}, withStatus(400, fmt.Errorf("cline cannot execute another provider's credential"))
+	}
+	storage, err := ParseStorage(raw)
+	if err != nil {
+		return Storage{}, withStatus(401, fmt.Errorf("cline credential is unavailable: %v", err))
+	}
+	expires, _ := ParseExpiry(storage.ExpiresAt) // ParseStorage already validated it.
+	if !expires.After(now) {
+		return Storage{}, withStatus(401, fmt.Errorf("cline access token is expired; its single host refresh owner must refresh before inference"))
+	}
+	return storage, nil
+}

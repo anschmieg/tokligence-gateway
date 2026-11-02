@@ -140,15 +140,15 @@ type AuthLoginPollResponse struct {
 
 // ModelRegistrationRequest mirrors pluginapi.ModelRegistrationRequest.
 type ModelRegistrationRequest struct {
-	Plugin               PluginMetadata `json:"Plugin"`
-	MultiProviderModels  bool           `json:"multi_provider_models,omitempty"`
+	Plugin              PluginMetadata `json:"Plugin"`
+	MultiProviderModels bool           `json:"multi_provider_models,omitempty"`
 }
 
 // StaticModelRequest mirrors pluginapi.StaticModelRequest.
 type StaticModelRequest struct {
-	Plugin               PluginMetadata `json:"Plugin"`
-	Host                 HostState      `json:"Host"`
-	MultiProviderModels  bool           `json:"multi_provider_models,omitempty"`
+	Plugin              PluginMetadata `json:"Plugin"`
+	Host                HostState      `json:"Host"`
+	MultiProviderModels bool           `json:"multi_provider_models,omitempty"`
 }
 
 // AuthModelRequest mirrors pluginapi.AuthModelRequest.
@@ -165,9 +165,9 @@ type AuthModelRequest struct {
 
 // ModelResponse mirrors pluginapi.ModelResponse.
 type ModelResponse struct {
-	Provider       string            `json:"Provider"`
-	Models         []RegisteredModel `json:"Models"`
-	AuthUpdate     AuthData          `json:"AuthUpdate"`
+	Provider   string            `json:"Provider"`
+	Models     []RegisteredModel `json:"Models"`
+	AuthUpdate AuthData          `json:"AuthUpdate"`
 }
 
 // Handler dispatches plugin RPC methods. Transport (host HTTP callback) is
@@ -500,9 +500,9 @@ func (h *Handler) handleExecute(request []byte) ([]byte, error) {
 	if !h.catalog.Contains(req.Model) {
 		return nil, withStatus(404, fmt.Errorf("cline model %q is not registered", req.Model))
 	}
-	storage, err := ParseStorage(req.StorageJSON)
+	storage, err := admitInferenceCredential(req.AuthProvider, req.StorageJSON, time.Now())
 	if err != nil {
-		return nil, withStatus(401, fmt.Errorf("cline credential is unavailable: %v", err))
+		return nil, err
 	}
 	// Translation happens against the already-translated chat-completions
 	// payload (the host translated the client format to the executor input

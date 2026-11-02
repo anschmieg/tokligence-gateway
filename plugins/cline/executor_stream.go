@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 )
 
 // StreamBridge delivers validated data frames to the host stream bridge for
@@ -77,9 +78,9 @@ func (h *Handler) handleExecuteStream(request []byte) ([]byte, error) {
 	if !h.catalog.Contains(req.Model) {
 		return nil, withStatus(404, fmt.Errorf("cline model %q is not registered", req.Model))
 	}
-	storage, err := ParseStorage(req.StorageJSON)
+	storage, err := admitInferenceCredential(req.AuthProvider, req.StorageJSON, time.Now())
 	if err != nil {
-		return nil, withStatus(401, fmt.Errorf("cline credential is unavailable: %v", err))
+		return nil, err
 	}
 	translated, _, err := TranslateChatRequest(req.Model, req.Payload)
 	if err != nil {

@@ -162,3 +162,9 @@ performs any client-protocol translation itself.
 Deploy the built `cline.so` into the parent's credential-free staged
 CLIProxyAPI 8.0.49 instance, re-assert the registration/parse/publication
 handshake there, and add `executor.execute_stream` via the host stream bridge.
+
+Inference admission refuses expired access tokens locally on both buffered and
+streaming paths. It does not refresh, switch accounts, or contact the provider;
+the host remains the sole refresh owner. A foreign `AuthProvider` also fails
+before transport. Focused tests cover the exact expiry boundary and zero host
+HTTP callbacks on refusal. This is separate from live refresh acceptance.
