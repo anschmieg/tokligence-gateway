@@ -1,5 +1,26 @@
 # Gateway product scope refactor: implementation plan
 
+## Immediate delivery scope — November 2 correction
+
+The user challenged excessive engineering. Deliver an operator-usable native
+CLIProxyAPI gateway first; the broader migration and provider acceptance remain
+separate unfinished work, not prerequisites for using an already-tested route.
+
+- Keep the deployed native dashboard/API and live-passed free OpenRouter route
+  usable. Give concrete client settings; do not build another interface.
+- OpenCode: fix only demonstrated request-compilation differences using existing
+  code and focused verification. Keep its recorded429 quarantine. Do not mistake
+  more offline parity work for a successful live provider.
+- Finish the small demonstrated disabled-credential management bypass guard.
+- Defer Console body-overlay support (absent from the actual snapshot), universal
+  protocol parity, expanded model matrices, new diagnostic frameworks and optional
+  specialist migrations. Start none without a concrete failing requirement.
+- Integrate the two remaining scoped results, validate only changed behavior,
+  deploy once, and report exact usable/blocked coverage. No replacement review loop.
+
+This narrows the immediate delivery sequence; it does not silently declare the
+original OpenCode/four-model acceptance or complete gateway migration achieved.
+
 Status: proposed implementation sequence, authorized for planning; production migration requires a concrete staging result and approval.
 Date: 2026-11-01.
 
