@@ -48,7 +48,6 @@ REQUIRED_SHAPES = [
     f"port: {base.BIND_PORT}",
     "disable-auto-update-panel: true",
     'catalog: ""',
-    "enabled: false",
 ]
 # Provider configuration is owned/validated by the native backend. Do not
 # make documented provider entries prevent an ordinary staging restart.

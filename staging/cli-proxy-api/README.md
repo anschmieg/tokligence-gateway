@@ -211,3 +211,21 @@ The native staging service now binds only `100.74.55.86:4195`; dashboard URL `ht
 The attempted native TailscaleServe HTTPS443 mapping was denied by node permissions and did not change the existing8443 service. No new reverse proxy was installed. Parentverified tailnethealth200, unauthenticatedv0management401, authenticatedv0credentiallisting200(empty), authenticatedv8config200 anddashboardhashmatch. Actual T3 hub setup remains unverified.
 
 T3's [documented hub connection](https://github.com/pingdotgg/t3code/blob/main/docs/user/usage.md#connect-a-cliproxyapi-hub) supplies usage, not inference routing. Its [current reference client](https://github.com/pingdotgg/t3code/blob/main/apps/server/src/usage/cliproxyApi.ts) uses `/v0/management/auth-files` and `/v0/management/api-call`; the latter cancontactproviders forusage and resetcreditoperations. These are currentpublicreferencefacts, not verificationofinstalledT3version. Do not blanketdenytheapi-callrouteandclaimhubcompatibility; constrain dangerousoperations separately, preserve native API, and avoidtriggeringusageprobesduringemptysetup. Cline/OpenCode usage display is not promised by this hub client.
+
+## Secondary OpenCode staging ownership
+
+`transfer_opencode_owner.py` is a one-shot, staging-specific sequential handoff.
+It defaults to read-only admission. `--execute --plugin-sha <reviewed digest>`
+retires only verified old staging PIDs, holds their OS lock, blocks old restart,
+persists the latest credential privately, deletes the old DB row, then enables
+the plugin and moves the credential into the native auth directory. It never
+copies a DB, prints tokens, or automatically restarts a stale owner on failure.
+Its phase journal prevents replay; interrupted phases require direct inspection.
+
+The Nov2 handoff completed. The one-shot `probe_opencode_once.py` consumed its
+stable ID and returned429; **never replay it** or reset the ledger. The credential
+is disabled through native management while that rejection is investigated.
+Console provider headers are configured privately under
+`plugins.configs.opencode.console_headers` from the actual native Console
+snapshot. The org overlay is checked against the credential before dispatch.
+The correction passed the isolated host fixture; its live effect is untested.
