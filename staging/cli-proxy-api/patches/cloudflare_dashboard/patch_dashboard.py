@@ -32,6 +32,7 @@ def main():
  s.write_text(t)
  f=a.output/'src/pages/LoginPage.tsx';t=f.read_text();anchor="export function LoginPage()" if 'export function LoginPage()' in t else None
  t="import { isCloudflareAccessHost } from '@/utils/cloudflareAccess';\n"+t
+ t=replace(t,"if (isAuthenticated && !autoLoading && !autoLoginSuccess && phase === 'idle') {", "if (isAuthenticated && (isCloudflareAccessHost() || (!autoLoading && !autoLoginSuccess && phase === 'idle'))) {")
  pos=t.index('  return (',t.index('  const handleSubmit'))
  t=t[:pos]+'''  if (isCloudflareAccessHost()) {
     return <main style={{padding:48,fontFamily:'system-ui'}}>
