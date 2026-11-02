@@ -1,0 +1,40 @@
+{
+  "source": "https://openrouter.ai/api/v1/models",
+  "retrieved_at": "2026-11-02T08:38:20.468274+00:00",
+  "inference_requests": 0,
+  "auth_used": false,
+  "free_selection": {
+    "id": "nvidia/nemotron-3.5-lightning:free",
+    "pricing": {
+      "prompt": "0",
+      "completion": "0"
+    },
+    "supported_parameters": [
+      "include_reasoning",
+      "max_tokens",
+      "reasoning",
+      "seed",
+      "temperature",
+      "tool_choice",
+      "tools",
+      "top_p"
+    ],
+    "context_length": 1000000
+  },
+  "other_current_zero_price_free_ids": [
+    "cohere/north-mini-code:free",
+    "dots-studio/dots-3-note-preview:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "google/gemma-4-31b-it:free",
+    "liquid/lfm-2.5-2.6b:free",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "nvidia/nemotron-3.5-super-vl:free",
+    "recursive/flint-v1.0:free",
+    "thinkingmachines/inkling-small:free",
+    "thinkingmachines/inkling:free",
+    "xingchen-agi/xing4.0-29b-a4b:free",
+    "nvidia/nemotron-3.5-content-safety:free"
+  ],
+  "not_a_live_availability_test": true
+}

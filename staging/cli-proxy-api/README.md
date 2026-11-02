@@ -229,3 +229,37 @@ Console provider headers are configured privately under
 `plugins.configs.opencode.console_headers` from the actual native Console
 snapshot. The org overlay is checked against the credential before dispatch.
 The correction passed the isolated host fixture; its live effect is untested.
+
+## First native free OpenRouter route
+
+Once the explicitly requested Hermes read ACL is granted:
+
+```sh
+python3 staging/cli-proxy-api/activate_openrouter.py
+python3 staging/cli-proxy-api/activate_openrouter.py --apply
+```
+
+The first command is read-only admission. It reads only the existing OpenRouter
+key, rejects ambiguous/placeholder values, checks current official catalog
+pricing for the exact `:free` ID, and never prints the key. Apply transfers the
+key over SSH stdin into the native API, preserving other routes/payload rules
+through `If-Match`; no inference or OAuth transfer occurs. Requires the tested
+8.0.49-tokligence.3 backend and its deployment digest manifest. One stable
+activation journal prevents blind replay. The free route disables automatic HTTP
+redirects, credential retries, OpenRouter provider fallback, and paid router
+plugins, and caps prompt/completion/request/image provider prices at zero.
+Router plugins are not offered by this profile. A real one-request live check
+remains a separate admission after configuration/model publication.
+
+Public catalog evidence is in
+`docs/design/openrouter-free-catalog-20261102.json`. This is discovery, not proof
+of runtime capacity, key entitlement or successful inference. Old template IDs
+absent from that catalog have been removed from the OpenRouter example.
+
+After the native route is configured and its model is published, the prepared
+VPS-only `probe_openrouter_once.py` admits one real streaming Messages request
+forcing an inert `report_ready` tool proposal. It executes no tool and performs
+no continuation. It uses its own provider-specific LiveGuard ledger and stable
+ID, checks native retry/redirect/free-price/fallback policy, validates the full
+Messages terminal and original tool arguments, and never automatically retries.
+This probe is currently **not run**; key access and route activation come first.

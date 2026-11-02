@@ -44,3 +44,16 @@ ABI cannot publish IsCompat and the ordinary API-key setting does not bind this
 OAuth plugin route. Retirement: remove once mainline exposes this policy to
 plugin models/executors. Source input and adapter digest are pinned by the
 preparation tool; test only the custom seam and actual failed continuation.
+
+## Native compatible-provider redirect budget
+
+After the pinned preparation above, run
+`prepare_native_redirect_patch.py --prepared-source <fresh prepared tree>`.
+It checks exact config/executor input hashes, adds the native per-provider
+`disable-redirects` boolean (default false), and changes five compatible-client
+construction sites to a small wrapper preserving the chosen transport/proxy and
+context decorator. Enabled routes return a redirect response without following
+it. No provider names are hardcoded. Retirement: upstream per-route no-redirect
+support replaces this additive field/wrapper. Focused tests prove one POST to
+origin/zero to redirect target, unchanged defaults/unrelated routes, and native
+configuration parsing. This is custom-policy testing, not upstream conformance.
