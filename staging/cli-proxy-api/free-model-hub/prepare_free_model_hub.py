@@ -48,6 +48,10 @@ SHARED_SOURCES = [
 # never rewritten in place afterwards (re-prepare deletes only the output).
 
 EDITS = [
+    {"id":"leading-vendor-before-account-label","file":"internal/core/registry.go",
+     "why":"Saved Cline filename contained a GitHub label; explicit vendor prefixes must beat embedded label matches.",
+     "find":"\t\tfor _, id := range ids {\n\t\t\tif FileNameMatchesConvention(base, id) {",
+     "replace":"\t\tfor _, id := range ids {\n\t\t\tif fileNameHasVendorPrefix(base, id) { return r.byID[id], true }\n\t\t}\n\t\tfor _, id := range ids {\n\t\t\tif FileNameMatchesConvention(base, id) {"},
     {"id":"zai-retire-undocumented-free-test-id","file":"internal/vendors/openaicompat/openaicompat_test.go",
      "why":"Adjust the upstream test to the explicit current-pricing allowlist, excluding undocumented glm-4-flash-250414.",
      "find":"got := filterModels(models, FilterFlash, false)\n\tif len(got) != 3 {",
@@ -529,6 +533,9 @@ EDITS.extend([{'file': 'internal/admin/config.go',
 
 # --- New files (copied from staging patches) ------------------------------
 NEW_FILES = [
+    "internal/core/filename_attribution.go",
+    "internal/core/filename_attribution_test.go",
+    "internal/app/cline_attribution_test.go",
     "internal/vendors/openaicompat/zai_free_catalog.go",
     "internal/vendors/openaicompat/zai_free_catalog_test.go",
     "internal/app/stream_error.go",
