@@ -20,3 +20,12 @@ merge preview values when validating production. Global401 now calls local
 invalidateSession only; explicit user Logout alone calls Access logout. The
 error page retries /dashboard without revoking the SSO session. Regression
 case drives the real unauthorized event handler; five focused tests pass.
+
+
+Sidebar resource follow-up: the Access-only `/admin` API base must not prefix
+native `/v0/resource/plugins/` URLs. `resolvePluginAssetURL` now resolves those
+paths at the origin root on the Access host. FreeHub's static resource then
+redirects into its existing authenticated `/admin/v0/management/.../console`.
+Other deployments retain their configured mount prefixes. Three focused URL
+regressions and all five Access-login cases pass; the panel builds successfully.
+This does not expand backend aliases, weaken authentication or add browser keys.

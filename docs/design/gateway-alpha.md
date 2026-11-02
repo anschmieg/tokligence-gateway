@@ -204,3 +204,16 @@ signed-in profile parity. The existing OAuth access token was supplied read-only
 no refresh token or credential database was copied, and the fresh CLI database
 contained zero credentials. Gateway quarantine and prior evidence were unchanged.
 See [control evidence](opencode-official-cli-control-20261102.json). No retry was sent.
+
+
+## Free Model Hub sidebar fix
+
+The Access dashboard previously prepended its management-only `/admin` prefix
+to the plugin's public resource URL, resulting in404 and Safari's download prompt.
+The deployed panel now uses the native origin-root resource URL, whose static
+page redirects to the protected console. Panel SHA:
+`e91963c598d64608791d21a00d2983885e814fdc40bc3a1b7e4c6033029874a7`.
+Three URL regressions, five authentication regressions and the build pass. Native
+origin responses verify HTML and the deployed panel hash. No gateway restart or
+account changes were required. Reload the dashboard before retrying the sidebar;
+real Safari confirmation remains pending.
