@@ -1,0 +1,14 @@
+{
+  "phase": "deployed",
+  "source_commit": "1c3e784",
+  "old_panel_sha256": "e91963c598d64608791d21a00d2983885e814fdc40bc3a1b7e4c6033029874a7",
+  "panel_sha256": "252defe0c17e1fcf36e45d5b6e09c39b4d5fb611e5be18e580f2f5c3ec413418",
+  "gateway_restart": false,
+  "provider_requests": 0,
+  "inference_requests": 0,
+  "native_panel_hash_verified": true,
+  "resource_html": true,
+  "protected_console_html": true,
+  "protected_state_unchanged": true,
+  "browser_safari_confirmation": "pending_user_refresh"
+}
