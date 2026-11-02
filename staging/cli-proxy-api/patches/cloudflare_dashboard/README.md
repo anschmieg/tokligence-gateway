@@ -13,3 +13,10 @@ Focused parent verification: copy access_login.test.ts into prepared tree
 Tests stay outside upstreamsrc/typecheck inclusion; no changes to upstream
 compiler settings or broad core tests. Four custom authentication-state cases
 passed with fake config API and no provider/network calls.
+
+Login-failure follow-up: initial production team was an old placeholder while
+preview had the right team. Inspect production/runtime values separately; never
+merge preview values when validating production. Global401 now calls local
+invalidateSession only; explicit user Logout alone calls Access logout. The
+error page retries /dashboard without revoking the SSO session. Regression
+case drives the real unauthorized event handler; five focused tests pass.

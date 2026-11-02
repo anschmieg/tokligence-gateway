@@ -23,7 +23,10 @@ def main():
  t=replace(t,"const apiBase = normalizeApiBase(credentials.apiBase);", "const apiBase = isCloudflareAccessHost() ? window.location.origin+'/admin' : normalizeApiBase(credentials.apiBase);")
  t=replace(t,"const managementKey = credentials.managementKey.trim();", "const managementKey = isCloudflareAccessHost() ? '' : credentials.managementKey.trim();")
  t=replace(t,"const rememberPassword = credentials.rememberPassword ?? get().rememberPassword ?? false;", "const rememberPassword = isCloudflareAccessHost() ? false : (credentials.rememberPassword ?? get().rememberPassword ?? false);")
- t=replace(t,"localStorage.removeItem('isLoggedIn');\n      },", "localStorage.removeItem('isLoggedIn');\n        if (isCloudflareAccessHost()) window.location.assign('/cdn-cgi/access/logout');\n      },")
+ t=replace(t,"logout: () => void;", "logout: () => void;\n  invalidateSession: () => void;")
+ t=replace(t,"logout: () => {", "invalidateSession: () => {")
+ t=replace(t,"localStorage.removeItem('isLoggedIn');\n      },", "localStorage.removeItem('isLoggedIn');\n      },\n      logout: () => {\n        get().invalidateSession();\n        if (isCloudflareAccessHost()) window.location.assign('/cdn-cgi/access/logout');\n      },")
+ t=replace(t,"useAuthStore.getState().logout();", "useAuthStore.getState().invalidateSession();")
  t=replace(t,"if (!managementKey || !apiBase) {", "if ((!managementKey && !isCloudflareAccessHost()) || !apiBase) {")
  t=replace(t,"set({ connectionStatus: 'error' });", "set({ connectionStatus: 'error', ...(isCloudflareAccessHost() ? {isAuthenticated:false, managementKey:''} : {}) });")
  s.write_text(t)
@@ -33,8 +36,8 @@ def main():
  t=t[:pos]+'''  if (isCloudflareAccessHost()) {
     return <main style={{padding:48,fontFamily:'system-ui'}}>
       <h1>Gateway administration</h1>
-      <p>{autoLoading ? 'Checking your Cloudflare Access session…' : 'Cloudflare Access sign-in is required. No management key is needed.'}</p>
-      {!autoLoading && <button onClick={() => window.location.assign('/cdn-cgi/access/logout')}>Sign in again with Cloudflare Access</button>}
+      <p>{autoLoading ? 'Checking your Cloudflare Access session…' : 'Gateway session validation failed. Your Cloudflare sign-in has been kept; retry below.'}</p>
+      {!autoLoading && <button onClick={() => window.location.assign('/dashboard')}>Retry gateway session</button>}
     </main>;
   }
 

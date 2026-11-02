@@ -3,7 +3,8 @@ const memory = new Map<string,string>();
 const storage = { getItem:(k:string)=>memory.get(k)??null, setItem:(k:string,v:string)=>memory.set(k,v), removeItem:(k:string)=>memory.delete(k) };
 const redirects:string[]=[];
 const location = {protocol:'https:',hostname:'code.nothing.pink',origin:'https://code.nothing.pink',port:'',assign:(v:string)=>redirects.push(v)};
-Object.assign(globalThis,{localStorage:storage,window:{location,addEventListener:()=>{}}});
+const listeners = new Map<string,()=>void>();
+Object.assign(globalThis,{localStorage:storage,window:{location,addEventListener:(name:string,listener:()=>void)=>listeners.set(name,listener)}});
 const configurations:any[]=[];
 let rejected=false;
 mock.module('@/services/api/client',()=>({apiClient:{getConnectionRevision:()=>1,setConfig:(c:any)=>configurations.push(c)}}));
@@ -36,4 +37,11 @@ test('Access logout clears state and goes to the official logout path',()=>{
  useAuthStore.setState({isAuthenticated:true});useAuthStore.getState().logout();
  expect(useAuthStore.getState().isAuthenticated).toBe(false);
  expect(redirects).toEqual(['/cdn-cgi/access/logout']);
+});
+
+test('API authentication failure invalidates only the gateway session and keeps Cloudflare login',()=>{
+ useAuthStore.setState({isAuthenticated:true});
+ listeners.get('unauthorized')?.();
+ expect(useAuthStore.getState().isAuthenticated).toBe(false);
+ expect(redirects).toEqual([]);
 });
