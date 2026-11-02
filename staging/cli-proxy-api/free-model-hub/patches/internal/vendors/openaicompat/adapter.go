@@ -37,7 +37,9 @@ const (
 	// FilterZeroPrice keeps ":free" ids and zero-priced entries (OpenRouter).
 	FilterZeroPrice FreeFilter = "zero_price"
 	// FilterFlash keeps the free "-flash" models (Z.ai); "-flashx" is paid.
-	FilterFlash FreeFilter = "flash"
+	FilterFlash        FreeFilter = "flash"
+	FilterLLM7Free     FreeFilter = "llm7_free"
+	FilterVerifiedZero FreeFilter = "verified_zero"
 )
 
 // Provider describes one OpenAI-compatible upstream.
@@ -79,10 +81,10 @@ var Providers = []Provider{
 	{ID: "mistral", Name: "Mistral", BaseURL: "https://api.mistral.ai/v1", KeyURL: "https://console.mistral.ai/api-keys", Filter: FilterAll},
 	{ID: "codestral", Name: "Mistral Codestral", BaseURL: "https://codestral.mistral.ai/v1", KeyURL: "https://console.mistral.ai/codestral", Filter: FilterAll},
 	{ID: "sambanova", Name: "SambaNova", BaseURL: "https://api.sambanova.ai/v1", KeyURL: "https://cloud.sambanova.ai/apis", Filter: FilterAll},
-	{ID: "llm7", Name: "LLM7", BaseURL: "https://api.llm7.io/v1", KeyURL: "https://token.llm7.io", Filter: FilterAll},
+	{ID: "llm7", Name: "LLM7", BaseURL: "https://api.llm7.io/v1", KeyURL: "https://token.llm7.io", Filter: FilterLLM7Free},
 	{ID: "cohere", Name: "Cohere", BaseURL: "https://api.cohere.ai/compatibility/v1", KeyURL: "https://dashboard.cohere.com/api-keys", Filter: FilterAll},
 	{ID: "ollama", Name: "Ollama Cloud", BaseURL: "https://ollama.com/v1", KeyURL: "https://ollama.com/settings/keys", Filter: FilterAll},
-	{ID: "vercel", Name: "Vercel AI Gateway", BaseURL: "https://ai-gateway.vercel.sh/v1", KeyURL: "https://vercel.com/docs/ai-gateway", Filter: FilterAll},
+	{ID: "vercel", Name: "Vercel AI Gateway", BaseURL: "https://ai-gateway.vercel.sh/v1", KeyURL: "https://vercel.com/docs/ai-gateway", Filter: FilterVerifiedZero},
 	{ID: "zai", Name: "Z.ai", BaseURL: "https://api.z.ai/api/paas/v4", KeyURL: "https://z.ai/manage-apikey/apikey-list", Filter: FilterFlash, Note: "Only the free GLM *-Flash models are exposed."},
 }
 

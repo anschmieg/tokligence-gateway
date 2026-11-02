@@ -42,3 +42,24 @@ func TestCatalogToolsAreExplicit(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestCatalogLLM7FreeTierRejectsProUsageAndUnknown(t *testing.T) {
+	models, err := parseModels([]byte(`{"data":[{"id":"free","tier":"turbo","usage_based_only":false},{"id":"pro","tier":"pro","usage_based_only":false},{"id":"paid","tier":"turbo","usage_based_only":true},{"id":"unknown","tier":"turbo"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := filterModels(models, FilterLLM7Free, false)
+	if len(got) != 1 || got[0].ID != "free" {
+		t.Fatal(got)
+	}
+}
+func TestCatalogVercelRequiresExplicitZeroPrices(t *testing.T) {
+	models, err := parseModels([]byte(`{"data":[{"id":"beam-free","pricing":{"input":"0","output":"0"}},{"id":"paid:free","pricing":{"input":"1","output":"1"}},{"id":"unknown:free"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := filterModels(models, FilterVerifiedZero, false)
+	if len(got) != 1 || got[0].ID != "beam-free" {
+		t.Fatal(got)
+	}
+}

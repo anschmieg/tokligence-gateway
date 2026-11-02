@@ -11,6 +11,10 @@ import (
 
 // upstreamModel is one normalized catalog entry.
 type upstreamModel struct {
+	Tier             string
+	UsageBasedOnly   bool
+	UsagePolicyKnown bool
+	verifiedZero     bool
 	ID               string
 	Name             string
 	ContextLength    int64
@@ -65,6 +69,8 @@ func parseModels(body []byte) ([]upstreamModel, error) {
 		if provider, ok := entry["top_provider"].(map[string]any); ok && model.MaxOutput == 0 {
 			model.MaxOutput = firstInt(provider, "max_completion_tokens")
 		}
+		model.Tier = strings.ToLower(stringField(entry, "tier"))
+		model.UsageBasedOnly, model.UsagePolicyKnown = entry["usage_based_only"].(bool)
 		model.SupportsImages = mentionsImage(entry)
 		model.Parameters, model.ParametersKnown = catalogStrings(entry, "supported_parameters")
 		model.InputModalities, _ = catalogStrings(entry, "supported_input_modalities", "input_modalities")
@@ -83,7 +89,13 @@ func parseModels(body []byte) ([]upstreamModel, error) {
 		if pricing, ok := entry["pricing"].(map[string]any); ok {
 			if !model.free {
 				model.free = zeroPrice(pricing["prompt"]) && zeroPrice(pricing["completion"])
+				if _, present := pricing["input"]; present {
+					model.free = zeroPrice(pricing["input"]) && zeroPrice(pricing["output"])
+				}
 			}
+		}
+		if pricing, ok := entry["pricing"].(map[string]any); ok {
+			model.verifiedZero = (zeroPrice(pricing["prompt"]) && zeroPrice(pricing["completion"])) || (zeroPrice(pricing["input"]) && zeroPrice(pricing["output"]))
 		}
 		if strings.HasSuffix(id, ":free") || strings.HasSuffix(id, "/free") {
 			model.free = true
@@ -101,6 +113,14 @@ func filterModels(models []upstreamModel, filter FreeFilter, showPaid bool) []up
 	out := make([]upstreamModel, 0, len(models))
 	for _, model := range models {
 		switch filter {
+		case FilterVerifiedZero:
+			if !model.verifiedZero {
+				continue
+			}
+		case FilterLLM7Free:
+			if !((model.Tier == "free" || model.Tier == "turbo") && model.UsagePolicyKnown && !model.UsageBasedOnly) {
+				continue
+			}
 		case FilterFlagged:
 			if !model.free {
 				continue

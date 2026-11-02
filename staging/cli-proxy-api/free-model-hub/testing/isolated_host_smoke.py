@@ -64,6 +64,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 def inner(outer_ns):
     global MODEL
     canonical_mode = (WORK/'canonical-routing').exists()
+    catalog_mode = (WORK/'catalog-discovery').exists()
     if canonical_mode: MODEL = 'nvidia/nemotron-3.5-lightning:free'
     os.umask(0o077)
     report = {'verdict': 'fail', 'failures': [], 'gates': {}, 'counts': {
@@ -110,7 +111,7 @@ def inner(outer_ns):
                 self.reply(500)
             elif self.path == '/api/gateway/models':
                 count('catalog_get')
-                self.reply(200, json.dumps({'data': [{'id': MODEL, 'isFree': True,
+                self.reply(200, json.dumps({'data': ([{'id':'fixture-new:free','pricing':{'prompt':'0','completion':'0'}},{'id':'fixture-paid','pricing':{'prompt':'1','completion':'1'}}] if catalog_mode else []) + [{'id': MODEL, 'isFree': True,
                     'context_length': 8192, 'supported_parameters': ['max_tokens'], 'pricing': {'prompt': '0', 'completion': '0'}}]}).encode())
             elif multi_mode and self.path == '/api/v1/ai/cline/recommended-models':
                 count('catalog_get')
@@ -141,11 +142,11 @@ def inner(outer_ns):
                 self.reply(500)
                 return
             account = account_tokens.get(self.headers.get('Authorization'))
-            expected_model = 'fixture/solar' if self.path == '/api/v1/chat/completions' else MODEL
+            expected_model = 'fixture-new:free' if catalog_mode else 'fixture/solar' if self.path == '/api/v1/chat/completions' else MODEL
             if (body.get('model') != expected_model or body.get('stream') is not True
                     or (multi_mode and (not account or not account.startswith(
                         'cline-' if self.path == '/api/v1/chat/completions' else 'kilo-')))
-                    or (not multi_mode and self.headers.get('Authorization') and not (canonical_mode and self.headers.get('Authorization') == 'Bearer fixture-openrouter'))):
+                    or (not multi_mode and self.headers.get('Authorization') and not ((canonical_mode or catalog_mode) and self.headers.get('Authorization') == 'Bearer fixture-openrouter'))):
                 count('unexpected_http')
                 self.reply(500)
                 return
@@ -300,10 +301,15 @@ def inner(outer_ns):
                     'keyless_accounts': not multi_mode, 'keepalive_enabled': False,
                     'console_keyless': True, 'console_management_base': '/admin',
                     'state_dir': '/work/state', 'model_name_tag': 'prefix', 'log_to_file': False}}}}
-        if canonical_mode:
+        if canonical_mode or catalog_mode:
             config['api-keys'] = {'openai-compatibility': [{'name':'openrouter',
                 'base-url':'https://api.kilo.ai/api/gateway', 'keys':[{'api-key':'fixture-openrouter'}],
                 'models':[{'name':MODEL,'alias':'nemotron-3.5-lightning','is-compat':True}]}]}
+        if catalog_mode:
+            provider=config['api-keys']['openai-compatibility'][0]
+            provider['prefix']='disc'
+            provider['model-discovery']={'enabled':True,'free-only':True,'refresh-seconds':60}
+            provider['models']=[{'name':MODEL,'alias':'fixture-manual'}]
         (WORK/'config.yaml').write_text(json.dumps(config))
         serve(18443, Mock, True)
         serve(18444, Mock, True)
@@ -355,6 +361,23 @@ def inner(outer_ns):
         model_id = candidates[0]  # Route using the actual host publication.
         request = {'model': model_id, 'stream': True, 'max_tokens': 8,
             'messages': [{'role': 'user', 'content': 'fixture inert input'}]}
+        if catalog_mode:
+            stage = 'automatic_catalog_publication'
+            deadline=time.monotonic()+20
+            while True:
+                rows=get_json('/v1/models',CLIENT_KEY)['data'];ids={m['id'] for m in rows}
+                if 'disc/fixture-new:free' in ids:break
+                if time.monotonic()>deadline:raise GateFailure('auto_discovered_model_missing')
+                time.sleep(.2)
+            gate('automatic_free_model_added','disc/fixture-new:free' in ids)
+            gate('manual_alias_preserved','disc/fixture-manual' in ids)
+            gate('paid_model_not_automatically_added','disc/fixture-paid' not in ids)
+            gate('catalog_gets_only_before_caller',counts['catalog_get']>=2 and counts['inference_posts']==0)
+            status,raw=api('/v1/chat/completions',CLIENT_KEY,dict(request,model='disc/fixture-new:free'))
+            gate('auto_model_native_dispatch',status==200 and b'[DONE]' in raw and counts['inference_posts']==1)
+            gate('no_unexpected_provider_requests',counts['unexpected_http']==0 and counts['denied_connect']==0)
+            gate('final_auth_ownership',auth_gate())
+            return 0
         if canonical_mode:
             stage = 'canonical_routing'
             rows = get_json('/v1/models',CLIENT_KEY)['data']
@@ -444,10 +467,10 @@ def inner(outer_ns):
         # turn a previously passing snapshot into unnoticed extra dispatches.
         if not report['failures']:
             try:
-                gate('stopped_host_exact_counts', counts['inference_posts'] == (3 if canonical_mode else 6 if multi_mode else 2)
+                gate('stopped_host_exact_counts', counts['inference_posts'] == (1 if catalog_mode else 3 if canonical_mode else 6 if multi_mode else 2)
                     and counts['quota_origin'] == (1 if multi_mode else int(quota_mode))
-                    and counts['stream_origin'] == (3 if canonical_mode else 5 if multi_mode else 1)
-                    and counts['redirect_origin'] == (0 if canonical_mode or multi_mode else int(not quota_mode))
+                    and counts['stream_origin'] == (1 if catalog_mode else 3 if canonical_mode else 5 if multi_mode else 1)
+                    and counts['redirect_origin'] == (0 if catalog_mode or canonical_mode or multi_mode else int(not quota_mode))
                     and counts['redirect_target'] == 0 and counts['unexpected_http'] == 0
                     and counts['denied_connect'] == 0)
                 gate('stopped_host_auth_ownership', auth_gate(check_runtime=False))
@@ -472,10 +495,11 @@ def main():
     parser.add_argument('--opencode-plugin', required=True, help='Exact native OpenCode .so')
     parser.add_argument('--output', required=True, help='NEW private evidence directory')
     parser.add_argument('--quota-error', action='store_true', help='Test upstream429 instead of redirect, in a fresh host')
+    parser.add_argument('--catalog-discovery', action='store_true', help='Native automatic free catalog publication and one mock inference; zero external network')
     parser.add_argument('--canonical-routing', action='store_true', help='Canonical alias with native OpenRouter + FreeHub Kilo; three isolated mock requests')
     parser.add_argument('--multiple-credentials', action='store_true', help='Two fake Kilo keys and two fake Cline OAuth accounts; six local mock calls')
     args = parser.parse_args()
-    if sum([args.quota_error,args.multiple_credentials,args.canonical_routing])>1:
+    if sum([args.quota_error,args.multiple_credentials,args.canonical_routing,args.catalog_discovery])>1:
         parser.error('select one scenario')
     os.umask(0o077)
     bwrap = shutil.which('bwrap')
@@ -496,6 +520,8 @@ def main():
         (out/'multiple-credentials').touch()
     if args.canonical_routing:
         (out/'canonical-routing').touch()
+    if args.catalog_discovery:
+        (out/'catalog-discovery').touch()
     verdict = out/'verdict.json'
     write_verdict(verdict, {'verdict': 'fail', 'failures': ['fixture_not_completed']})
     inputs = {name: digest(path) for name, path in

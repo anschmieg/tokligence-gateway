@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-shot native.7 + FreeHub.1.5 deployment, no provider inference.
+"""One-shot catalog/routing or opt-in discovery deployment, no provider inference.
 
 Preserves user configuration; adds one model alias to the current OpenRouter
 list with If-Match. Runtime lifetime flock prevents two OAuth refresh owners.
@@ -17,12 +17,16 @@ LEAF='/v8/management/config/api-keys/openai-compatibility'
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def main():
  os.umask(0o077)
- p=argparse.ArgumentParser(description=__doc__);p.add_argument('--native-sha',required=True);p.add_argument('--plugin-sha',required=True);p.add_argument('--source',required=True);a=p.parse_args()
+ p=argparse.ArgumentParser(description=__doc__);p.add_argument('--native-sha',required=True);p.add_argument('--plugin-sha',required=True);p.add_argument('--source',required=True);p.add_argument('--discovery',action='store_true');a=p.parse_args()
  token=json.load(sys.stdin)['token'];key=(ROOT/'secrets/management.key').read_text().strip();client=(ROOT/'secrets/client-api-key').read_text().strip()
  lock=(ROOT/'state/freehub-deployment.lock').open('a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
- journal=ROOT/'model-catalog-routing-deployment-v1.json'
+ journal=ROOT/('model-discovery-deployment-v1.json' if a.discovery else 'model-catalog-routing-deployment-v1.json')
  if journal.exists():raise RuntimeError('existing deployment journal; inspect, never replay')
  pairs=[(ROOT/'bin/cli-proxy-api',ROOT/'model-catalog-native.pending',ROOT/'bin/cli-proxy-api-before-model-catalog',OLD_NATIVE,a.native_sha),(ROOT/'plugins/free-model-hub.so',ROOT/'model-catalog-freehub.pending.so',ROOT/'freehub-before-model-catalog.so',OLD_PLUGIN,a.plugin_sha)]
+ if a.discovery:
+  if sha(ROOT/'plugins/free-model-hub.so')!='88093bd493a7a62e6e0ed56110fd10ecddd1a477c69d5faa78bfcf87d43c2a7a':raise RuntimeError('existing FreeHub plugin differs')
+  pairs=[(ROOT/'bin/cli-proxy-api',ROOT/'model-discovery-native.pending',ROOT/'bin/cli-proxy-api-before-model-discovery','2b36c0918fdec5a44548d457678b149035a899da513be64caa869f3f63251d2b',a.native_sha)]
+  pairs.append((ROOT/'plugins/free-model-hub.so',ROOT/'model-discovery-freehub.pending.so',ROOT/'freehub-before-model-discovery.so','88093bd493a7a62e6e0ed56110fd10ecddd1a477c69d5faa78bfcf87d43c2a7a',a.plugin_sha))
  for target,pending,backup,old,new in pairs:
   if backup.exists() or target.is_symlink() or pending.is_symlink() or sha(target)!=old or sha(pending)!=new:raise RuntimeError('artifact or operation identity differs')
  runtime=(ROOT/'state/coolify-runtime.lock').open('r')
@@ -47,6 +51,9 @@ def main():
  def cool(path,method='GET'):return request('http://127.0.0.1:8000/api/v1/'+path,token,method)[0]
  configs=api('/v8/management/config/plugins/configs')[0]
  before_models=request(origin()+'/v1/models',client)[0]['data'];old_ids={m['id'] for m in before_models}
+ old_llm7={m['id'] for m in before_models if m.get('owned_by','').lower()=='llm7'}
+ required_ids=old_ids-old_llm7 if a.discovery else old_ids
+ old_openrouter={m['id'] for m in before_models if 'openai-compatible-openrouter' in m.get('providers',[])}
  protected=[ROOT/'plugins/opencode.so',ROOT/'config/static/management.html',ROOT/'secrets/client-api-key']
  protected+=list(ROOT.glob('*live*.json'))
  protected+=[x for x in (ROOT/'auth').glob('*.json') if json.loads(x.read_text()).get('type')=='opencode']
@@ -84,21 +91,30 @@ def main():
   # preserving all concurrent user-added providers/keys/models verbatim.
   providers,etag=api(LEAF)
   updated=copy.deepcopy(providers)
-  matches=[x for x in updated if x.get('name')=='openrouter']
-  if len(matches)!=1:raise RuntimeError('OpenRouter route identity ambiguous')
-  models=matches[0].get('models',[])
-  if any(m.get('alias')==CANONICAL for x in updated for m in x.get('models',[])):raise RuntimeError('canonical alias already configured; inspect')
-  original=next((m for m in models if m.get('name')==UPSTREAM and m.get('alias')=='openrouter/nemotron-3.5-lightning-free'),None)
-  if not original or not etag:raise RuntimeError('reviewed OpenRouter model or ETag missing')
-  alias=copy.deepcopy(original);alias.update(alias=CANONICAL,**{'display-name':'Nemotron 3.5 Lightning'})
-  models.append(alias)
-  api(LEAF,'PUT',updated,etag)
-  result['phase']='alias_configured';save()
-  end=time.monotonic()+40
+  if a.discovery:
+   for provider in updated:
+    provider['model-discovery']={'enabled':True,'free-only':True,'refresh-seconds':900}
+   api(LEAF,'PUT',updated,etag)
+   for path,value in [('model-refresh-seconds',1800),('model-refresh-providers',['freehub'])]:
+    _,current_etag=api('/v8/management/config')
+    api('/v8/management/config/plugins/'+path,'PUT',value,current_etag)
+  else:
+   matches=[x for x in updated if x.get('name')=='openrouter']
+   if len(matches)!=1:raise RuntimeError('OpenRouter route identity ambiguous')
+   models=matches[0].get('models',[])
+   if any(m.get('alias')==CANONICAL for x in updated for m in x.get('models',[])):raise RuntimeError('canonical alias already configured; inspect')
+   original=next((m for m in models if m.get('name')==UPSTREAM and m.get('alias')=='openrouter/nemotron-3.5-lightning-free'),None)
+   if not original or not etag:raise RuntimeError('reviewed OpenRouter model or ETag missing')
+   alias=copy.deepcopy(original);alias.update(alias=CANONICAL,**{'display-name':'Nemotron 3.5 Lightning'})
+   models.append(alias)
+   api(LEAF,'PUT',updated,etag)
+  result['phase']='discovery_configured' if a.discovery else 'alias_configured';save()
+  end=time.monotonic()+(100 if a.discovery else 40)
   while True:
    rows=request(origin()+'/v1/models',client)[0]['data'];ids={m['id'] for m in rows}
    canonical=next((m for m in rows if m['id']==CANONICAL),{})
-   if len(canonical.get('providers',[]))==2 and old_ids<=ids:break
+   new_discovery=[m['id'] for m in rows if 'openai-compatible-openrouter' in m.get('providers',[]) and m['id'] not in old_openrouter]
+   if len(canonical.get('providers',[]))==2 and required_ids<=ids and (not a.discovery or (new_discovery and "llm7-llm7/mistral-Nemo-Instruct-2407" in ids)):break
    if time.monotonic()>end:raise RuntimeError('model publication incomplete')
    time.sleep(1)
   if any(not m.get('owned_by') for m in rows):raise RuntimeError('empty model ownership remains')
@@ -114,7 +130,8 @@ def main():
    if isinstance(value,list):return [normalized(v) for v in value]
    return value
   if normalized(actual)!=normalized(updated):raise RuntimeError('provider settings differ')
-  result.update(phase='deployed',model_count=len(rows),all_original_ids_preserved=True,canonical_id=CANONICAL,canonical_providers=canonical['providers'],all_owners_disclosed=True,gemini_generation_methods_correct=True,protected_state_unchanged=True,existing_accounts_preserved=True)
+  result.update(phase='deployed',model_count=len(rows),all_original_ids_preserved=old_ids<=ids,canonical_id=CANONICAL,canonical_providers=canonical['providers'],all_owners_disclosed=True,gemini_generation_methods_correct=True,protected_state_unchanged=True,existing_accounts_preserved=True)
+  if a.discovery:result.update(automatic_model_refresh=True,catalog_refresh_seconds=900,plugin_refresh_seconds=1800,new_openrouter_catalog_contributions=len(new_discovery),new_model_ids=len(ids-old_ids),retired_nonfree_llm7_models=len(old_llm7-ids),all_other_original_ids_preserved=required_ids<=ids)
   save();print(json.dumps(result))
  except Exception as error:
   result.update(phase='failed',error_type=type(error).__name__);save()
