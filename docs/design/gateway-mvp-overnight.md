@@ -176,3 +176,6 @@ CFbackend+nativepanelcandidate ready forcutover: native4 customtestsPASS, CF+gua
 
 
 PRE-CUTOVER realEdgecoverage found: incognito/management.html returned oldgateway401 NOTAccesslogin; /admin/v8/management/config redirectedexistingAccesslogin. Thus protectnativebrowser viaexistingpaths: /dashboard nativepanel, /admin/v8 native sameprocessalias with originalmanagementmiddleware (no proxy/noinferencealias), browserbaseorigin/admin. Publichostrootredirectdashboard, canonicalmanagement.html browserredirectdashboard. NoCFpolicymutation/tokenneeded. Customalias focusednativehandler testpending86745; frontend4checks+typecheck/buildPASS afterroutebasechange. Rebuild exactfinalbackend/panel andadvanceCoolifycommitbeforehandoff, previousstagedcandidate hashnowobsolete. Noactualproviderinference.
+
+
+Customalias test initiallyCAUGHTduplicate nativehandlerexecution afterGinHandleContext restoresoldindex. Parentfixedexplicitouterc.Abort afterreentry; focusedtest nowmustPASSbeforebuild. This isrealcustomverification, notupstreamcorematrix. No deploymentorprovidertraffic occurred withbadcandidate. UIAccessprefix/nativealias mapping asabove, finalartifactsourcecommitadvancesaccordingly.

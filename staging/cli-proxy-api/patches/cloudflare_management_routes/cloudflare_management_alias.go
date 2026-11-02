@@ -18,4 +18,7 @@ func (s *Server) cloudflareManagementAlias(c *gin.Context) {
  c.Request.URL.Path = path
  c.Request.URL.RawPath = ""
  s.engine.HandleContext(c)
+ // HandleContext restores the old index but leaves the selected handler chain.
+ // Abort the outer chain so native handlers cannot run a second time.
+ c.Abort()
 }
