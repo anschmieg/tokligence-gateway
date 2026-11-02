@@ -217,3 +217,75 @@ Three URL regressions, five authentication regressions and the build pass. Nativ
 origin responses verify HTML and the deployed panel hash. No gateway restart or
 account changes were required. Reload the dashboard before retrying the sidebar;
 real Safari confirmation remains pending.
+
+## Model discovery and canonical routing audit — November 2, 18:15 UTC
+
+Read-only inspection of the deployed native origin found208 unique OpenAI model
+IDs across9 provider lanes. All models registered by credential owners appear;
+the additional OpenRouter route comes from native static configuration. Counts:
+NVIDIA85, LLM770, Kilo17, Codex14, Antigravity8, SambaNova6, Cline4, Zai3,
+OpenRouter1. These are published IDs, not208 live-accepted models. Groq/Mistral
+currently register none; disabled OpenCode credentials register none.
+
+`/v1/models` returns200 in OpenAI, Claude and Codex client formats;
+`/v1beta/models` returns200 for Gemini. Each has208 records. Codex/Gemini share
+the OpenAI IDs; Claude rewrites206 non-Claude IDs into reversible
+`claude-fable-5-dd-<reversed-original>` aliases. Decoding them gives the exact same
+208 underlying IDs. Bare `/models` returns404: clients must use the `/v1` base.
+This verifies the deployed origin, not external Cloudflare ingress acceptance.
+No inference, refresh, credential changes or configuration writes occurred.
+
+Discovery is complete relative to the registered routes, but capability metadata
+is not reliable enough to use for automatic routing:
+
+- Plain OpenAI discovery strips capabilities and limits;185 plugin models also
+  have empty ownership. Richer protocol formats cannot repair missing source facts.
+- FreeHub substitutes1M context and16,384 output tokens where upstream values are
+  absent, and declares tools unconditionally in the generic adapter. Codex format
+  synthesizes reasoning controls:190 records advertise low through ultra without
+  corresponding upstream evidence.
+- 185 Gemini records contain `tool_calls` as a generation method, rather than the
+  `generateContent` operation. Generic FreeHub rows also classify task-specific
+  embedding/audio/image/video identifiers as chat without proving those endpoints.
+- A public Kilo catalog spotcheck confirms Lyria clip declares no tools and has
+  audio output; local conversion advertises tools and loses that output modality.
+
+The sanitized [full208-model audit](gateway-model-catalog-audit-20261102.json)
+contains per-model disclosed fields, source locations, flags and26 candidate
+identity groups. Merging those candidates would reduce208 IDs to180, but this is
+candidate discovery, not a verified identity map or an applied configuration.
+
+Implement consolidation within the existing providers and native registry:
+
+1. Correct the FreeHub metadata conversion and native discovery serialization.
+   Preserve real supported parameters/modalities/limits and distinguish unknown
+   values from defaults. Keep standard API fields compatible.
+2. Approve explicit publisher/model/revision mappings, including known spelling
+   variants. Do not erase thinking, fast/high, size, quantization, date or context
+   variants. Virtual routers and unknown stealth identities remain distinct.
+   Third-party GPT/Claude naming alone does not establish identical service/model.
+3. Use FreeHub's existing vendor-scoped aliases/reverse lookup, native OAuth fork
+   aliases for built-ins, and native compatible-provider aliases for OpenRouter.
+   FreeHub currently replaces original IDs: add a small keep-original publication
+   option so existing clients and provider-qualified overrides remain usable.
+   Resolve same-vendor duplicates deterministically; a single global reverse alias
+   would route some vendor-specific upstream IDs incorrectly.
+4. Publish canonical capabilities as the intersection guaranteed by admitted
+   routes, with minimum confirmed context/output ceilings. Keep advanced
+   provider-specific options available through qualified IDs. Preserve free-only
+   admission, privacy distinctions, credential cooldowns and one physical dispatch.
+5. Start with `nemotron-3.5-lightning`: the specific OpenRouter and Kilo routes
+   already passed live acceptance. Cline's Lightning and similarly named NVIDIA
+   variants require their own admission evidence; Cline's Solar pass is insufficient.
+   Then expand to Beam and other verified groups. No aliases were changed in this
+   audit, and no new routing service/proxy is proposed.
+
+Vercel's free Gateway imposes its own per-model limits; upstream limits are
+independent. Published docs do not provide numeric limits sufficient to conclude
+which is generally stricter. Purchased Gateway credits remove Vercel's own limit,
+not upstream capacity, model eligibility or promotion duration. Multiple keys do
+not create team entitlements; independent funded teams do not guarantee independent
+upstream capacity. Pooling accounts to circumvent rate limits is explicitly
+prohibited by Vercel's AUP. Sources: [rate limits](https://vercel.com/docs/ai-gateway/rate-limits),
+[pricing](https://vercel.com/docs/ai-gateway/pricing),
+[AUP](https://vercel.com/legal/acceptable-use-policy#2-prohibited-activities).
