@@ -289,3 +289,43 @@ upstream capacity. Pooling accounts to circumvent rate limits is explicitly
 prohibited by Vercel's AUP. Sources: [rate limits](https://vercel.com/docs/ai-gateway/rate-limits),
 [pricing](https://vercel.com/docs/ai-gateway/pricing),
 [AUP](https://vercel.com/legal/acceptable-use-policy#2-prohibited-activities).
+
+
+## Deployed model discovery and canonical routing — November 2, 20:55 UTC
+
+Native `8.0.49-tokligence.7` and FreeHub `0.1.5-tokligence.1` are deployed through
+Coolify operation `azsyfaj4mlcanqoukqtq25pe`, source `1d94a85`. The deployment
+journal `model-catalog-routing-deployment-v1.json` is complete: never replay it.
+No provider inference or login was sent. Existing accounts, plugin settings,
+OpenCode quarantine/reports, panel and caller key are preserved.
+
+`/v1/models` now exposes provider ownership, source-backed parameters/modalities,
+known token ceilings and explicit capability objects. `null` capabilities and
+omitted limits mean unknown. Missing metadata no longer becomes a1M/16K promise;
+170 current entries have unknown context omitted. No foreign Codex entry inherits
+`ultra` reasoning from the Codex template. All209 model IDs have ownership and
+capability objects. No Gemini generation method contains `tool_calls`.
+Kilo Lyria correctly declares audio output and tools=false. Generic model family
+is unspecified (`model`) unless a vendor-specific adapter declares otherwise;
+this does not add embedding/audio/video inference endpoints.
+
+Use `model: "nemotron-3.5-lightning"` for the first canonical route. Native routing
+selects FreeHub Kilo or native OpenRouter among eligible credentials. All208 prior
+IDs remain published and callable, including both qualified Lightning overrides.
+This adds the first reviewed canonical name; it does not claim the other26 audit
+candidate groups have been verified or merged. Third-party GPT/Claude branding,
+quantization/revisions and virtual routers are deliberately not equated by name.
+
+The exact deployed binary/plugin pair passed the isolated actual-host fixture:
+three local mock POSTs selected Kilo/OpenRouter/Kilo, canonical source model names
+were restored correctly, qualified override stayed on Kilo, no hidden dispatch
+or external network traffic occurred, and disabled OpenCode stayed unpublished.
+Focused custom race tests cover missing/explicit source metadata, vendor-isolated
+reverse aliases, operator overrides, shared contract intersection and foreign
+Codex template removal. Existing upstream console tests assuming mandatory keys
+conflict with the previously deployed keyless UI; these are not newly claimed
+passing. See [post-deployment catalog/evidence](gateway-model-catalog-fixed-20261102.json).
+
+The native dashboard's AI Providers Codex page reads `config.codexApiKeys`; OAuth
+Codex accounts are shown under Auth Files. Its empty API-key resource list does
+not imply missing OAuth accounts. No account migration or relogin is needed.
