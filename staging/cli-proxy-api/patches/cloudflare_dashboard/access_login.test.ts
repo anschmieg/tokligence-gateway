@@ -17,7 +17,7 @@ const {useAuthStore}=await import('../src/stores/useAuthStore');
 beforeEach(()=>{memory.clear();configurations.length=0;redirects.length=0;rejected=false;location.protocol='https:';location.hostname='code.nothing.pink';location.origin='https://code.nothing.pink';useAuthStore.setState({isAuthenticated:false,managementKey:'',apiBase:'',rememberPassword:false});});
 test('Access login pins origin and sends/persists no management key',async()=>{
  await useAuthStore.getState().login({apiBase:'https://foreign.invalid',managementKey:'must-not-persist',rememberPassword:true});
- expect(configurations.at(-1)).toEqual({apiBase:'https://code.nothing.pink',managementKey:''});
+ expect(configurations.at(-1)).toEqual({apiBase:'https://code.nothing.pink/admin',managementKey:''});
  expect(useAuthStore.getState().isAuthenticated).toBe(true);
  expect(useAuthStore.getState().rememberPassword).toBe(false);
  expect([...memory.values()].join('')).not.toContain('must-not-persist');

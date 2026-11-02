@@ -29,10 +29,19 @@ def main():
  if sha(original_route) != 'a22703ae5533111f51f03cb037ca1f15a4ced10ebd95d1fa06159245c36fb5bb':p.error('Pinned routes input differs')
  anchor = '\ts.engine.GET("/management.html", s.serveManagementControlPanel)'
  if original_route.decode().count(anchor) != 1:p.error('Pinned panel route differs')
- desired_route = original_route.decode().replace(anchor, anchor+'\n\ts.engine.GET("/dashboard", s.serveManagementControlPanel)').encode()
+ route_text = original_route.decode().replace(anchor, anchor+'\n\ts.engine.GET("/dashboard", s.serveManagementControlPanel)\n\ts.engine.Any("/admin/*path", s.cloudflareManagementAlias)')
+ root_anchor = '\ts.engine.GET("/", func(c *gin.Context) {'
+ if route_text.count(root_anchor) != 1:p.error('Pinned root route differs')
+ route_text = route_text.replace(root_anchor, root_anchor+'\n\t\tif c.Request.Host == "code.nothing.pink" { c.Redirect(307, "/dashboard"); return }')
+ desired_route = route_text.encode()
  if route.read_bytes() not in [original_route,desired_route]:p.error('Existing routes differ')
+ for name in ['cloudflare_management_alias.go','cloudflare_management_alias_test.go']:
+  target = a.prepared_source/'internal/api'/name
+  body = (root/'patches/cloudflare_management_routes'/name).read_bytes()
+  if target.exists() and target.read_bytes()!=body:p.error('Existing management alias differs')
+  target.write_bytes(body)
  for name,value in changes.items():(d/name).write_bytes(value)
  route.write_bytes(desired_route)
- manifest={'base_commit':PIN,'input_hashes':INPUTS,'routes_input_sha256':sha(original_route),'routes_output_sha256':sha(desired_route),'outputs':{name:sha(data) for name,data in changes.items()},'auth':'verified Cloudflare assertion or existing native management key; inference unchanged','credential_quarantine':'disabled credentials refused before management upstream HTTP'}
+ manifest={'base_commit':PIN,'input_hashes':INPUTS,'routes_input_sha256':sha(original_route),'routes_output_sha256':sha(desired_route),'alias_outputs':{name:sha((a.prepared_source/'internal/api'/name).read_bytes()) for name in ['cloudflare_management_alias.go','cloudflare_management_alias_test.go']},'outputs':{name:sha(data) for name,data in changes.items()},'auth':'verified Cloudflare assertion or existing native management key; inference unchanged','credential_quarantine':'disabled credentials refused before management upstream HTTP'}
  (a.prepared_source/'management-auth-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n');print(json.dumps({'prepared':str(a.prepared_source),'files':len(changes),'deployed':False}))
 if __name__=='__main__':main()

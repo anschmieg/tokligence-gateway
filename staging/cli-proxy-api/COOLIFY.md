@@ -32,3 +32,14 @@ The exact before-change Coolify app definition is retained privately at
 `coolify-before-alpha/application.json`; private environment values must not
 be placed in Git or deployment output. Restore only reviewed app/runtime
 settings for rollback, never reactivate an old secondary OAuth owner.
+
+Existing Access policy discovery before cutover: unauthenticated
+`/management.html` returned the old gateway's401 directly (not an Access login),
+while `/admin/v8/management/config` redirected to Cloudflare Access. Therefore
+the native panel is served at existing protected `/dashboard`; the browser API
+base is same-origin `/admin`. A small in-process route alias re-enters the native
+/v8 or /v0 management router and its signed-JWT middleware. It refuses inference
+paths, preserves methods/body/query/If-Match and creates no proxy process.
+Public-host `/` redirects to `/dashboard`. `/management.html` remains available
+for direct native clients and redirects browsers on this host to `/dashboard`.
+Existing Access application/personal-email policy stays unchanged.
