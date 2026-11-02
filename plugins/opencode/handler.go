@@ -860,6 +860,7 @@ func (h *Handler) WithConfigured() PluginConfig {
 	defer h.mu.RUnlock()
 	cfg := h.cfg
 	cfg.Models = append([]string(nil), cfg.Models...)
+	cfg.ConsoleDisabledModels = append([]string(nil), cfg.ConsoleDisabledModels...)
 	cfg.ConsoleHeaders = make(map[string]string, len(h.cfg.ConsoleHeaders))
 	for k, v := range h.cfg.ConsoleHeaders {
 		cfg.ConsoleHeaders[k] = v

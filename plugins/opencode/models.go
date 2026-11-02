@@ -37,6 +37,9 @@ func BuildModelCatalog(cfg PluginConfig) ([]RegisteredModel, error) {
 	}
 	models := make([]RegisteredModel, 0, len(cfg.Models))
 	for _, id := range cfg.Models {
+		if !cfg.ModelAllowed(id) {
+			continue
+		}
 		models = append(models, RegisteredModel{
 			ID:                         id,
 			Object:                     "model",

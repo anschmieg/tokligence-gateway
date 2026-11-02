@@ -66,3 +66,12 @@ is not the complete inference header set. Actual staging Console config returned
 x-opencode-org-id matching the same credential org. console_headers applies that
 reviewed snapshot with account-scope/transport-header refusal. This is a narrow
 snapshot implementation, not the entire dynamic Console provider transform.
+
+Console model policy Nov2: `plugin/provider/opencode.ts` provider transform sets
+`model.enabled = !config.disabled`. `console_disabled_models` carries the reviewed
+snapshot denylist into local model publication and both executors. Unknown models
+remain unadmitted by the operator allowlist. Native compiled-host isolated fixture
+`/tmp/opencode-console-model-policy-20261102-a` includes an allowlisted but
+Console-disabled model, verifies it is absent from publication and preserves the
+existing reasoning continuation. Focused tests reject disabled dispatch before
+HTTP and malformed/null list entries without mutating prior configuration.

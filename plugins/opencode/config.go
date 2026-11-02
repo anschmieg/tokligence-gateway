@@ -16,6 +16,10 @@ type PluginConfig struct {
 	// Console configuration. It is not a caller header passthrough.
 	ConsoleHeaders map[string]string `yaml:"console_headers"`
 
+	// ConsoleDisabledModels is the reviewed Console model policy snapshot.
+	// It restricts the explicit local allowlist; it never grants new models.
+	ConsoleDisabledModels ConsoleModelDenylist `yaml:"console_disabled_models"`
+
 	Enabled bool `yaml:"enabled"`
 
 	// InferenceBaseURL is the OpenCode inference endpoint root, for example
@@ -130,6 +134,18 @@ func DecodeConfig(raw []byte) (PluginConfig, error) {
 		headers[name] = value
 	}
 	cfg.ConsoleHeaders = headers
+	seenDisabled := make(map[string]bool)
+	disabled := make([]string, 0, len(cfg.ConsoleDisabledModels))
+	for _, model := range cfg.ConsoleDisabledModels {
+		if model == "" || strings.TrimSpace(model) != model || strings.ContainsAny(model, "\r\n\x00") {
+			return PluginConfig{}, fmt.Errorf("invalid Console disabled model identity")
+		}
+		if !seenDisabled[model] {
+			disabled = append(disabled, model)
+			seenDisabled[model] = true
+		}
+	}
+	cfg.ConsoleDisabledModels = disabled
 	return cfg, nil
 }
 
@@ -141,10 +157,36 @@ func (c PluginConfig) ModelAllowed(model string) bool {
 	if model == "" {
 		return false
 	}
+	for _, disabled := range c.ConsoleDisabledModels {
+		if disabled == model {
+			return false
+		}
+	}
 	for _, allowed := range c.Models {
 		if allowed == model {
 			return true
 		}
 	}
 	return false
+}
+
+// ConsoleModelDenylist refuses YAML's implicit null-to-empty-list conversion.
+// A malformed restriction must fail configuration instead of disappearing.
+type ConsoleModelDenylist []string
+
+func (list *ConsoleModelDenylist) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.SequenceNode {
+		return fmt.Errorf("Console disabled models must be a string list")
+	}
+	for _, item := range node.Content {
+		if item.Kind != yaml.ScalarNode || item.Tag != "!!str" {
+			return fmt.Errorf("Console disabled models must contain strings")
+		}
+	}
+	var values []string
+	if err := node.Decode(&values); err != nil {
+		return err
+	}
+	*list = values
+	return nil
 }

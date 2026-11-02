@@ -286,7 +286,8 @@ def write_backend_config(work, profile, session_state_path):
             "opencode": {"enabled": True, "preserve_unsigned_thinking": True,
                 "console_headers": {"x-opencode-org-id":"smoke-org"},
                 "inference_base_url": "http://127.0.0.1:%d" % MOCK_PORT,
-                "models": [MODEL_ID], "app_name": "cli", "version": "2.0.32",
+                "models": [MODEL_ID, "console-denied-model"],
+                "console_disabled_models": ["console-denied-model"], "app_name": "cli", "version": "2.0.32",
                 "channel": "latest", "project_id": "global",
                 "session_state_path": str(session_state_path)}}},
     }
@@ -566,6 +567,12 @@ def run_profile(work, profile, shape):
             ids = [m.get("id") for m in catalog.get("data", []) if isinstance(m, dict)]
             published = [m for m in ids if MODEL_ID == m]
         summary["models_published"] = published
+
+        if any("console-denied-model" in (model or "") for model in ids):
+            summary["blocked"] = True
+            summary["blocker"] = "Console-disabled model was published"
+            return
+        summary["console_model_policy"] = "verified"
 
         # Native inference header binding (model-request.ts): the caller
         # supplies the session identity; the plugin forwards it upstream.

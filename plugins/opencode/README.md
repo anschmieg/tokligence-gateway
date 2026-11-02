@@ -1,6 +1,12 @@
 # OpenCode Console plugin (CLIProxyAPI v8.0.49)
 
-**Parent review: experimental candidate, NOT admitted for deployment.**
+**Current status (November 2): deployed with its credential quarantined after429.**
+The historical review notes below predate completed host/session/reasoning tests
+and the sequential credential handoff. Live acceptance still has not passed.
+`console_disabled_models` applies the reviewed native Console model restrictions
+to both publication and dispatch, intersecting the operator allowlist. It cannot
+grant additional models. This is a snapshot, not automatic Console discovery.
+
 Component tests/build do not establish working host dispatch. Blocking findings:
 caller-scope/session behavior must still be verified through the real host. Console GET
 passthrough now admits only the parsed same-origin native config path and never
