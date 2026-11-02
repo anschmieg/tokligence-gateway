@@ -122,3 +122,29 @@ Backend .6 and FreeHub0.1.2 now preserve streamed upstream error statuses and
 bound native OAuth requests against redirects and automatic401 replay. Existing
 accounts/settings, dashboard, OpenCode quarantine and prior evidence were preserved.
 See [sanitized acceptance report](configured-provider-acceptance-20261102.json).
+
+
+## Free-provider follow-up — November 2, 16:21 UTC
+
+FreeHub0.1.3 is deployed. Its Z.ai catalog now admits only the documented free
+GLM-4.7-Flash, GLM-4.5-Flash and GLM-4.6V-Flash. The earlier GLM-5.3-Flash was
+incorrectly labeled free by upstream and is paid; it is no longer published in
+this free lane. Focused catalog tests passed, and existing settings/accounts,
+OpenCode quarantine and prior reports were preserved through the plugin update.
+
+The single corrected Z.ai free-model diagnostic still returned429/code1113
+(insufficient balance/resource package). This does not establish that buying
+balance is required for a zero-priced model. Standard API access/key product
+needs clarification; no billing changes or Coding Plan endpoint substitution
+were made. NVIDIA's single useful follow-up used its documented free
+`z-ai/glm-5.3-flash` endpoint and timed out after45seconds. Its outcome is
+inconclusive; the uncertain request was not repeated. Both diagnostics used the
+native gateway with automatic retries/redirects/fallback disabled.
+
+Current live-passed providers: OpenRouter, Kilo, LLM7, Antigravity and Codex.
+Failed or blocked: NVIDIA (404 then timeout), SambaNova (high-demand429), Z.ai
+(1113), Groq (catalog403), Mistral (catalog401), Cline (saved account absent from
+FreeHub account pool/routes), OpenCode (existing429 quarantine through at least
+November3 07:42:08.980115UTC). A representative-model success is not validation
+of every model or every duplicate credential. Groq/Mistral/Cline have no ready
+published route, so no inference was sent to them.

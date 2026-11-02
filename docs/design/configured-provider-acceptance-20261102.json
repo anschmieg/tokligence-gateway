@@ -228,5 +228,62 @@
       "Native per-provider401 stop-and-cooldown policy prevents refresh/replay."
     ],
     "protected_state_unchanged": true
-  }
+  },
+  "followups": [
+    {
+      "provider": "nvidia",
+      "model": "nvidia-nvidia/z-ai/glm-5.3-flash",
+      "phase": "failed",
+      "caller_posts": 1,
+      "credential_count": 2,
+      "automatic_retries": 0,
+      "redirects": false,
+      "fallback": false,
+      "started_utc": "2026-11-02T16:14:22Z",
+      "error_type": "TimeoutError",
+      "elapsed_seconds": 45.03,
+      "prior_evidence_unchanged": true,
+      "reason": "Documented free GLM model timed out after 45 seconds; uncertain outcome, no retry. Earlier Gemma model returned unavailable-function404.",
+      "classification": "inconclusive_timeout"
+    },
+    {
+      "provider": "zai",
+      "model": "zai-zai/glm-4.7-flash",
+      "phase": "failed",
+      "caller_posts": 1,
+      "credential_count": 1,
+      "automatic_retries": 0,
+      "redirects": false,
+      "fallback": false,
+      "started_utc": "2026-11-02T16:20:48Z",
+      "http_status": 429,
+      "retry_after_present": false,
+      "done": false,
+      "nonempty_text": false,
+      "finish_reasons": [],
+      "embedded_error": false,
+      "response_bytes": 219,
+      "error_code": "rate_limit_exceeded",
+      "elapsed_seconds": 0.2,
+      "prior_evidence_unchanged": true,
+      "upstream_code": "1113",
+      "reason": "Documented zero-priced GLM-4.7-Flash rejected with insufficient balance/resource package. Standard API entitlement/key product remains unresolved; no top-up or paid fallback performed."
+    }
+  ],
+  "zai_catalog_correction_deployment": {
+    "phase": "deployed",
+    "source_commit": "99b5bda",
+    "backend_sha256": "a8359602b94cb042a5b812750d3742f6ad146bda743b16726ade159e1167bfc0",
+    "plugin_sha256": "69b7c1dea1e15e0c7622d9587b2abf3cb35a8eed6cf054eb633f1cbaf0ef7af2",
+    "deployment_uuid": "w9upj5whadzmgr7a6ddrhxcu",
+    "protected_state_unchanged": true,
+    "inference_requests": 0
+  },
+  "zai_free_models": [
+    "glm-4.7-flash",
+    "glm-4.5-flash",
+    "glm-4.6v-flash"
+  ],
+  "zai_pricing_source": "https://docs.z.ai/guides/overview/pricing",
+  "zai_initial_model_paid": true
 }
