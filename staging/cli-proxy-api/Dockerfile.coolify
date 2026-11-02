@@ -1,7 +1,8 @@
 # Coolify owns the process; the exact tested runtime and native state are mounted
 # at the existing path. No legacy gateway, token import, or second OAuth owner.
 FROM ubuntu:24.04
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl util-linux && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl util-linux passwd && rm -rf /var/lib/apt/lists/*
+RUN groupadd --gid 30033 agent && useradd --uid 30033 --gid 30033 --create-home --home-dir /home/agent agent
 COPY staging/cli-proxy-api/coolify-entrypoint.sh /usr/local/bin/gateway-entrypoint
 RUN chmod 0755 /usr/local/bin/gateway-entrypoint
 USER 30033:30033
