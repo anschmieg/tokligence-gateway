@@ -33,6 +33,13 @@ def main():
     from live_safety import recorded_cooldowns
     ledger=json.loads((OLD/'live-probe-ledger.json').read_text())
     cooldowns=recorded_cooldowns(OLD,ledger)
+    provider_state=ROOT/'state/opencode-provider-cooldown.json'
+    if provider_state.exists():
+        state=json.loads(provider_state.read_text())
+        reset=datetime.datetime.fromisoformat(state['retry_at'])
+        if state.get('version')!=1 or state.get('status') not in (401,403,429) or reset.tzinfo is None:
+            raise RuntimeError('provider cooldown evidence cannot be verified')
+        if reset>datetime.datetime.now(datetime.timezone.utc):cooldowns.append(reset)
     now=time.time()
     address=next(a for a in (ROOT/'state/coolify-container-address').read_text().split() if ipaddress.ip_address(a).version==4)
     if not ipaddress.ip_address(address).is_private:raise RuntimeError('non-private native origin')

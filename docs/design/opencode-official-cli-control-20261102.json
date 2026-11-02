@@ -1,0 +1,61 @@
+{
+  "run": "official-cli-oauth-control-20261102-v1",
+  "model": "beam-free",
+  "phase": "failed",
+  "native_cli_version": "2.2.5",
+  "native_cli_sha256": "dcc7e6f4ac1672e1884dcb8d26ab333e55ffc3f080e01a7a60177aa05f54935f",
+  "account_scope": "existing_same_OAuth_account_and_org",
+  "credential_delivery": "read_only_access_token_in_private_child_config",
+  "oauth_refresh_owners": 1,
+  "cli_refresh_credential": false,
+  "request_budget": 1,
+  "output_budget": 1024,
+  "local_hold_exception": "explicit_user_request_for_one_official_CLI_probe",
+  "gateway_quarantine_preserved": true,
+  "started_utc": "2026-11-02T17:29:43Z",
+  "exit_code": 1,
+  "marker_received": false,
+  "physical_requests": 1,
+  "guard_loaded": true,
+  "local_bridge_gets": 1,
+  "protected_state_unchanged": true,
+  "provider_response": {
+    "status": 429,
+    "retry_after": "23413",
+    "request_id": "01a19d4f-5f08-7b8e-a449-526f8a57efc7",
+    "type": "FreeUsageLimitError"
+  },
+  "finished_utc": "2026-11-02T17:29:47Z",
+  "provider_declared_retry_after_seconds": 23413,
+  "provider_retry_at_estimate": "2026-11-03T00:00:00.107944+00:00",
+  "retry_at_precision": "response_receipt_time_plus_delta_seconds",
+  "fresh_cli_credential_inventory": {
+    "credential": 0,
+    "account": 0,
+    "control_account": 0
+  },
+  "guard_sha256": "3f7d7e0c671203b6d108a6992cb367664efbc0af7d1c40140f01a53d4016db5c",
+  "scope": "Released compiled OpenCode2.2.5 constructs and decodes the request; supported one-shot HTTP hooks call original Bun fetch with redirects disabled and bridge the response back through a local204 stub. Frozen native provider config carries the existing OAuth access token and org header; no native Console credential store or refresh grant is supplied. This is not an untouched signed-in CLI profile comparison.",
+  "offline_guard_checks": [
+    {
+      "case": "success",
+      "physical_mock_requests": 1,
+      "status": 200,
+      "cli_marker": true
+    },
+    {
+      "case": "quota",
+      "physical_mock_requests": 1,
+      "status": 429,
+      "redirect_target_requests": 0,
+      "cli_error": true
+    },
+    {
+      "case": "redirect",
+      "physical_mock_requests": 1,
+      "status": 307,
+      "redirect_target_requests": 0,
+      "cli_error": true
+    }
+  ]
+}

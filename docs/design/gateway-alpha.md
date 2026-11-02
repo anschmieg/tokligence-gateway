@@ -185,3 +185,22 @@ disabled, and the durable investigation hold remains through November3
 24-hour fallback after the prior429, not a provider-confirmed reset. No new
 inference, refresh or provider HTTP was sent. This preparation does not establish
 live free-model acceptance or permission for non-OpenCode clients.
+
+
+## Official OpenCode CLI control — November 2, 17:29 UTC
+
+At the user's explicit request, released OpenCode2.2.5 made one same-account,
+same-organization Beam Free control request. OpenCode returned429 with
+`FreeUsageLimitError` and `Retry-After: 23413`. The response receipt plus that
+delay places retry eligibility at approximately November3 00:00UTC /01:00CET.
+This is now provider-supplied guidance; the previous07:42UTC timestamp remains a
+separate, unchanged local investigation hold.
+
+The CLI compiled and decoded the request. A supported one-shot plugin called the
+original Bun HTTPS fetch with redirects disabled and returned its response to the
+native decoder through a local204 stub. Retries, tool calls and title inference
+were disabled. This proves one guarded official-CLI control, not untouched
+signed-in profile parity. The existing OAuth access token was supplied read-only;
+no refresh token or credential database was copied, and the fresh CLI database
+contained zero credentials. Gateway quarantine and prior evidence were unchanged.
+See [control evidence](opencode-official-cli-control-20261102.json). No retry was sent.
