@@ -38,7 +38,7 @@ def main():
  selected=[p for p in providers if p.get('name')=='openrouter']
  if len(selected)!=1 or not selected[0].get('disable-redirects') or selected[0].get('request-retry')!=0 or len(selected[0].get('keys',[]))!=1:raise RuntimeError('Native dispatch policy differs')
  if cfg['routing']['retry']['request-retry']!=0 or cfg['routing']['retry']['max-retry-credentials']!=1:raise RuntimeError('Global dispatch policy differs')
- rules=cfg.get('payload',{}).get('override',[])
+ rules=cfg.get('requests',{}).get('payload',{}).get('override',[])
  expected={'allow_fallbacks':False,'max_price':{'prompt':0,'completion':0,'request':0,'image':0}}
  if not any(r.get('params',{}).get('provider')==expected and r.get('params',{}).get('plugins')==[] and any(m.get('name')==UPSTREAM for m in r.get('models',[])) for r in rules):raise RuntimeError('Free-route payload policy differs')
  sys.path.insert(0,'/home/agent/tokligence-staging/gateway/native/opencode')

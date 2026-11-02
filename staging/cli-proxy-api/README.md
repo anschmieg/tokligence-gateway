@@ -263,3 +263,20 @@ no continuation. It uses its own provider-specific LiveGuard ledger and stable
 ID, checks native retry/redirect/free-price/fallback policy, validates the full
 Messages terminal and original tool arguments, and never automatically retries.
 This probe is currently **not run**; key access and route activation come first.
+
+
+### Current usable route (November 2, 2026)
+
+Native API base: `http://100.74.55.86:4195/v1` over Tailscale.
+Client model: `openrouter/nemotron-3.5-lightning-free`.
+Use the existing private VPS `secrets/client-api-key` for inference and the
+separate `secrets/management.key` for the native dashboard. Keys are not included
+in these instructions. Native Messages streaming and an inert tool proposal
+passed one bounded live request; reasoning replay and tool execution remain
+untested live. OpenCode remains disabled after its recorded provider rejection.
+The native dashboard is `http://100.74.55.86:4195/management.html`.
+
+OpenRouter activation writes v8 `requests.payload` before publishing its route.
+A zero-dispatch pending policy operation can be explicitly resumed with
+`apply_openrouter.py --resume-policy`; completed activations refuse replay.
+This does not authorize repeating any live test ID.
