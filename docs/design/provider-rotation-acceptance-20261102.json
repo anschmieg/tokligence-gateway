@@ -1,0 +1,258 @@
+{
+  "provider_inference_calls": 11,
+  "key_counts": {
+    "openrouter": 1,
+    "orcarouter": 1,
+    "unorouter": 1,
+    "requesty": 4
+  },
+  "openrouter_priority": 0,
+  "cases": [
+    {
+      "case": "orca-free",
+      "model": "orca/z-ai/glm-5.3-flash-free",
+      "phase": "failed",
+      "caller_posts": 1,
+      "started_utc": "2026-11-02T21:40:09Z",
+      "automatic_retries": 0,
+      "forced_selection": false,
+      "http_status": 429,
+      "selected_credential": "orcarouter-key-1",
+      "selection_trace_present": true,
+      "retry_after": "8391",
+      "done": false,
+      "nonempty_text": false,
+      "finish_reasons": [],
+      "embedded_error": false,
+      "response_bytes": 453,
+      "error_code": "free_rate_limited",
+      "error_reason": "err_free_rate",
+      "elapsed_seconds": 0.2
+    },
+    {
+      "case": "uno-free",
+      "model": "uno/nemotron-3.5-lightning-30b-a3b:free",
+      "phase": "failed",
+      "caller_posts": 1,
+      "started_utc": "2026-11-02T21:40:09Z",
+      "automatic_retries": 0,
+      "forced_selection": false,
+      "http_status": 403,
+      "selected_credential": "unorouter-key-1",
+      "selection_trace_present": true,
+      "retry_after": null,
+      "done": false,
+      "nonempty_text": false,
+      "finish_reasons": [],
+      "embedded_error": false,
+      "response_bytes": 389,
+      "error_code": "consent_required",
+      "error_reason": "",
+      "elapsed_seconds": 0.12
+    },
+    {
+      "case": "requesty-1",
+      "model": "requesty/nvidia/nemotron-3.5-lightning-30b-a3b",
+      "phase": "pass",
+      "caller_posts": 1,
+      "started_utc": "2026-11-02T21:40:09Z",
+      "automatic_retries": 0,
+      "forced_selection": false,
+      "http_status": 200,
+      "selected_credential": "requesty-key-4",
+      "selection_trace_present": true,
+      "retry_after": null,
+      "done": true,
+      "nonempty_text": true,
+      "finish_reasons": [
+        "stop"
+      ],
+      "embedded_error": false,
+      "response_bytes": 58085,
+      "elapsed_seconds": 2.02
+    },
+    {
+      "case": "requesty-2",
+      "model": "requesty/nvidia/nemotron-3.5-lightning-30b-a3b",
+      "phase": "pass",
+      "caller_posts": 1,
+      "started_utc": "2026-11-02T21:40:11Z",
+      "automatic_retries": 0,
+      "forced_selection": false,
+      "http_status": 200,
+      "selected_credential": "requesty-key-3",
+      "selection_trace_present": true,
+      "retry_after": null,
+      "done": true,
+      "nonempty_text": true,
+      "finish_reasons": [
+        "stop"
+      ],
+      "embedded_error": false,
+      "response_bytes": 43921,
+      "elapsed_seconds": 1.26
+    },
+    {
+      "case": "requesty-3",
+      "model": "requesty/nvidia/nemotron-3.5-lightning-30b-a3b",
+      "phase": "pass",
+      "caller_posts": 1,
+      "started_utc": "2026-11-02T21:40:13Z",
+      "automatic_retries": 0,
+      "forced_selection": false,
+      "http_status": 200,
+      "selected_credential": "requesty-key-2",
+      "selection_trace_present": true,
+      "retry_after": null,
+      "done": true,
+      "nonempty_text": true,
+      "finish_reasons": [
+        "stop"
+      ],
+      "embedded_error": false,
+      "response_bytes": 52546,
+      "elapsed_seconds": 1.77
+    },
+    {
+      "case": "requesty-4",
+      "model": "requesty/nvidia/nemotron-3.5-lightning-30b-a3b",
+      "phase": "pass",
+      "caller_posts": 1,
+      "started_utc": "2026-11-02T21:40:14Z",
+      "automatic_retries": 0,
+      "forced_selection": false,
+      "http_status": 200,
+      "selected_credential": "requesty-key-1",
+      "selection_trace_present": true,
+      "retry_after": null,
+      "done": true,
+      "nonempty_text": true,
+      "finish_reasons": [
+        "stop"
+      ],
+      "embedded_error": false,
+      "response_bytes": 78801,
+      "elapsed_seconds": 2.71
+    },
+    {
+      "case": "canonical-1",
+      "model": "nemotron-3.5-lightning",
+      "phase": "pass",
+      "caller_posts": 1,
+      "started_utc": "2026-11-02T21:40:17Z",
+      "automatic_retries": 0,
+      "forced_selection": false,
+      "http_status": 200,
+      "selected_credential": "kilo-public",
+      "selection_trace_present": true,
+      "retry_after": null,
+      "done": true,
+      "nonempty_text": true,
+      "finish_reasons": [
+        "stop"
+      ],
+      "embedded_error": false,
+      "response_bytes": 61642,
+      "elapsed_seconds": 1.68
+    },
+    {
+      "case": "canonical-2",
+      "model": "nemotron-3.5-lightning",
+      "phase": "pass",
+      "caller_posts": 1,
+      "started_utc": "2026-11-02T21:40:19Z",
+      "automatic_retries": 0,
+      "forced_selection": false,
+      "http_status": 200,
+      "selected_credential": "kilo-public",
+      "selection_trace_present": true,
+      "retry_after": null,
+      "done": true,
+      "nonempty_text": true,
+      "finish_reasons": [
+        "stop"
+      ],
+      "embedded_error": false,
+      "response_bytes": 69926,
+      "elapsed_seconds": 1.45
+    },
+    {
+      "case": "openrouter-direct",
+      "model": "openrouter/nemotron-3.5-lightning-free",
+      "phase": "pass",
+      "caller_posts": 1,
+      "started_utc": "2026-11-02T21:43:24Z",
+      "automatic_retries": 0,
+      "forced_selection": false,
+      "http_status": 200,
+      "selected_credential": "openrouter-key-1",
+      "selection_trace_present": true,
+      "retry_after": null,
+      "done": true,
+      "nonempty_text": true,
+      "finish_reasons": [
+        "stop"
+      ],
+      "embedded_error": false,
+      "response_bytes": 110056,
+      "elapsed_seconds": 2.82
+    },
+    {
+      "case": "balanced-canonical-1",
+      "model": "nemotron-3.5-lightning",
+      "phase": "pass",
+      "caller_posts": 1,
+      "started_utc": "2026-11-02T21:45:40Z",
+      "automatic_retries": 0,
+      "forced_selection": false,
+      "http_status": 200,
+      "selected_credential": "kilo-public",
+      "selection_trace_present": true,
+      "retry_after": null,
+      "done": true,
+      "nonempty_text": true,
+      "finish_reasons": [
+        "stop"
+      ],
+      "embedded_error": false,
+      "response_bytes": 61956,
+      "elapsed_seconds": 1.63
+    },
+    {
+      "case": "balanced-canonical-2",
+      "model": "nemotron-3.5-lightning",
+      "phase": "pass",
+      "caller_posts": 1,
+      "started_utc": "2026-11-02T21:45:41Z",
+      "automatic_retries": 0,
+      "forced_selection": false,
+      "http_status": 200,
+      "selected_credential": "openrouter-key-1",
+      "selection_trace_present": true,
+      "retry_after": null,
+      "done": true,
+      "nonempty_text": true,
+      "finish_reasons": [
+        "stop"
+      ],
+      "embedded_error": false,
+      "response_bytes": 86976,
+      "elapsed_seconds": 2.22
+    }
+  ],
+  "requesty_selected_credentials": [
+    "requesty-key-1",
+    "requesty-key-2",
+    "requesty-key-3",
+    "requesty-key-4"
+  ],
+  "balanced_provider_sequence": [
+    "kilo-public",
+    "openrouter-key-1"
+  ],
+  "canonical_selected_credentials": [
+    "kilo-public",
+    "kilo-public"
+  ],
+  "protected_state_unchanged": true
+}

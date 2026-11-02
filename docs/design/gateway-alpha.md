@@ -390,3 +390,46 @@ OpenAI-compatible configuration. No additional plugin is needed for basic access
 free-only exact model admission and quota handling still require verification.
 Nous/Uno add independent gateway limits but are aggregators, so upstream capacity
 may overlap with other providers. No claim of multiplied shared upstream quota.
+
+
+## Live new-provider/rotation checks and price priority — November 2, 21:46 UTC
+
+The user explicitly renewed live evaluation for newly added providers and
+credential/provider rotation. Eleven deliberate gateway requests used new durable
+case journals; earlier completed acceptance helpers were not replayed. Nine
+streams passed text+stop+DONE. OrcaRouter GLM5.3FlashFree returned429
+`free_rate_limited/err_free_rate`, with8391seconds retry delay at21:40:09UTC,
+placing next provider eligibility nearNovember3 00:00UTC. No retry was sent.
+UnoRouter LightningFree returned403 `consent_required`; the key owner must review
+https://unorouter.com/consents?model=nemotron-3.5-lightning-30b-a3b%3Afree .
+Provider consent can permit upstream input use/storage/training; it was not
+accepted automatically. This is a provider prerequisite, not a gateway key error.
+
+Requesty's four distinct configured keys all passed Lightning and native trace
+headers confirmed natural selection4→3→2→1, without forced credentials. Distinct
+keys do not prove independent accounts, daily allowances or upstream capacity.
+A qualified native OpenRouter request also passed. The initial two canonical
+requests both selected Kilo because OpenRouter had configured priority−10.
+The user then explicitly requested equal preference for free OpenRouter and Kilo,
+with lowest priority for PAYGO OpenRouter.
+
+`openrouter_price_priority.py` applies stock native provider-group priorities:
+known upstream `:free` models and `openrouter/free` priority0, other/unknown models
+priority−10. Mixed lists are partitioned into native free/PAYGO groups without
+changing keys, model aliases or other providers. It classifies upstream IDs,
+never a client alias that merely looks free. Empty/wildcard catalogs remain low
+priority. There are currently only two aliases of one free model in OpenRouter;
+no PAYGO models or paid fallback were added. Future paid models must remain in
+the separate low-priority group; this helper is a guarded configuration operation,
+not a background reprioritization daemon. Five focused partition/preservation
+tests pass. Operation `state/openrouter-price-priority-v1.json` is configured.
+
+After the change two independent canonical requests selected Kilo then OpenRouter
+and both passed. Thus live credential rotation and native cross-provider rotation
+are now verified for these specific routes. Requests used one native dispatch,
+retry0/maxcredentials1/bootstrap0 and redirect refusal; third-party routers'
+internal fanout cannot be counted here. OpenCode stayed disabled, protected
+reports/ledger/hash checks pass. Provider settings/accounts were preserved apart
+from explicit priority and redirect policy changes. Model-ID matching was not
+changed. No Nous/Vercel configured credential was observed at inventory time.
+See [live evidence](provider-rotation-acceptance-20261102.json).
