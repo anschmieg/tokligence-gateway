@@ -38,25 +38,26 @@ def main():
     parser.add_argument('--plugin-only', action='store_true', help='Reviewed 0.1.0 to 0.1.1 file-identity correction')
     parser.add_argument('--stream-status', action='store_true', help='Reviewed 0.1.1 to 0.1.2 structured stream errors')
     parser.add_argument('--provider-acceptance', action='store_true', help='Native OAuth request budget plus structured FreeHub errors')
+    parser.add_argument('--zai-free', action='store_true', help='Reviewed documented-free Z.ai catalog correction')
     args = parser.parse_args()
-    if args.stream_status: args.plugin_only = True
+    if args.stream_status or args.zai_free: args.plugin_only = True
     token = json.load(sys.stdin)['token']
     key = (ROOT/'secrets/management.key').read_text().strip()
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     lock = (ROOT/'state/freehub-deployment.lock').open('a')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    journal = ROOT/('provider-acceptance-safety-deployment-v1.json' if args.provider_acceptance else 'freehub-stream-status-deployment-v1.json' if args.stream_status else 'freehub-identity-deployment-v1.json' if args.plugin_only else 'freehub-deployment-v1.json')
+    journal = ROOT/('freehub-zai-free-deployment-v1.json' if args.zai_free else 'provider-acceptance-safety-deployment-v1.json' if args.provider_acceptance else 'freehub-stream-status-deployment-v1.json' if args.stream_status else 'freehub-identity-deployment-v1.json' if args.plugin_only else 'freehub-deployment-v1.json')
     binary = ROOT/'bin/cli-proxy-api'
     pending = ROOT/'freehub-backend.pending'
     library = ROOT/'plugins/free-model-hub.so'
     pending_library = ROOT/'freehub-plugin.pending.so'
-    backup = ROOT/('bin/cli-proxy-api-before-provider-acceptance' if args.provider_acceptance else 'freehub-before-stream-status.so' if args.stream_status else 'freehub-before-identity.so' if args.plugin_only else 'bin/cli-proxy-api-before-freehub')
+    backup = ROOT/('freehub-before-zai-free.so' if args.zai_free else 'bin/cli-proxy-api-before-provider-acceptance' if args.provider_acceptance else 'freehub-before-stream-status.so' if args.stream_status else 'freehub-before-identity.so' if args.plugin_only else 'bin/cli-proxy-api-before-freehub')
     library_backup = ROOT/'freehub-before-provider-acceptance.so'
     if journal.exists() or backup.exists() or (args.provider_acceptance and library_backup.exists()) or (library.exists() and not (args.plugin_only or args.provider_acceptance)):
         raise RuntimeError('existing operation evidence; inspect instead of replay')
     expected_backend = OLD
     if args.plugin_only or args.provider_acceptance:
-        prior = json.loads((ROOT/('freehub-identity-deployment-v1.json' if args.stream_status or args.provider_acceptance else 'freehub-deployment-v1.json')).read_text())
+        prior = json.loads((ROOT/('provider-acceptance-safety-deployment-v1.json' if args.zai_free else 'freehub-identity-deployment-v1.json' if args.stream_status or args.provider_acceptance else 'freehub-deployment-v1.json')).read_text())
         if prior['phase'] != 'deployed' or digest(library) != prior['plugin_sha256']:
             raise RuntimeError('previous plugin identity differs')
         expected_backend = prior['backend_sha256']

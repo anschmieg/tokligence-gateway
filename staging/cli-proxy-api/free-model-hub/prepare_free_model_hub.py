@@ -48,6 +48,18 @@ SHARED_SOURCES = [
 # never rewritten in place afterwards (re-prepare deletes only the output).
 
 EDITS = [
+    {"id":"zai-retire-undocumented-free-test-id","file":"internal/vendors/openaicompat/openaicompat_test.go",
+     "why":"Adjust the upstream test to the explicit current-pricing allowlist, excluding undocumented glm-4-flash-250414.",
+     "find":"got := filterModels(models, FilterFlash, false)\n\tif len(got) != 3 {",
+     "replace":"got := filterModels(models, FilterFlash, false)\n\tif len(got) != 2 {"},
+    {"id":"zai-explicit-free-models","file":"internal/vendors/openaicompat/models.go",
+     "why":"Official pricing charges for GLM5.3Flash; only explicit documented zero-price IDs belong in this free lane.",
+     "find":'regexp.MustCompile(`-flash($|-)`)',
+     "replace":'regexp.MustCompile(`^(glm-4\\.7-flash|glm-4\\.5-flash|glm-4\\.6v-flash)$`)'},
+    {"id":"zai-documented-free-catalog","file":"internal/vendors/openaicompat/adapter.go",
+     "why":"Supplement documented free IDs omitted by an otherwise successful authenticated model catalog.",
+     "find":"models := filterModels(listed, a.provider.Filter, showPaid)",
+     "replace":"models := filterModels(listed, a.provider.Filter, showPaid)\n\tif a.provider.Filter == FilterFlash { models = completeZaiFreeCatalog(models) }"},
     {"id":"structured-stream-error-status","file":"internal/app/executor.go",
      "why":"Preserve upstream quota/auth HTTP status through native schema10 stream close.",
      "find":"closeStream(callbackID, streamID, streamFailureMessage(errForward))",
@@ -517,6 +529,8 @@ EDITS.extend([{'file': 'internal/admin/config.go',
 
 # --- New files (copied from staging patches) ------------------------------
 NEW_FILES = [
+    "internal/vendors/openaicompat/zai_free_catalog.go",
+    "internal/vendors/openaicompat/zai_free_catalog_test.go",
     "internal/app/stream_error.go",
     "internal/app/stream_error_test.go",
     "internal/app/auth_identity_test.go",
