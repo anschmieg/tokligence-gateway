@@ -11,7 +11,7 @@ Bubblewrap must support `--unshare-net`; there is no fallback. OpenSSL makes
 an ephemeral test CA/certificate inside the sandbox, with SANs for the real
 Kilo hostname `api.kilo.ai` and the fake redirect target. Production provider
 URLs are unchanged. A CONNECT proxy maps only those two authorities to two
-loopback TLS mock servers. Every other CONNECT is denied and fails the smoke.
+loopback TLS mock servers. Every other provider CONNECT is denied and fails the smoke. The native npm version-metadata updater is explicitly denied locally and counted separately; it never receives a tunnel.
 The host trusts only the fixture CA through `SSL_CERT_FILE` and an empty
 `SSL_CERT_DIR`. No caller HOME, credential directory, DNS configuration, proxy
 environment, or network environment is inherited. The supplied host and both

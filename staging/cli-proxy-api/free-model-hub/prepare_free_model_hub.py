@@ -49,6 +49,13 @@ SHARED_SOURCES = [
 
 EDITS = [
     {
+        "id": "native-host-auth-id-retains-extension",
+        "file": "internal/app/authprovider.go",
+        "why": "Native v8 indexes saved files by relative filename including .json; preserve that identity to avoid duplicate management entries.",
+        "find": 'id := strings.TrimSuffix(fileName, ".json")',
+        "replace": 'id := strings.TrimSpace(fileName)',
+    },
+    {
         "id": "core-registry-parked-field",
         "file": "internal/core/registry.go",
         "why": "Vendor admission needs per-registry parking state (registry_admission.go).",
@@ -506,6 +513,7 @@ EDITS.extend([{'file': 'internal/admin/config.go',
 
 # --- New files (copied from staging patches) ------------------------------
 NEW_FILES = [
+    "internal/app/auth_identity_test.go",
     "go.sum",
     "internal/admin/config_yaml.go",
     "internal/admin/config_yaml_test.go",

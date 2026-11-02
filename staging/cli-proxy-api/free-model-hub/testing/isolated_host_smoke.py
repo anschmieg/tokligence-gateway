@@ -209,13 +209,14 @@ def inner(outer_ns):
         require(status == 200, 'api_status')
         return json.loads(raw)
 
-    def auth_gate():
+    def auth_gate(check_runtime=True):
         # Native request logging creates auth/logs after a rejected request;
         # it is not a credential. Check every regular credential file.
         files = sorted(p.name for p in (WORK/'auth').iterdir() if p.is_file())
         return (files == ['kilo-free.json', 'opencode-fixture.json']
             and digest(WORK/'auth/opencode-fixture.json') == seeded_hash
-            and json.loads((WORK/'auth/kilo-free.json').read_text()).get('vendor') == 'kilo')
+            and json.loads((WORK/'auth/kilo-free.json').read_text()).get('vendor') == 'kilo'
+            and (not check_runtime or sum(f.get('name') == 'kilo-free.json' for f in get_json('/v8/management/credentials')['files']) == 1))
 
     try:
         inner_ns = os.readlink('/proc/self/ns/net')
@@ -355,7 +356,7 @@ def inner(outer_ns):
                     and counts['stream_origin'] == 1 and counts['redirect_origin'] == 1
                     and counts['redirect_target'] == 0 and counts['unexpected_http'] == 0
                     and counts['denied_connect'] == 0)
-                gate('stopped_host_auth_ownership', auth_gate())
+                gate('stopped_host_auth_ownership', auth_gate(check_runtime=False))
             except Exception as error:
                 report['failures'].append(str(error) if isinstance(error, GateFailure)
                     else 'final_evidence:' + type(error).__name__)

@@ -35,21 +35,28 @@ def main():
     parser.add_argument('--backend-sha256', required=True)
     parser.add_argument('--plugin-sha256', required=True)
     parser.add_argument('--source', required=True)
+    parser.add_argument('--plugin-only', action='store_true', help='Reviewed 0.1.0 to 0.1.1 file-identity correction')
     args = parser.parse_args()
     token = json.load(sys.stdin)['token']
     key = (ROOT/'secrets/management.key').read_text().strip()
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     lock = (ROOT/'state/freehub-deployment.lock').open('a')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    journal = ROOT/'freehub-deployment-v1.json'
+    journal = ROOT/('freehub-identity-deployment-v1.json' if args.plugin_only else 'freehub-deployment-v1.json')
     binary = ROOT/'bin/cli-proxy-api'
     pending = ROOT/'freehub-backend.pending'
     library = ROOT/'plugins/free-model-hub.so'
     pending_library = ROOT/'freehub-plugin.pending.so'
-    backup = ROOT/'bin/cli-proxy-api-before-freehub'
-    if journal.exists() or backup.exists() or library.exists():
+    backup = ROOT/('freehub-before-identity.so' if args.plugin_only else 'bin/cli-proxy-api-before-freehub')
+    if journal.exists() or backup.exists() or (library.exists() and not args.plugin_only):
         raise RuntimeError('existing operation evidence; inspect instead of replay')
-    if digest(binary) != OLD or digest(pending) != args.backend_sha256 or digest(pending_library) != args.plugin_sha256:
+    expected_backend = OLD
+    if args.plugin_only:
+        prior = json.loads((ROOT/'freehub-deployment-v1.json').read_text())
+        if prior['phase'] != 'deployed' or digest(library) != prior['plugin_sha256']:
+            raise RuntimeError('previous plugin identity differs')
+        expected_backend = prior['backend_sha256']
+    if digest(binary) != expected_backend or (not args.plugin_only and digest(pending) != args.backend_sha256) or digest(pending_library) != args.plugin_sha256:
         raise RuntimeError('artifact identity mismatch')
     runtime = (ROOT/'state/coolify-runtime.lock').open('r')
     def held():
@@ -120,7 +127,10 @@ def main():
     hashes = {str(p):digest(p) for p in preserved}
     native_config = api('/v8/management/config/plugins/configs/opencode')[0]
     configs = api('/v8/management/config/plugins/configs')[0]
-    if 'free-model-hub' in configs: raise RuntimeError('Free Hub already configured')
+    if args.plugin_only:
+        if configs.get('free-model-hub') != dict(CONFIG, enabled=True):
+            raise RuntimeError('previous scoped configuration differs')
+    elif 'free-model-hub' in configs: raise RuntimeError('Free Hub already configured')
     result = dict(phase='prepared', source_commit=args.source,
         backend_sha256=args.backend_sha256, plugin_sha256=args.plugin_sha256,
         login_requests=0, inference_requests=0, preserved_file_hashes=hashes)
@@ -131,8 +141,9 @@ def main():
         write_config(CONFIG)
         result['phase']='configured_disabled'; save()
         stop()
-        shutil.copyfile(binary, backup); backup.chmod(0o700)
-        os.replace(pending, binary); binary.chmod(0o700)
+        shutil.copyfile(library if args.plugin_only else binary, backup); backup.chmod(0o700)
+        if not args.plugin_only:
+            os.replace(pending, binary); binary.chmod(0o700)
         os.replace(pending_library, library); library.chmod(0o700)
         swapped = True
         result['phase']='swapped_stopped'; save()
@@ -157,6 +168,10 @@ def main():
         ids = {v['id'] for v in vendors}
         if ids.intersection({'opencodezen','opencodego','openrouter'}) or not {'kilo','cline','github'} <= ids:
             raise RuntimeError('vendor admission differs')
+        if args.plugin_only:
+            entries = api('/v8/management/credentials')[0]['files']
+            if sum(f.get('name') == 'kilo-free.json' for f in entries) != 1:
+                raise RuntimeError('Kilo credential identity duplicated')
         client = (ROOT/'secrets/client-api-key').read_text().strip()
         models = request(origin()+'/v1/models', client)[0]['data']
         result.update(phase='deployed', registered_vendor_ids=sorted(ids),
