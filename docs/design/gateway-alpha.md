@@ -22,9 +22,8 @@ model discovery, management/client auth separation, invalid-assertion denial
 and runtime single-owner checks. Both `/dashboard` and `/management.html` serve
 the exact tested panel. Public unauthenticated `/dashboard` redirects to Access;
 public unauthenticated `/v1/models` returns native401 Missing API key in the
-browser. A personal-email login and keyless panel opening await user confirmation:
-Google rejected the automated preview browser as insecure. This is not claimed
-as an observed successful real-user login.
+browser. The user subsequently confirmed personal-email Cloudflare login and
+keyless native panel access after the production-team correction below.
 
 The existing staging client key and old production client key remain admitted.
 Public Python urllib discovery from the VPS hit Cloudflare1010 Browser Integrity
@@ -58,9 +57,9 @@ reports remain in that root. The native management API is the configuration
 owner; the release manifest is evidence rather than a second route store.
 Do not start another host runtime or re-enable quarantined OpenCode to test login.
 
-After the personal Cloudflare login check, OpenCode free-model compatibility
-returns to top priority. Additional providers and speculative parity work remain
-deferred.
+OpenCode free-model compatibility remains a priority. Its same-account durable
+cooldown expires no earlier than November 3 at 07:42:08.980115 UTC. Reconnecting
+does not clear it; no rejection-driven public/account fallback is allowed.
 
 ## Login correction after initial alpha deployment
 
@@ -70,4 +69,40 @@ Production is now corrected and the restarted process's actual environment was
 verified. Fix deployment `yjxuec0qlcz6h2gyg2j7iq2t` finished at revision `fe33bfc`.
 The panel now clears only local auth on API401, preserving Cloudflare login.
 Explicit Logout still ends SSO. Five custom auth-state tests and the panel build
-pass; a successful personal browser login still awaits the user's retry.
+pass; the user subsequently confirmed successful personal browser login.
+
+
+## Free Model Hub addition — November 2
+
+The full pinned Free Model Hub plugin is installed alongside native OpenCode:
+[open its console](https://code.nothing.pink/admin/v0/management/plugins/free-model-hub/console).
+It uses the same Cloudflare Access session, without a browser Management Key.
+The origin console and API authentication checks pass; real browser opening of
+this added console has not yet been confirmed by the user.
+
+There are 27 admitted vendor variants, including Cline and the other upstream
+login providers. OpenCode Zen/Go and OpenRouter are excluded here because their
+existing native integrations retain ownership. Provider support does not imply
+an account, free entitlement or live acceptance for every provider.
+
+The public Kilo pool publishes 17 models. Scheduled keepalives are disabled;
+loading performs catalog discovery and no inference. Prefix model aliases keep
+new routes separate. Native backend `.5` covers ABI callback redirect policy;
+plugin `0.1.1-tokligence` preserves native filename credential IDs so one saved
+account appears once. Existing accounts/settings, OpenCode quarantine, dashboard
+asset, client key and prior live reports were verified unchanged through both
+controlled restarts. Final Coolify deployment: `ctvr56qzepr1enqzb7hxsw98`.
+
+Custom unit checks and an actual-host isolated mock smoke pass, including both
+plugins, keyless console authentication, foreign credential preservation, single
+stream dispatch and zero redirect-target requests. These are synthetic results,
+not claims of live provider parity. Kilo live acceptance is recorded separately.
+
+
+Kilo live acceptance: `kilo-kilo/nvidia/nemotron-3.5-lightning:free` passed a
+streaming Chat request on November 2 at 13:13 UTC. The first 64-token call ended
+at `length` before answering; the single permitted diagnostic used 1024 tokens
+on the same free model and returned text with `stop` and `[DONE]`. Two total
+caller POSTs, no automatic retries, redirects or fallback. No other new vendor's
+live functionality is claimed. Both reports and the original OpenCode cooldown
+remain preserved.

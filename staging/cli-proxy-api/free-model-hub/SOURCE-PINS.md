@@ -84,3 +84,16 @@ No real provider traffic or deployment has occurred from these smoke tests.
 
 The inherited `tsaQB` attribution ambiguity above is retained; no additional code
 from that source is adopted. Provider support is not a guarantee of free quota.
+
+
+## Final acceptance
+
+Source0898748, FreeHub0.1.1-tokligence SHA
+`b8ea4e20e1e4f43dbc8678f64e9d87bdff7879d2074a2f13f8557dae9d71013e`.
+Native host .5 SHA
+`fd20618ee87f376bd45de142aa2ce52d98202e9dedef2e2acc2b69fb8caac1ff`.
+Actual-host isolated smoke `/tmp/freehub-native-host-smoke-g` passes, including
+unique native credential identity (the upstream ID dropped the `.json` suffix;
+this adoption preserves the host filename). Deployment and the subsequent Kilo
+live diagnostic pass; other provider variants remain untested. See
+`docs/design/free-model-hub-acceptance.json` for sanitized evidence.

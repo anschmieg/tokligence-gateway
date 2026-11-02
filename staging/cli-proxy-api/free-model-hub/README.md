@@ -38,8 +38,11 @@ scalar/list decoder. Both plugin HTTP clients and the native ABI callback client
 must refuse redirects; a single caller request must not create hidden dispatches.
 
 Parent verification: custom focused race tests and console JavaScript behavior
-checks pass. Actual-host coexistence testing found and prompted fixes for flow
-YAML and ABI redirect policy; final integrated smoke/deployment remain pending.
+checks pass. Final actual-host coexistence smoke and deployment pass. It caught
+and prompted fixes for flow YAML, ABI redirect policy and native filename IDs.
+Current plugin version is `0.1.1-tokligence`; Kilo subsequently passed one live
+streaming acceptance after a permitted response-cap diagnostic. Other vendors
+remain untested.
 See `testing/README.md` for the mandatory network-isolated mock run. Its results
 prove custom integration only, not real provider acceptance.
 

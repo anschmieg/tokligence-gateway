@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """One explicit free Kilo live acceptance. No retries, redirects or fallback."""
 import fcntl
+import argparse
 import hashlib
 import ipaddress
 import json
@@ -17,11 +18,21 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self,*args,**kwargs): return None
 
 def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--diagnostic',action='store_true',help='Explicit second call only after first ended length without text')
+    args=parser.parse_args()
     os.umask(0o077)
     lock=(ROOT/'state/kilo-live.lock').open('a')
     fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-    journal=ROOT/(ID+'.json')
+    request_id=ID+'-diagnostic' if args.diagnostic else ID
+    journal=ROOT/(request_id+'.json')
     if journal.exists(): raise RuntimeError('existing reservation; never replay')
+    if args.diagnostic:
+        first=json.loads((ROOT/(ID+'.json')).read_text())
+        if not (first.get('phase')=='failed' and first.get('caller_posts')==1
+            and first.get('http_status')==200 and first.get('done') is True
+            and first.get('nonempty_text') is False and first.get('finish_reasons')==['length']):
+            raise RuntimeError('second diagnostic not admitted')
     deployed=json.loads((ROOT/'freehub-deployment-v1.json').read_text())
     if deployed['phase']!='deployed': raise RuntimeError('deployment not admitted')
     address=next(ipaddress.ip_address(a) for a in (ROOT/'state/coolify-container-address').read_text().split() if ipaddress.ip_address(a).version==4)
@@ -48,14 +59,14 @@ def main():
         raise RuntimeError('OpenCode quarantine differs')
     evidence=[ROOT/'cliproxy-opencode-live-20261102-v1.json',ROOT/'cliproxy-openrouter-live-20261102-v1.json',Path('/home/agent/tokligence-staging/live-probe-ledger.json')]
     hashes={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in evidence}
-    result=dict(id=ID,model=MODEL,provider='kilo',phase='reserved',
+    result=dict(id=request_id,model=MODEL,provider='kilo',phase='reserved',
         caller_post_budget=1,caller_posts=0,automatic_retries=0,redirects=False,
         fallback=False,started_utc=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()))
     with journal.open('x') as output:json.dump(result,output)
-    body=json.dumps(dict(model=MODEL,stream=True,max_tokens=64,
+    body=json.dumps(dict(model=MODEL,stream=True,max_tokens=1024 if args.diagnostic else 64,
         messages=[dict(role='user',content='Say hi in one short sentence.')])).encode()
     request=urllib.request.Request(base+'/v1/chat/completions',data=body,
-        headers={'Authorization':'Bearer '+client,'Content-Type':'application/json','X-Request-ID':ID})
+        headers={'Authorization':'Bearer '+client,'Content-Type':'application/json','X-Request-ID':request_id})
     result.update(phase='dispatched',caller_posts=1)
     journal.write_text(json.dumps(result,indent=2)+'\n')
     try:
