@@ -72,7 +72,11 @@ def inner(outer_ns):
     servers = []
     stage = 'namespace'
     quota_mode = (WORK/'quota-mode').exists()
+    multi_mode = (WORK/'multiple-credentials').exists()
     mode = {'redirect': False}
+    seen_accounts = []
+    account_tokens = {'Bearer fixture-kilo-a': 'kilo-a', 'Bearer fixture-kilo-b': 'kilo-b',
+        'Bearer workos:fixture-cline-a': 'cline-a', 'Bearer workos:fixture-cline-b': 'cline-b'}
     lock = threading.Lock()
 
     def count(name):
@@ -105,6 +109,10 @@ def inner(outer_ns):
                 count('catalog_get')
                 self.reply(200, json.dumps({'data': [{'id': MODEL, 'isFree': True,
                     'context_length': 8192, 'pricing': {'prompt': '0', 'completion': '0'}}]}).encode())
+            elif multi_mode and self.path == '/api/v1/ai/cline/recommended-models':
+                count('catalog_get')
+                self.reply(200, json.dumps({'free': [{'id': 'fixture/solar',
+                    'contextWindow': 8192, 'maxOutputTokens': 128}]}).encode())
             else:
                 count('unexpected_http')
                 self.reply(500)
@@ -116,7 +124,10 @@ def inner(outer_ns):
                 return
             count('inference_posts')
             length = int(self.headers.get('Content-Length', '0'))
-            if self.path != '/api/gateway/chat/completions' or not 0 < length <= 65536:
+            expected_paths = ['/api/gateway/chat/completions']
+            if multi_mode:
+                expected_paths.append('/api/v1/chat/completions')
+            if self.path not in expected_paths or not 0 < length <= 65536:
                 count('unexpected_http')
                 self.reply(500)
                 return
@@ -126,12 +137,18 @@ def inner(outer_ns):
                 count('unexpected_http')
                 self.reply(500)
                 return
-            if (body.get('model') != MODEL or body.get('stream') is not True
-                    or self.headers.get('Authorization')):
+            account = account_tokens.get(self.headers.get('Authorization'))
+            expected_model = 'fixture/solar' if self.path == '/api/v1/chat/completions' else MODEL
+            if (body.get('model') != expected_model or body.get('stream') is not True
+                    or (multi_mode and (not account or not account.startswith(
+                        'cline-' if self.path == '/api/v1/chat/completions' else 'kilo-')))
+                    or (not multi_mode and self.headers.get('Authorization'))):
                 count('unexpected_http')
                 self.reply(500)
                 return
-            if mode.get('quota'):
+            if multi_mode:
+                seen_accounts.append(account)
+            if mode.get('quota') and (not multi_mode or account == mode.get('quota_account')):
                 count('quota_origin')
                 self.reply(429, b'{"error":{"message":"fixture quota exceeded"}}', 'application/json')
                 return
@@ -162,6 +179,8 @@ def inner(outer_ns):
                 self.send_error(403)
                 return
             ports = {'api.kilo.ai:443': 18443, 'redirect.fixture.invalid:443': 18444}
+            if multi_mode:
+                ports['api.cline.bot:443'] = 18443
             port = ports.get(self.path)
             if port is None:
                 count('denied_connect')
@@ -218,6 +237,11 @@ def inner(outer_ns):
         # Native request logging creates auth/logs after a rejected request;
         # it is not a credential. Check every regular credential file.
         files = sorted(p.name for p in (WORK/'auth').iterdir() if p.is_file())
+        if multi_mode:
+            return (files == ['cline-a.json', 'cline-b.json', 'kilo-a.json', 'kilo-b.json', 'opencode-fixture.json']
+                and digest(WORK/'auth/opencode-fixture.json') == seeded_hash
+                and (not check_runtime or all(sum(f.get('name') == name for f in
+                    get_json('/v8/management/credentials')['files']) == 1 for name in files)))
         return (files == ['kilo-free.json', 'opencode-fixture.json']
             and digest(WORK/'auth/opencode-fixture.json') == seeded_hash
             and json.loads((WORK/'auth/kilo-free.json').read_text()).get('vendor') == 'kilo'
@@ -232,7 +256,7 @@ def inner(outer_ns):
         # share the outer process-group deadline. No Python package installs.
         subprocess.run(['/usr/bin/openssl', 'req', '-config', '/dev/null', '-x509', '-newkey', 'rsa:2048',
             '-nodes', '-days', '1', '-subj', '/CN=api.kilo.ai', '-addext',
-            'subjectAltName=DNS:api.kilo.ai,DNS:redirect.fixture.invalid',
+            'subjectAltName=DNS:api.kilo.ai,DNS:api.cline.bot,DNS:redirect.fixture.invalid',
             '-addext', 'basicConstraints=critical,CA:TRUE',
             '-keyout', '/work/key.pem', '-out', '/work/ca.pem'],
             check=True, timeout=5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -245,6 +269,14 @@ def inner(outer_ns):
                     'accountID': 'fixture-account', 'email': 'fixture@example.invalid'}}}
         (WORK/'auth/opencode-fixture.json').write_text(json.dumps(seed) + '\n')
         seeded_hash = digest(WORK/'auth/opencode-fixture.json')
+        if multi_mode:
+            for suffix in ('a', 'b'):
+                (WORK/f'auth/kilo-{suffix}.json').write_text(json.dumps({
+                    'type': 'freehub', 'vendor': 'kilo', 'api_key': 'fixture-kilo-'+suffix}))
+                (WORK/f'auth/cline-{suffix}.json').write_text(json.dumps({
+                    'type': 'freehub', 'vendor': 'cline', 'accessToken': 'fixture-cline-'+suffix,
+                    'refreshToken': 'fixture-refresh-'+suffix, 'expiresAt': 2524608000,
+                    'accountId': 'fixture-cline-'+suffix}))
         (WORK/'static/models.json').write_text(json.dumps({k: [] for k in
             ('claude', 'gemini', 'vertex', 'aistudio', 'codex-free', 'codex-team',
              'codex-plus', 'codex-pro', 'kimi', 'antigravity', 'xai', 'meta')}))
@@ -260,7 +292,7 @@ def inner(outer_ns):
                     'session_state_path': '/work/opencode-sessions.json'},
                 'free-model-hub': {'enabled': True, 'allowed_vendors': [],
                     'blocked_vendors': ['opencodezen', 'opencodego', 'openrouter'],
-                    'keyless_accounts': True, 'keepalive_enabled': False,
+                    'keyless_accounts': not multi_mode, 'keepalive_enabled': False,
                     'console_keyless': True, 'console_management_base': '/admin',
                     'state_dir': '/work/state', 'model_name_tag': 'prefix', 'log_to_file': False}}}}
         (WORK/'config.yaml').write_text(json.dumps(config))
@@ -282,7 +314,8 @@ def inner(outer_ns):
                 model_ids = [m['id'] for m in get_json('/v1/models', CLIENT_KEY)['data']]
                 if (all(registered.get(p, {}).get('registered') for p in ('opencode', 'free-model-hub'))
                         and any(MODEL in m and 'kilo' in m for m in model_ids)
-                        and (WORK/'auth/kilo-free.json').exists()):
+                        and ((multi_mode and any('fixture/solar' in m for m in model_ids))
+                            or (not multi_mode and (WORK/'auth/kilo-free.json').exists()))):
                     break
             except (OSError, ValueError, KeyError, GateFailure):
                 pass
@@ -305,7 +338,7 @@ def inner(outer_ns):
         gate('vendor_admission', {'kilo', 'cline', 'github', 'groq'} <= vendor_ids
             and not vendor_ids.intersection({'opencodezen', 'opencodego', 'openrouter'}))
         gate('login_providers_visible', any(v['id'] == 'cline' and v['supports_login'] for v in vendors))
-        gate('only_kilo_auth_and_preserved_opencode', auth_gate())
+        gate('unique_accounts_and_preserved_opencode' if multi_mode else 'only_kilo_auth_and_preserved_opencode', auth_gate())
         gate('disabled_opencode_unpublished', not any('fixture-disabled-only' in m for m in model_ids))
         gate('no_startup_inference', counts['inference_posts'] == 0)
         candidates = [m for m in model_ids if MODEL in m and 'kilo' in m]
@@ -313,6 +346,32 @@ def inner(outer_ns):
         model_id = candidates[0]  # Route using the actual host publication.
         request = {'model': model_id, 'stream': True, 'max_tokens': 8,
             'messages': [{'role': 'user', 'content': 'fixture inert input'}]}
+        if multi_mode:
+            stage = 'multi_account_dispatch'
+            # Independent caller requests; never replay one rejected request.
+            for _ in range(2):
+                status, raw = api('/v1/chat/completions', CLIENT_KEY, request)
+                gate('kilo_success_'+str(len(seen_accounts)), status == 200 and b'[DONE]' in raw)
+            gate('kilo_both_accounts_selected', set(seen_accounts) == {'kilo-a', 'kilo-b'})
+            first, second = seen_accounts
+            mode.update(quota=True, quota_account=first)
+            status, raw = api('/v1/chat/completions', CLIENT_KEY, request)
+            gate('quota_no_same_request_replay', status == 429 and seen_accounts == [first, second, first])
+            status, raw = api('/v1/chat/completions', CLIENT_KEY, request)
+            gate('next_request_uses_healthy_account', status == 200 and b'[DONE]' in raw
+                and seen_accounts == [first, second, first, second])
+            cline_models = [m for m in model_ids if 'cline' in m and 'fixture/solar' in m]
+            gate('cline_model_published', len(cline_models) == 1)
+            for _ in range(2):
+                status, raw = api('/v1/chat/completions', CLIENT_KEY, dict(request, model=cline_models[0]))
+                gate('cline_success_'+str(len(seen_accounts)), status == 200 and b'[DONE]' in raw)
+            gate('cline_both_accounts_selected', set(seen_accounts[4:]) == {'cline-a', 'cline-b'})
+            gate('multi_vendor_and_callback_isolation', len(seen_accounts) == 6 and counts['inference_posts'] == 6
+                and counts['quota_origin'] == 1 and counts['stream_origin'] == 5)
+            gate('no_unexpected_provider_requests', counts['unexpected_http'] == 0 and counts['denied_connect'] == 0)
+            gate('final_auth_ownership', auth_gate())
+            report['account_sequence'] = seen_accounts
+            return 0
         stage = 'stream'
         status, raw = api('/v1/chat/completions', CLIENT_KEY, request)
         frames = []
@@ -359,8 +418,10 @@ def inner(outer_ns):
         # turn a previously passing snapshot into unnoticed extra dispatches.
         if not report['failures']:
             try:
-                gate('stopped_host_exact_counts', counts['inference_posts'] == 2 and counts['quota_origin'] == int(quota_mode)
-                    and counts['stream_origin'] == 1 and counts['redirect_origin'] == int(not quota_mode)
+                gate('stopped_host_exact_counts', counts['inference_posts'] == (6 if multi_mode else 2)
+                    and counts['quota_origin'] == (1 if multi_mode else int(quota_mode))
+                    and counts['stream_origin'] == (5 if multi_mode else 1)
+                    and counts['redirect_origin'] == (0 if multi_mode else int(not quota_mode))
                     and counts['redirect_target'] == 0 and counts['unexpected_http'] == 0
                     and counts['denied_connect'] == 0)
                 gate('stopped_host_auth_ownership', auth_gate(check_runtime=False))
@@ -385,7 +446,10 @@ def main():
     parser.add_argument('--opencode-plugin', required=True, help='Exact native OpenCode .so')
     parser.add_argument('--output', required=True, help='NEW private evidence directory')
     parser.add_argument('--quota-error', action='store_true', help='Test upstream429 instead of redirect, in a fresh host')
+    parser.add_argument('--multiple-credentials', action='store_true', help='Two fake Kilo keys and two fake Cline OAuth accounts; six local mock calls')
     args = parser.parse_args()
+    if args.quota_error and args.multiple_credentials:
+        parser.error('select one scenario')
     os.umask(0o077)
     bwrap = shutil.which('bwrap')
     if not bwrap or not Path('/usr/bin/openssl').is_file():
@@ -401,6 +465,8 @@ def main():
     out = out.resolve(strict=True)
     if args.quota_error:
         (out/'quota-mode').touch()
+    if args.multiple_credentials:
+        (out/'multiple-credentials').touch()
     verdict = out/'verdict.json'
     write_verdict(verdict, {'verdict': 'fail', 'failures': ['fixture_not_completed']})
     inputs = {name: digest(path) for name, path in
