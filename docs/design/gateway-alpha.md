@@ -1,56 +1,63 @@
-# Gateway alpha — gateway-alpha-20261102.1
+# Gateway alpha — Coolify deployment
 
-This alpha uses the existing CLIProxyAPI deployment on the private Tailscale
-network. It does not move production OAuth or replace the production ingress.
+The alpha is now deployed in the existing **Tokligence Gateway** Coolify app at
+`code.nothing.pink`, replacing its old gateway process.
 
-## Use now
-
-- Dashboard: <http://100.74.55.86:4195/management.html>
-- OpenAI API base: `http://100.74.55.86:4195/v1`
-- Anthropic Messages endpoint: `http://100.74.55.86:4195/v1/messages`
+- Admin panel: <https://code.nothing.pink/dashboard>
+- OpenAI API base: `https://code.nothing.pink/v1`
 - Model: `openrouter/nemotron-3.5-lightning-free`
-- Inference key: existing private VPS file
-  `/home/agent/cliproxy-staging/secrets/client-api-key`.
-- Dashboard/management key: separate private VPS file
-  `/home/agent/cliproxy-staging/secrets/management.key`.
 
-Keys are not included in the release. Use a client on the same authorized
-Tailscale network and the inference key in its normal API-key setting. The T3
-usage hub uses the management API separately; connecting that hub alone does
-not configure model inference.
+The admin panel uses your existing Cloudflare Access personal-email policy.
+Its same-origin browser requests go through the existing protected `/admin/*`
+paths. The native backend validates the signed Access assertion; the browser
+sends and stores no management key. Direct native management clients retain
+key authentication. Ordinary inference clients still need their API key;
+Cloudflare admin login is not an inference credential.
 
-## Verified and remaining
+## Actual coverage
 
-The deployed mainline-based CLIProxyAPI8.0.49-tokligence.3 serves its pinned
-native dashboard. A single live free OpenRouter request passed streaming
-Messages translation and an inert tool proposal. The route has one key,
-retry0, automatic redirects disabled, provider fallback disabled and zero-price
-routing constraints. No tool was executed; live reasoning continuation is
-untested. Usage/rate limits of the upstream free service still apply.
+Coolify deployment `xbw4myxjpqnlobplmkfnrlss` finished successfully. Its native
+backend8.0.49-tokligence.4 and patched upstream1.27.0 panel passed origin health,
+model discovery, management/client auth separation, invalid-assertion denial
+and runtime single-owner checks. Both `/dashboard` and `/management.html` serve
+the exact tested panel. Public unauthenticated `/dashboard` redirects to Access;
+public unauthenticated `/v1/models` returns native401 Missing API key in the
+browser. A personal-email login and keyless panel opening await user confirmation:
+Google rejected the automated preview browser as insecure. This is not claimed
+as an observed successful real-user login.
 
-OpenCode's secondary OAuth has one owner here. Its first live request returned
-429; the credential remains disabled. The subsequent Console org-header and
-model-restriction fixes are deployed, but corrected live behavior is untested.
-Do not re-enable or retry it through the dashboard. The upstream management
-API-call utility can bypass disabled-credential dispatch checks; a narrow fix
-is in progress. Do not use management connectivity/verification/test actions
-as acceptance tests or quota recovery.
+The existing staging client key and old production client key remain admitted.
+Public Python urllib discovery from the VPS hit Cloudflare1010 Browser Integrity
+Check, even without auth; origin discovery with the native key succeeded.
+This is a distinct edge-client limitation, not a provider inference result.
 
-Cline's custom plugin has isolated host evidence, but is not live-configured.
-Mistral's existing key is available privately, but no free entitlement or live
-acceptance is claimed. Full production migration and general gateway feature
-parity are not part of this alpha's completed coverage.
+The free OpenRouter route previously passed one live streaming Messages request
+with a correct inert tool proposal. No tool was executed, and live reasoning
+continuation remains untested. No new inference was sent during this deployment.
+Retries, redirects, provider fallback and paid routing remain disabled for it.
+
+OpenCode remains disabled after its recorded429. Console org-header and model
+restriction fixes are present, but corrected live acceptance is still untested.
+The management API-call utility now refuses disabled credentials before token
+resolution or HTTP. Cline is not live-configured; no Mistral free entitlement or
+live acceptance is claimed. Full migration/parity remains unfinished.
 
 ## Operations
 
-Deployment root remains `/home/agent/cliproxy-staging`; retaining this path avoids
-unnecessary state/credential migration. The alpha release records the exact
-running backend/plugin/dashboard hashes, source revision, native model listing
-and health result. No new provider inference is needed for release admission.
-Previous backend/plugin rollback artifacts and all live reports/cooldowns stay
-in place. The alpha manifest is a release record, not a second configuration
-store; the native management API remains the configuration owner.
+Coolify app UUID: `iog8gk8g8o0s44840g4o4sso`.
+Deployment Git revision: `af2bd33` (Dockerfile/runtime ownership setup).
+Backend patch revision: `2a0bf688e085d9e62bac104a48dda149344bea72`.
+Native state remains `/home/agent/cliproxy-staging`, bind-mounted at that exact
+path. The former standalone4195 process is stopped; Coolify is the runtime
+owner. A lifetime descriptor lock prevents duplicate native containers.
+No OAuth database/token was copied or reseeded. Old production `/data` storage
+is unchanged and is not consumed by the new native process.
 
-OpenCode free-model compatibility is the first priority after this release.
-Defer additional providers and speculative parity features until that path is
-resolved or a precise external blocker is established.
+Private rollback/app configuration, tested artifact identities and deployment
+reports remain in that root. The native management API is the configuration
+owner; the release manifest is evidence rather than a second route store.
+Do not start another host runtime or re-enable quarantined OpenCode to test login.
+
+After the personal Cloudflare login check, OpenCode free-model compatibility
+returns to top priority. Additional providers and speculative parity work remain
+deferred.
