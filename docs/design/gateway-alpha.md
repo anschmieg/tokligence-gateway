@@ -168,3 +168,20 @@ FreeHub0.1.4 SHAcdab08acb6eac6367c6f646ef94770cf5ac01c882b5e2ca2e3711958fee2bb08
 Coolify deployment `m5v4iyyaaocrdorbbwjo5ejm` finished.
 
 Upstream attribution bug: [free-model-hub issue#1](https://github.com/Yousha-dev/free-model-hub/issues/1).
+
+
+## OpenCode acceptance preparation — November 2, 16:59 UTC
+
+Corrected two production configuration gaps: the OpenCode allowlist now includes
+`glm-5.3-flash-free` alongside `beam-free`, and its native401 request policy stops
+and cools the credential instead of permitting automatic refresh/replay. Both
+changes used scoped native If-Match writes; all other settings, quarantined
+credential files and previous evidence were verified unchanged.
+
+Read-only admission confirms that both saved OAuth access tokens are currently
+valid and match the configured Console organization. Both credentials remain
+disabled, and the durable investigation hold remains through November3
+07:42:08.980115UTC or newer. That timestamp is the local guard's conservative
+24-hour fallback after the prior429, not a provider-confirmed reset. No new
+inference, refresh or provider HTTP was sent. This preparation does not establish
+live free-model acceptance or permission for non-OpenCode clients.
