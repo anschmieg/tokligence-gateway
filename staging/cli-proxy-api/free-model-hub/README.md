@@ -98,3 +98,34 @@ Rollback restores the previous backend and removes/disables only this plugin;
 never restore an old OAuth owner or enable keepalives as part of rollback.
 
 See `SOURCE-PINS.md` for upstream attribution and `integration/SEAMS.md` for routes.
+
+## Truthful discovery and additive canonical aliases
+
+The0.1.5 adoption preserves upstream supported parameters and input/output
+modalities. Missing context/output limits remain0 (unknown) instead of fabricated
+1M/16K limits. Generic models have an unspecified `model` family rather than an
+unproven chat-only classification. Tool capability is a request parameter;
+Gemini generation methods use `generateContent`. Ownership is filled from the
+actual vendor at publication, including non-generic vendors.
+
+Aliases now publish both the alias and original qualified ID. Operator aliases
+retain precedence. Reviewed defaults are in `patches/internal/admin/canonical_aliases.go`;
+the initial mapping is Kilo's exact NVIDIA Lightning free route. Reverse lookup
+is vendor-scoped and requires a positively cached source model. Native OpenRouter
+gets the same alias through its existing native model configuration. No extra
+proxy, scheduler, pool, account or refresh owner is introduced.
+
+Canonical IDs advertise the intersection of registered native provider contracts.
+Missing limits stay unknown; clients needing route-specific features can use the
+qualified ID. Unverified branding equivalence, dates, quantization, thinking
+variants and virtual routers are not automatically merged. The other audit
+candidate groups remain review candidates, not approved identities.
+
+Prepare FreeHub with the existing preparation command. Prepare the host from its
+previous native.6 patched tree using `../prepare_model_catalog.py --source ...
+--output <new-directory>`. The helper verifies modified source-file hashes before
+applying changes. Focused race tests cover metadata and source absence, alias
+round-trips, foreign-vendor isolation, operator precedence, shared capability
+intersection and Codex template suppression. Older upstream console tests that
+assume mandatory browser keys conflict with the previously deployed keyless
+Access UI; they are not evidence of a new catalog regression.

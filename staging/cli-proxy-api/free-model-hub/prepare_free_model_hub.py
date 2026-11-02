@@ -42,12 +42,16 @@ SHARED_SOURCES = [
     "/tmp/cliproxy-cloudflare-alpha-source",   # deployed-host patch source (seam reference only)
 ]
 
+CATALOG_FILES = ['internal/core/helpers.go', 'internal/core/protocol.go', 'internal/vendors/openaicompat/models.go', 'internal/vendors/openaicompat/adapter.go', 'internal/admin/catalog.go', 'internal/admin/canonical_aliases.go', 'internal/admin/canonical_aliases_test.go', 'internal/vendors/openaicompat/catalog_metadata_test.go']
+
 # --- Anchored edits -------------------------------------------------------
 # Every entry is applied with an exact expected occurrence count. The script
 # fails closed when an anchor is missing or ambiguous; the staged output is
 # never rewritten in place afterwards (re-prepare deletes only the output).
 
 EDITS = [
+    {"id":"generation-method-not-tool-capability-test","file":"internal/core/protocol_test.go", "find":'!slices.Contains(withTools.SupportedGenerationMethods, "tool_calls")', "replace":'!slices.Contains(withTools.SupportedGenerationMethods, "generateContent")',"why":"Gemini operation and tool parameters are separate declarations."},
+    {"id":"cached-generation-method-test","file":"internal/admin/catalog_test.go", "find":'!slices.Contains(info.SupportedGenerationMethods, "tool_calls")', "replace":'!slices.Contains(info.SupportedGenerationMethods, "generateContent")',"why":"Rehydrated tools are parameters, not generation methods."},
     {"id":"leading-vendor-before-account-label","file":"internal/core/registry.go",
      "why":"Saved Cline filename contained a GitHub label; explicit vendor prefixes must beat embedded label matches.",
      "find":"\t\tfor _, id := range ids {\n\t\t\tif FileNameMatchesConvention(base, id) {",
@@ -664,6 +668,13 @@ def main() -> None:
         shutil.copy2(patch_source, target)
         manifest["new_files"][relative] = sha256(patch_source)
         print(f"file added: {relative}")
+
+    # Reviewed complete-file overlays preserve upstream conventions while correcting
+    # metadata and additive alias publication. Applied after prior adoption edits.
+    for relative in CATALOG_FILES:
+        source_file = PATCH_DIR / relative
+        shutil.copyfile(source_file, output / relative)
+        manifest["new_files"][relative] = sha256(source_file)
 
     for path in sorted(output.rglob("*")):
         if path.is_dir():

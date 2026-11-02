@@ -67,3 +67,22 @@ python3 staging/cli-proxy-api/free-model-hub/testing/isolated_host_smoke.py \
   --output /tmp/freehub-native-host-smoke-NEW
 cat /tmp/freehub-native-host-smoke-NEW/verdict.json
 ```
+
+Canonical routing + discovery regression (network-isolated, fake credentials):
+
+```sh
+python3 staging/cli-proxy-api/free-model-hub/testing/isolated_host_smoke.py \
+  --binary /tmp/cliproxy-model-catalog-binary \
+  --plugin /tmp/freehub-catalog-routing-b.so \
+  --opencode-plugin /tmp/opencode-native-parity-031.so \
+  --canonical-routing --output /tmp/freehub-canonical-NEW
+```
+
+This profile makes exactly three local mock POSTs: two independent canonical
+Lightning requests select FreeHub Kilo and native OpenRouter; one qualified
+request stays on Kilo. Both upstream bodies retain the vendor's exact model ID.
+It checks additive publication, two native providers, unknown shared context
+omitted, no startup inference, no external networking and preserved disabled
+OpenCode. Passing evidence: `/tmp/freehub-canonical-smoke-b/verdict.json`.
+The first run passed routing gates but failed the fixture's old two-request
+shutdown counter; the counter now accounts for the three-request profile.
