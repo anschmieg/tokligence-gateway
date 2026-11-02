@@ -282,7 +282,7 @@ def write_backend_config(work, profile, session_state_path):
         "routing": {"retry": {"request-retry": 0, "max-retry-credentials": 1},
             "cooldown": {"save-cooldown-status": True}},
         "plugins": {"enabled": True, "dir": str(plugins_dir), "configs": {
-            "opencode": {"enabled": True,
+            "opencode": {"enabled": True, "preserve_unsigned_thinking": True,
                 "inference_base_url": "http://127.0.0.1:%d" % MOCK_PORT,
                 "models": [MODEL_ID], "app_name": "cli", "version": "2.0.32",
                 "channel": "latest", "project_id": "global",

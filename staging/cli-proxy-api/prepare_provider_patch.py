@@ -30,6 +30,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--unsigned-thinking-compat", action="store_true", help="Opt-in host seam for existing Claude/OpenAI compatibility translator")
     args = parser.parse_args()
     source = args.source.resolve(strict=True)
     output = args.output.absolute()
@@ -44,6 +45,16 @@ def main():
     additions = {}
     for name in ("provider_dispatch_budget.go", "provider_dispatch_budget_test.go"):
         additions[name] = (artifacts / name).read_bytes()
+    adapter_rel = "internal/pluginhost/adapters_executors.go"
+    adapter_sha = "762e5110cf796765a8db0abf7780536fc309ad422178dc38cc4a492e0adb355c"
+    adapter_raw = None
+    adapter_anchor = "translated := sdktranslator.TranslateRequestEnvelope(context.Background(), inputRequested, inputFormat, sdktranslator.RequestEnvelope{"
+    if args.unsigned_thinking_compat:
+        adapter_raw = subprocess.check_output(["git", "-C", str(source), "show", f"{PIN}:{adapter_rel}"])
+        if digest(adapter_raw) != adapter_sha or adapter_raw.decode().count(adapter_anchor) != 1:
+            parser.error("pinned executor adapter mismatch")
+        for name in ("plugin_thinking_compat.go", "plugin_thinking_compat_test.go"):
+            additions[name] = (artifacts / name).read_bytes()
     with tempfile.TemporaryFile() as archive:
         subprocess.run(["git", "-C", str(source), "archive", PIN], stdout=archive, check=True)
         archive.seek(0)
@@ -60,12 +71,17 @@ def main():
         if target.exists():
             raise RuntimeError("patch output unexpectedly exists")
         target.write_bytes(body)
+    if adapter_raw is not None:
+        adapter_patched = adapter_raw.decode().replace(adapter_anchor, "translated := a.translateConfiguredPluginRequest(context.Background(), inputRequested, inputFormat, sdktranslator.RequestEnvelope{").encode()
+        (output / adapter_rel).write_bytes(adapter_patched)
     report = {
         "base_commit": PIN,
         "input_http_sha256": HTTP_SHA,
         "patched_http_sha256": digest(patched),
         "additions": {name: digest(body) for name, body in additions.items()},
         "providers": ["opencode", "cline"],
+        "unsigned_thinking_compat": args.unsigned_thinking_compat,
+        "patched_adapter_sha256": digest(adapter_patched) if adapter_raw is not None else None,
         "built": False,
         "deployed": False,
     }

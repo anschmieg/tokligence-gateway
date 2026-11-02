@@ -75,3 +75,9 @@ two basic calls plus tool call/continuation); no real tool execution or file
 access. Reasoning replay remains explicitly untested in this mode.
 `/tmp/opencode-host-tools-20261101-a` passed the round trip; its persisted
 registry also contains exactly one idle entry with zero leases.
+
+`/tmp/opencode-host-reasoning-compat-20261102-a`: PASS full continuation using
+8.0.49-tokligence.2 with explicit per-plugin preserve_unsigned_thinking. Actual
+unsigned returned thinking survives the next provider request as reasoning_content;
+three mock dispatches, no forged signature. This replaces c/d's known failing
+host translation path; it is synthetic replay evidence, not live acceptance.

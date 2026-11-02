@@ -30,3 +30,17 @@ Rollback: restore the verified stock8.0.49 binary using the owned lifecycle afte
 stopping only its recorded process. Keep custom provider credentials inactive
 until a one-dispatch policy is available. Do not overwrite native UI config.
 Retire this patch when mainline offers an equivalent plugin request policy.
+
+## Explicit unsigned-thinking compatibility for plugin endpoints
+
+Prepare with `--unsigned-thinking-compat` to add the narrow host seam in
+`plugin_thinking_compat.go`. Its default is off. Only Claude-to-OpenAI plugin
+translation with `plugins.configs.<plugin-id>.preserve_unsigned_thinking: true`
+selects upstream's existing compatibility converter and normalizers. No provider
+name list, synthetic signature, second codec or API-key credential is needed.
+Other plugins/formats use the original envelope path. Invalid policy values fail
+locally. This is a maintained host exception because the pinned plugin model
+ABI cannot publish IsCompat and the ordinary API-key setting does not bind this
+OAuth plugin route. Retirement: remove once mainline exposes this policy to
+plugin models/executors. Source input and adapter digest are pinned by the
+preparation tool; test only the custom seam and actual failed continuation.
