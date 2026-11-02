@@ -24,7 +24,15 @@ def main():
    value=(root/'patches'/folder/name).read_bytes()
    if (d/name).exists() and (d/name).read_bytes()!=value:p.error('Existing helper differs')
    changes[name]=value
+ route = a.prepared_source/'internal/api/server_routes.go'
+ original_route = subprocess.check_output(['git','-C',str(a.upstream),'show',PIN+':internal/api/server_routes.go'])
+ if sha(original_route) != 'a22703ae5533111f51f03cb037ca1f15a4ced10ebd95d1fa06159245c36fb5bb':p.error('Pinned routes input differs')
+ anchor = '\ts.engine.GET("/management.html", s.serveManagementControlPanel)'
+ if original_route.decode().count(anchor) != 1:p.error('Pinned panel route differs')
+ desired_route = original_route.decode().replace(anchor, anchor+'\n\ts.engine.GET("/dashboard", s.serveManagementControlPanel)').encode()
+ if route.read_bytes() not in [original_route,desired_route]:p.error('Existing routes differ')
  for name,value in changes.items():(d/name).write_bytes(value)
- manifest={'base_commit':PIN,'input_hashes':INPUTS,'outputs':{name:sha(data) for name,data in changes.items()},'auth':'verified Cloudflare assertion or existing native management key; inference unchanged','credential_quarantine':'disabled credentials refused before management upstream HTTP'}
+ route.write_bytes(desired_route)
+ manifest={'base_commit':PIN,'input_hashes':INPUTS,'routes_input_sha256':sha(original_route),'routes_output_sha256':sha(desired_route),'outputs':{name:sha(data) for name,data in changes.items()},'auth':'verified Cloudflare assertion or existing native management key; inference unchanged','credential_quarantine':'disabled credentials refused before management upstream HTTP'}
  (a.prepared_source/'management-auth-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n');print(json.dumps({'prepared':str(a.prepared_source),'files':len(changes),'deployed':False}))
 if __name__=='__main__':main()
