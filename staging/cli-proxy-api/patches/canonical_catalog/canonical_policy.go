@@ -332,7 +332,7 @@ func (h *BaseAPIHandler) canonicalPlan(ctx context.Context, model string, raw []
 	}
 	policy := h.AuthManager.CanonicalRoutingPolicy()
 	p := canonicalPlan{Requested: model, Base: base, Suffix: suffix, Policy: "free-then-paid", Limit: policy.AttemptLimit(), Requirements: r}
-	p.Stages = []canonicalStage{{base + ":free", 0, false}, {base + ":free", 1, false}}
+	p.Stages = []canonicalStage{{base + ":free", 0, false}}
 	if free {
 		p.Policy = "free-only"
 		var alternatives []string
@@ -340,15 +340,12 @@ func (h *BaseAPIHandler) canonicalPlan(ctx context.Context, model string, raw []
 			alternatives = canonicalRankedFallbacks(base, r, policy)
 		}
 		for _, alt := range alternatives {
-			p.Stages = append(p.Stages, canonicalStage{alt + ":free", 0, true}, canonicalStage{alt + ":free", 1, true})
+			p.Stages = append(p.Stages, canonicalStage{alt + ":free", 0, true})
 		}
 	} else {
 		p.Stages = append(p.Stages, canonicalStage{base + ":paid", 2, false}, canonicalStage{base + ":paid", 3, false})
 	}
 	return p, true, nil
-}
-func canonicalPreferred(info *registry.ModelInfo) bool {
-	return strings.EqualFold(info.OwnedBy, "kilo") || strings.EqualFold(info.OwnedBy, "openrouter")
 }
 func canonicalPair(auth string, info *registry.ModelInfo) string {
 	source := info.MetadataModelID
@@ -364,8 +361,9 @@ func canonicalExclusions(stage canonicalStage, r canonicalRequirements, tried ma
 	excluded := []string{}
 	for auth, info := range registry.GetGlobalRegistry().CanonicalRouteInfos(stage.Model) {
 		skip := tried[canonicalPair(auth, info)] || (strings.HasSuffix(stage.Model, ":free") && quota[auth])
-		preferred := canonicalPreferred(info)
-		if stage.Tier == 0 && !preferred || stage.Tier == 1 && preferred || stage.Tier == 2 && strings.EqualFold(info.OwnedBy, "openrouter") || stage.Tier == 3 && !strings.EqualFold(info.OwnedBy, "openrouter") {
+		// All free providers share native selection. Only paid OpenRouter has
+		// an explicit provider-specific last-resort tier.
+		if stage.Tier == 2 && strings.EqualFold(info.OwnedBy, "openrouter") || stage.Tier == 3 && !strings.EqualFold(info.OwnedBy, "openrouter") {
 			skip = true
 		}
 		if stage.Alternative && !canonicalCompatible(info, r) {

@@ -41,17 +41,18 @@ def planned_config(raw):
  if found!=1:raise RuntimeError('shared Gemini group is ambiguous')
  return yaml.serialize(root).encode()
 def main():
- os.umask(0o077);p=argparse.ArgumentParser();p.add_argument('--native-sha',required=True);p.add_argument('--source',required=True);p.add_argument('--check-only',action='store_true');p.add_argument('--cooldown-fix',action='store_true');p.add_argument('--hardening',action='store_true');p.add_argument('--plugin-sha');a=p.parse_args()
+ os.umask(0o077);p=argparse.ArgumentParser();p.add_argument('--native-sha',required=True);p.add_argument('--source',required=True);p.add_argument('--check-only',action='store_true');p.add_argument('--cooldown-fix',action='store_true');p.add_argument('--hardening',action='store_true');p.add_argument('--plugin-sha');p.add_argument('--free-peers',action='store_true');a=p.parse_args()
  if a.hardening and not a.plugin_sha:p.error('--hardening requires --plugin-sha')
- if a.hardening and a.cooldown_fix:p.error('select one upgrade')
+ if sum((a.hardening,a.cooldown_fix,a.free_peers))>1:p.error('select one upgrade')
  token=json.load(sys.stdin)['token'];key=(R/'secrets/management.key').read_text().strip()
  lock=(R/'state/freehub-deployment.lock').open('a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
- version='v3' if a.hardening else 'v2' if a.cooldown_fix else 'v1'
- preserve_config=a.hardening or a.cooldown_fix
- journal=R/('canonical-policy-deployment-'+version+'.json');target=R/'bin/cli-proxy-api';pending=R/('canonical-policy-hardening-native.pending' if a.hardening else 'canonical-policy-cooldown-native.pending' if a.cooldown_fix else 'canonical-policy-native.pending');backup=R/('bin/cli-proxy-api-before-canonical-policy-'+version);conf=R/'config/config.yaml';config_backup=R/('secrets/config-before-canonical-policy-'+version+'.yaml')
+ version='v4' if a.free_peers else 'v3' if a.hardening else 'v2' if a.cooldown_fix else 'v1'
+ preserve_config=a.hardening or a.cooldown_fix or a.free_peers
+ journal=R/('canonical-policy-deployment-'+version+'.json');target=R/'bin/cli-proxy-api';pending=R/('canonical-policy-free-peers-native.pending' if a.free_peers else 'canonical-policy-hardening-native.pending' if a.hardening else 'canonical-policy-cooldown-native.pending' if a.cooldown_fix else 'canonical-policy-native.pending');backup=R/('bin/cli-proxy-api-before-canonical-policy-'+version);conf=R/'config/config.yaml';config_backup=R/('secrets/config-before-canonical-policy-'+version+'.yaml')
  if any(x.exists() for x in [journal,backup,config_backup]):raise RuntimeError('existing operation; inspect, never replay')
  old='55c14635d9a60d2264300ea0bd3c7a26a36c45272a3cd1ae1bdb5fb0384290e9' if a.cooldown_fix else OLD
  if a.hardening:old='729572b5532f2f3ecf27c673fccc164fb138cadbbd49a84e2c2a17013dc1f569'
+ if a.free_peers:old='ffdcdac567f4871832ea75836bcb0aa70fc03f18e17758eb5c7764b07f945c4e'
  plugin=R/'plugins/free-model-hub.so';plugin_pending=R/'canonical-policy-hardening-plugin.pending';plugin_backup=R/'bin/free-model-hub-before-canonical-hardening.so'
  if a.hardening and (plugin_backup.exists() or sha(plugin)!='51fc4af90894999977ceb2c3f8fd0cdaf1302e669743021194d2c1b44dc093c9' or sha(plugin_pending)!=a.plugin_sha):raise RuntimeError('plugin artifact or existing backup differs')
  if sha(target)!=old or sha(pending)!=a.native_sha:raise RuntimeError('native artifact differs')

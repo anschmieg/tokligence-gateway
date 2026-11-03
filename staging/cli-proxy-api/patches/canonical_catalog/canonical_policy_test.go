@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"reflect"
+	"sort"
 	"sync"
 	"testing"
 
@@ -96,7 +97,11 @@ func TestCanonicalPlainFreeThenSameModelPaid(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"cf-kilo/upstream-glm-5.3-flash", "cf-other/upstream-glm-5.3-flash", "cf-paid/upstream-glm-5.3-flash", "cf-or-paid/upstream-glm-5.3-flash"}
-	if !reflect.DeepEqual(e.calls, want) {
+	got := append([]string(nil), e.calls...)
+	if len(got) >= 2 {
+		sort.Strings(got[:2])
+	}
+	if !reflect.DeepEqual(got, want) {
 		t.Fatal(e.calls)
 	}
 	if headers.Get("X-Gateway-Provider") != "openrouter" {
@@ -119,7 +124,7 @@ func TestCanonicalFreeNeverPaidAndSimilarFallback(t *testing.T) {
 func TestCanonicalAuthenticationAndUncertainErrorsNeverFallback(t *testing.T) {
 	for _, status := range []int{400, 401, 403, 502, 504} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
-			h, e := canonicalFixture(t, map[string]int{"cf-kilo": status}, true)
+			h, e := canonicalFixture(t, map[string]int{"cf-kilo": status, "cf-other": status}, true)
 			_, _, err := h.ExecuteWithAuthManager(context.Background(), "openai", "glm-5.3-flash:free", []byte(`{"model":"glm-5.3-flash:free"}`), "")
 			if err == nil || len(e.calls) != 1 || e.refresh != 0 {
 				t.Fatal(err, e.calls, e.refresh)
@@ -161,6 +166,26 @@ func TestCanonicalFallbackCapabilitiesFailClosed(t *testing.T) {
 		r, err := canonicalRequestRequirements([]byte(body))
 		if err != nil || canonicalCompatible(info, r) {
 			t.Fatal(body, err)
+		}
+	}
+}
+
+// Native round robin must see both free owners on every new request, rather
+// than repeatedly restarting in a privileged provider tier.
+func TestCanonicalFreeProvidersAreNativePeers(t *testing.T) {
+	h, e := canonicalFixture(t, nil, false)
+	for i := 0; i < 2; i++ {
+		_, _, err := h.ExecuteWithAuthManager(context.Background(), "openai", "glm-5.3-flash:free", []byte(`{"model":"glm-5.3-flash:free"}`), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(e.calls) != 2 || e.calls[0] == e.calls[1] {
+		t.Fatalf("native peers did not rotate: %v", e.calls)
+	}
+	for _, call := range e.calls {
+		if call != "cf-kilo/upstream-glm-5.3-flash" && call != "cf-other/upstream-glm-5.3-flash" {
+			t.Fatal(call)
 		}
 	}
 }
