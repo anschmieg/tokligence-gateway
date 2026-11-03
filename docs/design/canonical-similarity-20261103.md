@@ -1,5 +1,10 @@
 # Context-aware canonical free fallback similarity
 
+**Review status:** [adversarial review](canonical-similarity-adversarial-review-20261103.md)
+reproduced six gaps in the deployed implementation. The contract below is the
+intended behavior; opaque-state detection and final capability fencing are not
+fully satisfied. No fixes or runtime changes were made in that review.
+
 The request's exact model and all eligible free providers are still attempted
 first. This ranking concerns the alternate models for `:free` only; plain IDs
 still fall back to paid routes for the same model, and provider overrides retain

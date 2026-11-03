@@ -1,0 +1,2 @@
+ok  	github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers	1.251s
+ok  	github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth	1.254s

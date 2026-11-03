@@ -1,0 +1,18 @@
+package registry
+
+import (
+ "testing"
+ "time"
+)
+
+func TestReviewSimilarityExpiredQuotaBooleanDiffersFromAvailability(t *testing.T) {
+ r:=GetGlobalRegistry();id:="review-expired-quota-client";model:="review-expired-quota:free"
+ r.RegisterClient(id,"fixture",[]*ModelInfo{{ID:model,CanonicalID:"review-expired-quota",CanonicalPolicy:"free",CanonicalFree:true}})
+ t.Cleanup(func(){r.UnregisterClient(id)})
+ // Time-travel only in the scratch test, no sleep/real cooldown change.
+ old:=time.Now().Add(-2*modelQuotaExceededWindow)
+ r.mutex.Lock();r.models[model].QuotaExceededClients[id]=&old
+ available,_:=modelRegistrationAvailability(r.models[model],time.Now());r.mutex.Unlock()
+ held:=r.IsModelQuotaExceededForClient(id,model)
+ if available && held {t.Fatalf("expired native quota still rejected by ranker's membership check: native_available=%v ranker_held=%v quota_age=%v window=%v",available,held,time.Since(old),modelQuotaExceededWindow)}
+}

@@ -1,0 +1,16 @@
+{
+  "reviewed_head": "110a8aa8899acb036eea4e0a3ca378ee9d3181bd",
+  "implementation_commit": "22ba749",
+  "deployed_native_sha256": "4683b3ef0e118f3a6db263d8cecfbf744a8f306a281220fb711622a7fa0a659a",
+  "owned_patch_sha256": {
+    "canonical_history.go": "9adb58730fb58566ce40086cedef646c1a1696f0c0b8e2c33458b46cf1c30448",
+    "canonical_similarity.go": "abe927c65379eb18f46f297cdda6aac64ff755b2b08a49e98b0f4cef584f79a7",
+    "canonical_policy.go": "9abedc8ddda693796c0b73036a4190b97b09f81a9bf2589c9e9c651026d6674a",
+    "canonical_policy_execution.go": "ea67f810848bfde1a75ae16a73d97c9b256d38734347458f5bbe03f0d19e1056",
+    "routing_types.go": "be6f0f290bf0a91ba9f7b2f1a97ad9492809c944b83c412a9beba38d112df98f"
+  },
+  "counterexample_assertions_failed": 6,
+  "controls_passed": true,
+  "production_changes": false,
+  "provider_inference_requests": 0
+}
