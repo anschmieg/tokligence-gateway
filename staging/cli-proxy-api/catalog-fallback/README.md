@@ -27,10 +27,11 @@ Read [ARCHITECTURE.md](ARCHITECTURE.md) for the decision rationale and boundarie
 
 ## Policy
 
-Exact-model free routes are still tried first. Plain canonical IDs retain their
-same-model free-to-paid behavior, with paid OpenRouter last. This extension only
-assembles cross-model alternatives for `:free` and named profile URLs; exact
-overrides remain unchanged. Profiles keep the original requested model first,
+Exact-model free routes are still tried first. Normal canonical IDs are model-bound, with default SUB permission. Explicit PAID
+permits same-model PAYGO, with paid OpenRouter last. Cross-model alternatives
+belong only to profile URLs or explicit virtual profile aliases. `:free` narrows
+permission to verified FREE routes. Exact overrides remain model/provider bound
+and are subject to session billing permission. Profiles keep the original requested model first,
 then use similarity ranking anchored to that original model. Native credential
 priority/weighting acts within each model, never across the alternate-model chain.
 All eligible free providers use native credential selection, without a brand bonus.
@@ -220,3 +221,15 @@ can therefore outrank a model with strong evidence of a severe regression.
 Strict comparable mode and explicit loss bounds retain their stronger evidence
 requirements. Neither the score nor the live cache supplies benchmarks absent
 from the upstream data; MiniMax's missing records remain missing.
+
+
+## Session billing revision
+
+[SESSION-BILLING.md](SESSION-BILLING.md) defines FREE/SUB/PAID, default SUB,
+explicit idempotent session controls, frozen per-request permissions, selected
+account/source entitlement telemetry, native aliases and client integration assets.
+Archived .15 fixture/deployment evidence is historical. The .16 session rollout
+has separate session-billing evidence and a unique non-replayable operation journal.
+Use `rebuild.py --upstream <pinned-git-clone> --output <NEW-root>` to reconstruct
+the complete checked source chain; never weaken source pins after temporary
+build trees are cleared. The backend is `<NEW-root>/backend`.

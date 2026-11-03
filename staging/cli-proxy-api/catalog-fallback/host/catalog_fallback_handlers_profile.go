@@ -28,6 +28,7 @@ type profileView struct {
 	Policy   registry.CanonicalRoutingConfig
 	Evidence *catalogfallback.Snapshot
 	Fresh    bool
+	Billing  registry.BillingPolicy
 }
 
 func (h *BaseAPIHandler) newProfileView(name string) (profileView, bool) {
@@ -41,7 +42,7 @@ func (h *BaseAPIHandler) newProfileView(name string) (profileView, bool) {
 		age = 7 * 24 * time.Hour
 	}
 	snapshot, fresh := catalogfallback.DefaultStore.AdvisorySnapshot(policy.EvidenceCatalog, time.Now(), age)
-	return profileView{profile, policy, snapshot, fresh}, true
+	return profileView{profile, policy, snapshot, fresh, registry.BillingSub}, true
 }
 func (h *BaseAPIHandler) profileRouteSet(view profileView, r canonicalRequirements, preferred ...string) []profileRoute {
 	now := time.Now()
@@ -52,16 +53,17 @@ func (h *BaseAPIHandler) profileRouteSet(view profileView, r canonicalRequiremen
 		if model.CanonicalPolicy != "canonical" || model.CanonicalID != model.ID {
 			continue
 		}
-		selector := model.ID + ":free"
-		for auth, info := range registry.GetGlobalRegistry().CanonicalRouteInfos(selector) {
-			if !h.AuthManager.CanonicalFallbackAvailable(auth, selector, now) || !canonicalCompatible(info, r) {
-				continue
+		for _, selector := range []string{model.ID + ":free", model.ID + ":paid"} {
+			for auth, info := range registry.GetGlobalRegistry().CanonicalRouteInfos(selector) {
+				if !h.AuthManager.CanonicalBillingAvailable(auth, selector, now, view.Billing) || !canonicalBillingCompatible(info, r) {
+					continue
+				}
+				isPreferred := len(preferred) > 0 && preferred[0] == model.ID
+				if !isPreferred && !snapshot.HasTaskEvidence(info.OwnedBy, canonicalEvidenceSource(info), profile.Task) {
+					continue
+				}
+				routes = append(routes, profileRoute{model.ID, auth, h.AuthManager.CanonicalPriority(auth), registry.NewCanonicalDispatchBinding(auth, selector, info), info})
 			}
-			isPreferred := len(preferred) > 0 && preferred[0] == model.ID
-			if !isPreferred && !snapshot.HasTaskEvidence(info.OwnedBy, canonicalEvidenceSource(info), profile.Task) {
-				continue
-			}
-			routes = append(routes, profileRoute{model.ID, auth, h.AuthManager.CanonicalPriority(auth), registry.NewCanonicalDispatchBinding(auth, selector, info), info})
 		}
 	}
 	return routes
@@ -79,6 +81,7 @@ func (h *BaseAPIHandler) ProfileModels(name string) (map[string]any, int) {
 		return map[string]any{"error": "unknown model profile"}, 404
 	}
 	profile := view.Profile
+	view.Billing = registry.BillingPaid // task curation is independent of session billing permission
 	routes := h.profileRouteSet(view, req)
 	priorities := map[string]int{}
 	exists := map[string]bool{}
@@ -111,15 +114,16 @@ func (h *BaseAPIHandler) ProfileModels(name string) (map[string]any, int) {
 		row["object"] = "model"
 		row["profile"] = name
 		row["model_role"] = "hint"
-		row["cost_policy"] = "free-only"
+		row["cost_policy"] = "session"
+		row["default_billing_policy"] = "SUB"
 		row["task"] = string(profile.Task)
-		row["selection_reason"] = "verified task evidence and eligible no-additional-charge route"
+		row["selection_reason"] = "verified task evidence and currently available route"
 		row["credential_priority"] = priorities[id]
-		row["routing_policy"] = "preferred-then-similar-free-only"
+		row["routing_policy"] = "preferred-then-similar-session-billing"
 		delete(row, "free_only_id") // syntax is contractual, not another availability proof
 		data = append(data, row)
 	}
-	return map[string]any{"object": "list", "data": data, "profile": name, "task": string(profile.Task), "cost_policy": "free-only", "policy_version": "task-profile-v1", "full_catalog": "/v1/models", "model_role": "hint", "evidence_stale": !view.Fresh}, 200
+	return map[string]any{"object": "list", "data": data, "profile": name, "task": string(profile.Task), "cost_policy": "session", "default_billing_policy": "SUB", "policy_version": "task-profile-v1", "full_catalog": "/v1/models", "model_role": "hint", "preferred_model": profile.PreferredModel, "evidence_stale": !view.Fresh}, 200
 }
 func (h *BaseAPIHandler) profileCanonicalPlan(ctx context.Context, name, model string, raw []byte, opts modelExecutionOptions) (canonicalPlan, bool, *interfaces.ErrorMessage) {
 	fail := func(status int, message string) (canonicalPlan, bool, *interfaces.ErrorMessage) {
@@ -132,7 +136,8 @@ func (h *BaseAPIHandler) profileCanonicalPlan(ctx context.Context, name, model s
 	if err != nil {
 		return fail(400, "invalid or ambiguous profile request")
 	}
-	if r.UnverifiedCostFeatures {
+	policySnapshot := registry.RequestBillingPolicy(ctx, name, strings.HasSuffix(thinking.ParseSuffix(model).ModelName, ":free"))
+	if policySnapshot.Policy != registry.BillingPaid && r.UnverifiedCostFeatures {
 		return fail(400, "profile cannot admit unverified hosted-tool, premium-tier or upstream-routing charges")
 	}
 	// Thinking suffix is applied natively too; preserve the exact requested mode.
@@ -147,19 +152,45 @@ func (h *BaseAPIHandler) profileCanonicalPlan(ctx context.Context, name, model s
 		return fail(404, "unknown model profile")
 	}
 	profile := view.Profile
+	if profile.CostPolicy == "free-only" && policySnapshot.Policy == registry.BillingPaid {
+		return fail(403, "this profile explicitly prohibits PAYGO")
+	}
+	view.Billing = policySnapshot.Policy
 	policy := view.Policy
-	originalOpaque := r.OpaqueState
+	virtual := hint == name && registry.GetGlobalRegistry().GetModelInfo(hint, "") == nil
+	if virtual && (r.OpaqueState || registry.RequiresBoundModel(ctx)) {
+		return fail(409, "opaque state requires an explicit model preference")
+	}
+	if virtual && profile.PreferredModel != "" {
+		hint = profile.PreferredModel
+	}
+	originalOpaque := r.OpaqueState || registry.RequiresBoundModel(ctx)
 	r.OpaqueState = false // only used to admit the exact hint below; never discarded from payload
 	routes := h.profileRouteSet(view, r, hint)
 	if len(routes) == 0 {
-		return fail(503, "no currently eligible no-charge models with verified profile evidence")
+		return fail(503, "no currently eligible models satisfy profile and billing policy")
 	}
 	if r.Tools {
 		r.Task = catalogfallback.Agent
 	} else {
 		r.Task = profile.Task
 	}
-	p := canonicalPlan{Requested: model, Base: hint, Policy: "free-only", Profile: name, Limit: policy.AttemptLimit(), Requirements: r}
+	if hint == name && registry.GetGlobalRegistry().GetModelInfo(hint, "") == nil {
+		if originalOpaque {
+			return fail(409, "opaque state requires an explicit model preference")
+		}
+		sort.SliceStable(routes, func(i, j int) bool {
+			if routes[i].Priority != routes[j].Priority {
+				return routes[i].Priority > routes[j].Priority
+			}
+			return routes[i].Model < routes[j].Model
+		})
+		hint = routes[0].Model
+	}
+	if t := registry.RoutingTraceFromContext(ctx); t != nil {
+		t.Configure(name, model, policySnapshot, strings.HasSuffix(parsed.ModelName, ":free"))
+	}
+	p := canonicalPlan{Requested: model, Base: hint, Policy: string(policySnapshot.Policy), Billing: policySnapshot.Policy, Profile: name, Limit: policy.AttemptLimit(), Requirements: r}
 	if parsed.HasSuffix {
 		p.Suffix = strings.TrimPrefix(model, parsed.ModelName)
 	}
@@ -209,19 +240,18 @@ func (h *BaseAPIHandler) profileCanonicalPlan(ctx context.Context, name, model s
 	// original preference. Native priority/weights operate WITHIN each model,
 	// never promote a different model or cycle a fallback pool round-robin.
 	for _, id := range order {
-		allowed := map[string]bool{}
-		bindings := map[string]registry.CanonicalDispatchBinding{}
+		planned := map[string]registry.CanonicalDispatchBinding{}
 		for _, route := range byModel[id] {
-			allowed[route.Auth] = true
-			bindings[route.Auth] = route.Binding
+			planned[route.Auth+"\x00"+route.Binding.Route] = route.Binding
 		}
-		if len(allowed) > 0 {
-			var evidence *canonicalComparison
+		stages := h.billingStages(ctx, id, []string{id + ":free", id + ":paid"}, r, policySnapshot.Policy, id != hint, planned)
+		for i := range stages {
 			if comparison, ok := comparisons[id]; ok {
-				evidence = &comparison
+				c := comparison
+				stages[i].Evidence = &c
 			}
-			p.Stages = append(p.Stages, canonicalStage{Model: id + ":free", Alternative: id != hint, Allowed: allowed, PlannedBindings: bindings, Evidence: evidence})
 		}
+		p.Stages = append(p.Stages, stages...)
 	}
 	p.Requirements.OpaqueState = originalOpaque
 	return p, true, nil

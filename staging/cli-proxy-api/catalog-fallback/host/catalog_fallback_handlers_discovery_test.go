@@ -63,7 +63,7 @@ func TestProfileAnthropicDiscoveryKeepsReversibleAliases(t *testing.T) {
 		if canonical != "glm-4.7-flash" && canonical != "glm-5.3-flash" {
 			t.Fatal("irreversible alias", r)
 		}
-		if r["routing_policy"] != "preferred-then-similar-free-only" {
+		if r["routing_policy"] != "preferred-then-similar-session-billing" {
 			t.Fatal(r)
 		}
 	}
@@ -81,7 +81,27 @@ func TestProfileCannotBeSelectedByForgedHeaderOnFullCatalog(t *testing.T) {
 	h.WriteModelListResponse(c, "openai", full)
 	var after map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &after)
-	if rec.Code != 200 || len(after["data"].([]any)) != 1 || after["profile"] != nil {
+	if rec.Code != 200 || len(after["data"].([]any)) != 3 || after["profile"] != nil {
 		t.Fatal(rec.Code, after)
+	}
+}
+
+func TestSessionVirtualAliasesRetainOpenAIModelEnvelope(t *testing.T) {
+	h, _ := profileFixture(t, nil)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest("GET", "/v1/models", nil)
+	h.WriteModelListResponse(c, "openai", map[string]any{"object": "list", "data": []any{}})
+	var out map[string]any
+	json.Unmarshal(rec.Body.Bytes(), &out)
+	rows := out["data"].([]any)
+	if len(rows) != 2 {
+		t.Fatal(out)
+	}
+	for _, row := range rows {
+		r := row.(map[string]any)
+		if r["object"] != "model" || r["created"] != float64(0) || r["owned_by"] != "gateway" || r["virtual"] != true {
+			t.Fatal(r)
+		}
 	}
 }

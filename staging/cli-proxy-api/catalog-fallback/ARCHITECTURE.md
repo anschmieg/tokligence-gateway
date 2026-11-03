@@ -220,3 +220,21 @@ planning, so removal, repricing, expiry or revocation cannot reuse an old permit
 Hosted tools and upstream-controlled routing with unverified charges are refused
 on strict routes. Unknown entitlement remains usable through explicit normal
 routes under their own cost policy, never silently through a free profile.
+
+
+## 14. Separate task, permission and actual route economics
+
+A profile chooses task curation/similarity, a session grants spending permission,
+and the selected account/source supplies actual entitlement proof. Conflating
+these would make a paid-permitted request look paid even when served free, or
+make OAuth look like a verified allowance. The native final dispatch guard checks
+the captured permission against current account/source proof; telemetry reports
+FREE/SUB/PAID or explicit UNKNOWN. Model IDs remain binding on normal routes;
+virtual chat/coding IDs explicitly select profile semantics.
+
+Session state uses native authenticated identity plus opaque session/profile keys,
+bounded process-local storage and conservative expiry/restart behavior. A request
+snapshots permissions at admission; descendant sessions inherit their root's
+policy on subsequent requests. Static client headers do not prove whether a
+request is foreground, so the status helper refuses to guess from missing labels.
+No new proxy, provider executor, credential store or refresh owner is introduced.

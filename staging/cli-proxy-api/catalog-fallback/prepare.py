@@ -127,6 +127,7 @@ edit('sdk/api/handlers/canonical_policy.go','return p, true, nil','if !free&&r.U
 
 # Apply curation after native client-format generation and response interceptors.
 edit('sdk/api/handlers/handlers_interceptors.go','if modelID, detail := c.Get(ModelDetailIDContextKey); detail {','if filtered,status:=h.filterProfileModelList(c,body);status!=200 {lifecycle.complete(pluginapi.RequestCompletionFailed,status,nil);c.Writer.Header().Del("Content-Length");c.Header("Content-Type","application/json; charset=utf-8");c.Status(status);_,_=c.Writer.Write(filtered);return}else{body=filtered}\n if modelID, detail := c.Get(ModelDetailIDContextKey); detail {')
+subprocess.run([sys.executable,str(HERE/'prepare_billing.py'),'--source',str(a.output)],check=True)
 manifest={str(p.relative_to(HERE)):hashlib.sha256(p.read_bytes()).hexdigest() for folder in ['host','policy','cmd'] for p in (HERE/folder).glob('*.go')}
 (a.output/'catalog-fallback-draft.json').write_text(json.dumps({'draft':True,'production_changes':False,'files':manifest},indent=2)+'\n')
 print(json.dumps({'draft_prepared':str(a.output),'deployed':False}))

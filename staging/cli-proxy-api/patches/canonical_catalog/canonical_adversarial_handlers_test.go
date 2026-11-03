@@ -53,8 +53,8 @@ func TestCanonicalFreeSuffixRequiresPositiveOverrideProvenance(t *testing.T) {
 	if _, _, err := h.ExecuteWithAuthManager(context.Background(), "openai", "unknown-publisher/removed:free", []byte(`{"model":"unknown-publisher/removed:free"}`), ""); err == nil || len(e.calls) != 0 {
 		t.Fatal("a slash alone bypassed free policy", err, e.calls)
 	}
-	if _, _, err := h.ExecuteWithAuthManager(context.Background(), "openai", "provider/removed:free", []byte(`{"model":"provider/removed:free"}`), ""); err != nil || len(e.calls) != 1 {
-		t.Fatal("explicit proven override unavailable", err, e.calls)
+	if _, _, err := h.ExecuteWithAuthManager(context.Background(), "openai", "provider/removed:free", []byte(`{"model":"provider/removed:free"}`), ""); err == nil || len(e.calls) != 0 {
+		t.Fatal("provider override without free entitlement was dispatched", err, e.calls)
 	}
 }
 

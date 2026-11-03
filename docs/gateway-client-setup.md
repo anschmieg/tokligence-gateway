@@ -1,73 +1,74 @@
-# Nothing gateway: client setup handoff
+# Nothing gateway: agent setup handoff
 
-Configure the client to use the existing gateway and its **coding profile**.
-Keep that client's preferred model; different clients can prefer different models.
-Merge changes into its current configuration (or chezmoi source), preserving
-unrelated settings. This document contains no credentials.
+Use the existing gateway inference key from `NOTHING_API_KEY` or the user's secret
+mechanism. Merge settings/chezmoi changes without replacing unrelated configuration.
+Never commit keys. Cloudflare login and the Management Key are for administration.
 
-## URLs and authentication
+## Pick a task profile
 
-| Client protocol | Base URL | Resulting inference path |
-| --- | --- | --- |
-| OpenAI Chat / Responses | `https://code.nothing.pink/coding/v1` | `/coding/v1/chat/completions` or `/coding/v1/responses` |
-| Anthropic / Claude Code | `https://code.nothing.pink/coding` | `/coding/v1/messages` |
+- Default conversational agent: **chat**.
+- Development agents: **coding**.
+- Easiest OpenAI-compatible setup, including Rakazo: base URL
+  `https://code.nothing.pink/v1`, model **`chat`** or **`coding`**. These virtual
+  aliases explicitly enable profile routing. Both initially prefer
+  `nemotron-3.5-lightning`; the gateway config can change that preference.
+- To keep a client's own model preference, use base
+  `https://code.nothing.pink/chat/v1` or `/coding/v1` and its preferred canonical ID.
+- For Anthropic/Claude Code, omit the final `/v1` from the base; the resulting
+  request must be `/chat/v1/messages` or `/coding/v1/messages`.
 
-Use the existing **gateway inference API key**, for example from the user's
-`NOTHING_API_KEY` secret. Send `Authorization: Bearer <key>`. Do not use a provider
-key, Management Key, or Cloudflare browser cookie. Cloudflare login is for admin.
-Check how the installed client appends paths; avoid `/v1/v1`.
-
-For Claude Code CLI, a session-scoped example is:
+For example, with the existing key loaded:
 
 ```sh
-: "${NOTHING_API_KEY:?Load the existing gateway secret first}"
-export ANTHROPIC_BASE_URL="https://code.nothing.pink/coding"
+export ANTHROPIC_BASE_URL="https://code.nothing.pink/chat"
 export ANTHROPIC_AUTH_TOKEN="$NOTHING_API_KEY"
-export ANTHROPIC_MODEL="nemotron-3.5-lightning"
-claude
+export ANTHROPIC_MODEL="chat"
 ```
 
-Replace the example model with the user's preferred **canonical ID**. Resolve
-conflicting client credentials/provider settings deliberately; do not delete saved
-logins. For persistence, configure the client's existing secret mechanism and
-settings scope. Do not commit keys or assume JSON strings expand `$ENV_VARS`.
-See the [official Claude Code gateway guide](https://code.claude.com/docs/en/llm-gateway-connect)
-for settings-file scopes and `/status` verification.
+Avoid conflicting saved provider settings and duplicated `/v1/v1`. Use the
+[official Claude gateway guide](https://code.claude.com/docs/en/llm-gateway-connect)
+for settings scopes and `/status`; JSON settings do not expand shell variables.
 
-## What routing does
+## Routing and spending
 
-1. The requested model is a strong preference. Eligible providers/credentials for
-   that model are tried first, using native priority, weighting and cooldowns.
-2. If continuation is permitted, alternatives are ranked by task-specific
-   similarity to the **original requested model**, not chosen round-robin.
-3. The coding profile allows **zero additional metered charge**: verified free
-   quotas and verified included subscription allowances. OAuth alone is not proof
-   of this entitlement. Unknown/paid routes are excluded; no `:free` suffix is needed.
+Profile requests try the preferred model first, then similarity-ranked alternatives
+anchored to that original preference. Credentials use native selection within each
+model. The normal endpoint with an ordinary model ID stays model-bound; advertised
+provider-qualified overrides allow exact provider control.
 
-Capabilities, context requirements, account state and cost are checked before
-dispatch. Missing comparison evidence stays uncertain. Signed/encrypted or
-provider-owned conversation state can prevent model switching. Terminal or
-uncertain failures can stop fallback; a committed stream never switches models.
+Default billing permission is **SUB**: verified FREE plus verified included
+subscription allowances, no PAYGO. Explicit PAID permits PAYGO, after FREE/SUB for
+each model. `:free` restricts one request to FREE only, excluding subscriptions.
+On ordinary model IDs it cannot change the model; `chat:free`/`coding:free` remain
+explicit profile aliases. Unknown entitlement never qualifies for FREE/SUB.
 
-## Discovery, overrides and testing
+## Sessions, commands and status
 
-- `GET /coding/v1/models`: curated coding picker. Its size/content can change as
-  models, availability and evidence change; do not hardcode today's list. A model
-  absent from this small picker can still be an explicit eligible preference.
-- `GET /v1/models`: full canonical catalog and available override metadata.
-- For strict same-model behavior, use the normal base `/v1` (Anthropic base `/`)
-  and a canonical ID. Its normal policy can use PAYGO. For exact provider control,
-  use an advertised provider-qualified override there; it is not a coding hint.
+Use a new opaque `X-Gateway-Session` for each unrelated session. Propagate it to
+subagents/compaction; distinct child IDs can link with `X-Gateway-Parent-Session`.
+Policies are scoped by authenticated key identity, session family and task profile;
+new unrelated sessions default to SUB. Each request captures permission once.
 
-First verify discovery with the existing key, then inspect the client's effective
-base URL/model. For a deliberate end-to-end test, check the response headers
-`X-Gateway-Requested-Model`, `X-Gateway-Resolved-Model`, `X-Gateway-Profile`,
-`X-Gateway-Cost-Policy` and `X-Gateway-Similarity-Anchor`. Report actual failures;
-do not switch silently to a direct/paid endpoint or run retry/probe loops.
+The exact control/telemetry API and installable helper/Claude command assets are in
+[SESSION-BILLING.md](../staging/cli-proxy-api/catalog-fallback/SESSION-BILLING.md).
+`/routing free|sub|paid` sets policy; empty/toggle cycles FREE → SUB → PAID → FREE.
+The API uses explicit idempotent PUT, never a server-side toggle.
 
-Chat, Messages and Responses streaming are implemented. Profile paths currently
-do **not** expose token counting, WebSockets, compact-state or media endpoints;
-client features requiring those need separate compatibility work. Isolated host
-tests passed, but this is not a claim that every complete client workflow passed.
-Automated public checks from the implementation host hit Cloudflare error 1010;
-report that separately from gateway authentication or model failures.
+Status shows actual serving class (FREE yellow / SUB blue / PAID red), not allowed
+policy. Truthful per-request `main`, `subagent`, `compaction`, `auxiliary` labels are
+needed; unlabelled requests stay unspecified. Before selection or when unknown,
+show ` – `. Never label every Claude request as main through a static header.
+
+## Discovery and acceptance
+
+`/v1/models` contains the full catalog plus explicit virtual aliases. Profile
+`/models` gives a dynamic curated view, independent of billing permission; do not
+hardcode its list. Other eligible explicit preferences remain usable. Check actual
+requested/resolved model, billing class/policy and request-ID response headers.
+No committed stream changes model; opaque/compact continuations require an explicit
+model. Check protocol/client limits in the contract before enabling extra features.
+
+First check authenticated discovery, then run a deliberate client test. Do not
+silently enable direct/paid fallbacks or retry loops. Backend isolated tests do not
+prove complete Claude/Rakazo integration. Public automated requests from the build
+host encounter Cloudflare1010; distinguish that from native auth/model failures.

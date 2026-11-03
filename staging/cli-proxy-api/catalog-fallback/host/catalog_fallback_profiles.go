@@ -8,9 +8,10 @@ import (
 )
 
 type ModelProfile struct {
-	Task       catalogfallback.Task `yaml:"task" json:"task"`
-	MaxModels  int                  `yaml:"max-models,omitempty" json:"max-models,omitempty"`
-	CostPolicy string               `yaml:"cost-policy,omitempty" json:"cost-policy,omitempty"`
+	PreferredModel string               `yaml:"preferred-model,omitempty" json:"preferred-model,omitempty"`
+	Task           catalogfallback.Task `yaml:"task" json:"task"`
+	MaxModels      int                  `yaml:"max-models,omitempty" json:"max-models,omitempty"`
+	CostPolicy     string               `yaml:"cost-policy,omitempty" json:"cost-policy,omitempty"`
 }
 
 var profileName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
@@ -29,16 +30,20 @@ func ValidateModelProfiles(profiles map[string]ModelProfile) error {
 		if p.MaxModels < 0 || p.MaxModels > 50 {
 			return errors.New("profile model limit out of range")
 		}
-		if p.CostPolicy != "" && p.CostPolicy != "free-only" {
-			return errors.New("only explicit zero-additional-charge profile cost policy is currently supported")
+		if p.CostPolicy != "" && p.CostPolicy != "free-only" && p.CostPolicy != "session" {
+			return errors.New("profile cost policy must be session or free-only")
 		}
 	}
 	return nil
 }
 func (p CanonicalRoutingConfig) Profile(name string) (ModelProfile, bool) {
 	if len(p.Profiles) == 0 {
-		if name == "coding" {
-			return ModelProfile{Task: catalogfallback.Coding, MaxModels: 12, CostPolicy: "free-only"}, true
+		if name == "coding" || name == "chat" {
+			task := catalogfallback.Coding
+			if name == "chat" {
+				task = catalogfallback.General
+			}
+			return ModelProfile{Task: task, MaxModels: 12, CostPolicy: "session"}, true
 		}
 		return ModelProfile{}, false
 	}
@@ -50,7 +55,7 @@ func (p CanonicalRoutingConfig) Profile(name string) (ModelProfile, bool) {
 		v.MaxModels = 12
 	}
 	if v.CostPolicy == "" {
-		v.CostPolicy = "free-only"
+		v.CostPolicy = "session"
 	}
 	return v, true
 }

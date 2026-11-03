@@ -33,7 +33,7 @@ func TestProfileNativeHintFallsBackWithoutPaidOrExtraOwner(t *testing.T) {
 	h, e := profileFixture(t, map[string]int{"cf-kilo": 503, "cf-other": 503})
 	ctx := registry.WithModelProfile(context.Background(), "coding")
 	_, headers, err := h.ExecuteWithAuthManager(ctx, "openai", "glm-5.3-flash", []byte(`{"model":"glm-5.3-flash","messages":[{"role":"user","content":"code"}],"max_tokens":20}`), "")
-	if err != nil || len(e.calls) != 3 || !strings.HasPrefix(e.calls[2], "cf-alt/") || headers.Get("X-Gateway-Profile") != "coding" || headers.Get("X-Gateway-Cost-Policy") != "free-only" {
+	if err != nil || len(e.calls) != 3 || !strings.HasPrefix(e.calls[2], "cf-alt/") || headers.Get("X-Gateway-Profile") != "coding" || headers.Get("X-Gateway-Cost-Policy") != "SUB" {
 		t.Fatal(err, e.calls, headers)
 	}
 	for _, call := range e.calls {

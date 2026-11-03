@@ -1,6 +1,7 @@
 # Source and integration pins
 
-This package is a draft; none of these artifacts was installed in production.
+This file retains original draft provenance. Later deployments and exact artifact
+identities are recorded in evidence/ and the current gateway checkpoint.
 
 ## Public metadata
 

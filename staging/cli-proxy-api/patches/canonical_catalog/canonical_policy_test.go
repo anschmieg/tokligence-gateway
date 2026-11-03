@@ -92,7 +92,7 @@ func canonicalFixture(t *testing.T, status map[string]int, alt bool) (*BaseAPIHa
 }
 func TestCanonicalPlainFreeThenSameModelPaid(t *testing.T) {
 	h, e := canonicalFixture(t, map[string]int{"cf-kilo": 503, "cf-other": 503, "cf-paid": 503}, false)
-	_, headers, err := h.ExecuteWithAuthManager(context.Background(), "openai", "glm-5.3-flash", []byte(`{"model":"glm-5.3-flash","messages":[{"role":"user","content":"hello"}],"max_tokens":20}`), "")
+	_, headers, err := h.ExecuteWithAuthManager(billingContext(t,registry.BillingPaid,""), "openai", "glm-5.3-flash", []byte(`{"model":"glm-5.3-flash","messages":[{"role":"user","content":"hello"}],"max_tokens":20}`), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,15 +109,15 @@ func TestCanonicalPlainFreeThenSameModelPaid(t *testing.T) {
 	}
 }
 func TestCanonicalFreeNeverPaidAndSimilarFallback(t *testing.T) {
-	h, e := canonicalFixture(t, map[string]int{"cf-kilo": 503, "cf-other": 503}, true)
-	_, headers, err := h.ExecuteWithAuthManager(context.Background(), "openai", "glm-5.3-flash:free", []byte(`{"model":"glm-5.3-flash:free","messages":[{"role":"user","content":"hello"}],"max_tokens":20}`), "")
+	h, e := profileFixture(t, map[string]int{"cf-kilo": 503, "cf-other": 503})
+	_, headers, err := h.ExecuteWithAuthManager(registry.WithModelProfile(context.Background(),"coding"), "openai", "glm-5.3-flash:free", []byte(`{"model":"glm-5.3-flash:free","messages":[{"role":"user","content":"hello"}],"max_tokens":20}`), "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(e.calls) != 3 || e.calls[2] != "cf-alt/upstream-glm-4.7-flash" {
 		t.Fatal(e.calls)
 	}
-	if headers.Get("X-Gateway-Resolved-Model") != "glm-4.7-flash" || headers.Get("X-Gateway-Cost-Policy") != "free-only" {
+	if headers.Get("X-Gateway-Resolved-Model") != "glm-4.7-flash" || headers.Get("X-Gateway-Cost-Policy") != "FREE" {
 		t.Fatal(headers)
 	}
 }
@@ -145,9 +145,10 @@ func TestCanonicalStreamingStopsFallbackAfterOutput(t *testing.T) {
 	}
 }
 func TestCanonicalStreamingCanFallbackBeforeOutput(t *testing.T) {
-	h, e := canonicalFixture(t, map[string]int{"cf-kilo": 503, "cf-other": 503}, true)
-	data, headers, errs := h.ExecuteStreamWithAuthManager(context.Background(), "openai", "glm-5.3-flash:free", []byte(`{"model":"glm-5.3-flash:free","max_tokens":20}`), "")
-	n := 0
+	h, e := profileFixture(t, map[string]int{"cf-kilo": 503, "cf-other": 503})
+	data, headers, errs := h.ExecuteStreamWithAuthManager(registry.WithModelProfile(context.Background(),"coding"), "openai", "glm-5.3-flash:free", []byte(`{"model":"glm-5.3-flash:free","max_tokens":20}`), "")
+	if data==nil{t.Fatal("no stream",headers)}
+ n := 0
 	for chunk := range data {
 		n += len(chunk)
 	}
