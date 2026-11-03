@@ -71,3 +71,32 @@ func TestDraftStrongKnownRegressionCanRankBelowUnknown(t *testing.T) {
 		t.Fatal("evidence existence treated as guaranteed superiority", p)
 	}
 }
+func TestProfileReferenceLookupIsExactUnambiguousAndNotAdmission(t *testing.T) {
+	s := fixtureCatalog(t)
+	if id, ok := s.ResolveReference("glm-source"); !ok || id != "lab/glm-5.3-flash" {
+		t.Fatal(id, ok)
+	}
+	if _, ok := s.ResolveReference("GLM-SOURCE"); ok {
+		t.Fatal("fuzzy reference alias")
+	}
+	s.links["other-provider\x00glm-source"] = "other/minimax-3.1"
+	if _, ok := s.ResolveReference("glm-source"); ok {
+		t.Fatal("ambiguous reference accepted")
+	}
+	if id, ok := s.ResolveReference("lab/glm-5.3-flash"); !ok || id != "lab/glm-5.3-flash" {
+		t.Fatal(id, ok)
+	}
+	routes := fixtureRoutes()
+	routes = routes[1:]
+	p := Rank("removed-model", fixtureReq(), routes, s, Policy{AllowUnknown: true, ReferenceID: "lab/glm-5.3-flash"})
+	if len(p.Candidates) != 2 || p.Candidates[0].ModelID != "minimax-3.1" {
+		t.Fatal("reference did not anchor missing preferred route", p)
+	}
+	for _, c := range p.Candidates {
+		for _, id := range c.RouteIDs {
+			if id == "source" {
+				t.Fatal("reference became a dispatch route")
+			}
+		}
+	}
+}

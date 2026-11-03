@@ -14,7 +14,7 @@ func TestReviewSimilarityCapabilityRevocationAtFinalDispatch(t *testing.T) {
 	m := newOpenAICompatPoolTestManager(t, selector, nil, e)
 	a := m.List()[0]
 	r := registry.GetGlobalRegistry()
-	info := &registry.ModelInfo{ID: selector, CanonicalID: "review-capabilities", CanonicalPolicy: "free", CanonicalFree: true, HideFromDiscovery: true, CanonicalSourceID: "fixture-source", ContextLength: 32768, MaxCompletionTokens: 4096, SupportedInputModalities: []string{"text"}, SupportedOutputModalities: []string{"text"}, SupportedParameters: []string{"tools"}}
+	info := &registry.ModelInfo{ID: selector, CanonicalID: "review-capabilities", CanonicalPolicy: "free", CanonicalFree: true, PluginCostTier: "free", HideFromDiscovery: true, CanonicalSourceID: "fixture-source", ContextLength: 32768, MaxCompletionTokens: 4096, SupportedInputModalities: []string{"text"}, SupportedOutputModalities: []string{"text"}, SupportedParameters: []string{"tools"}}
 	r.RegisterClient(a.ID, a.Provider, []*registry.ModelInfo{info})
 	// Same immutable binding produced after the handler's capability check.
 	opts := reviewPermit(a.ID, selector)

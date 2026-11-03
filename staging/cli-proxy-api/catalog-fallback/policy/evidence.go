@@ -23,7 +23,7 @@ func evidencePoints(m Model, task Task) map[string][]evidencePoint {
 		if !ok {
 			continue
 		}
-		exact, _ := json.Marshal([]string{strings.ToLower(b.Name), b.Metric, b.Version, b.Harness, b.Variant, b.Dataset})
+		exact, _ := json.Marshal([]string{benchmarkIdentity(b.Name), strings.ToLower(b.Metric), b.Version, b.Harness, b.Variant, b.Dataset})
 		key := string(exact)
 		if previous, exists := seen[key]; exists && previous != v {
 			bad[key] = true
@@ -35,13 +35,13 @@ func evidencePoints(m Model, task Task) map[string][]evidencePoint {
 		if !ok {
 			continue
 		}
-		exact, _ := json.Marshal([]string{strings.ToLower(b.Name), b.Metric, b.Version, b.Harness, b.Variant, b.Dataset})
+		exact, _ := json.Marshal([]string{benchmarkIdentity(b.Name), strings.ToLower(b.Metric), b.Version, b.Harness, b.Variant, b.Dataset})
 		key := string(exact)
 		if bad[key] {
 			continue
 		}
 		// Independent evidence counts benchmark tasks, not repeated reports/variants.
-		name := strings.NewReplacer("-", "", "_", "", " ", "").Replace(strings.ToLower(b.Name)) + "\x00" + strings.ToLower(b.Metric)
+		name := benchmarkIdentity(b.Name) + "\x00" + strings.ToLower(b.Metric)
 		duplicate := false
 		for _, p := range out[name] {
 			if p.key == key {
@@ -113,7 +113,10 @@ func compare(s *Snapshot, baseID, candidateID string, task Task) Comparison {
 		}
 		out.Matched++
 		totalWeight += bestWeight
-		out.MeanLoss += bestWeight * loss
+		// Improvements on a different task cannot pay for a task regression.
+		if loss > 0 {
+			out.MeanLoss += bestWeight * loss
+		}
 		if loss > out.WorstLoss {
 			out.WorstLoss = loss
 		}
@@ -129,7 +132,7 @@ func compare(s *Snapshot, baseID, candidateID string, task Task) Comparison {
 	// Saturating independent task support; duplicate records/credentials do not
 	// increase confidence. Missing settings and missing coverage reduce weight.
 	out.Confidence = (totalWeight / float64(out.Matched)) * out.Coverage * float64(out.Matched) / float64(out.Matched+1)
-	out.RiskLoss = out.Confidence*out.MeanLoss + (1-out.Confidence)*unknownLossPrior
+	out.RiskLoss = out.Confidence*(out.MeanLoss+out.WorstLoss)/2 + (1-out.Confidence)*unknownLossPrior
 	out.Band = "partial"
 	if strict >= 2 && strict == out.ReferenceCount {
 		out.Band = "comparable"

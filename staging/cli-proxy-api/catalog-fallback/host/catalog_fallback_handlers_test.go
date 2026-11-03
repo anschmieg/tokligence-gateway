@@ -21,7 +21,7 @@ func TestDraftNativeCoordinatorChoosesEvidenceBeforeFamily(t *testing.T) {
 	if _, err := manager.Register(context.Background(), a); err != nil {
 		t.Fatal(err)
 	}
-	base := &registry.ModelInfo{ID: "minimax-3.1", CanonicalID: "minimax-3.1", CanonicalPolicy: "canonical", CanonicalFree: true, OwnedBy: "minimax", ContextLength: 32768, MaxCompletionTokens: 4096, SupportedParameters: []string{"tools"}, SupportedInputModalities: []string{"text"}, SupportedOutputModalities: []string{"text"}}
+	base := &registry.ModelInfo{ID: "minimax-3.1", CanonicalID: "minimax-3.1", CanonicalPolicy: "canonical", CanonicalFree: true, PluginCostTier: "free", OwnedBy: "minimax", ContextLength: 32768, MaxCompletionTokens: 4096, SupportedParameters: []string{"tools"}, SupportedInputModalities: []string{"text"}, SupportedOutputModalities: []string{"text"}}
 	selector := *base
 	selector.ID = "minimax-3.1:free"
 	selector.CanonicalPolicy = "free"
@@ -61,7 +61,7 @@ func TestDraftNativeOpaqueFunctionSignatureNeverUsesAlternative(t *testing.T) {
 }
 func TestDraftNativeSchemaFieldDoesNotDisableFallback(t *testing.T) {
 	r, err := canonicalRequestRequirements([]byte(`{"messages":[{"role":"user","content":"list files"}],"tools":[{"type":"function","function":{"parameters":{"properties":{"fileData":{"type":"string"}}}}}]}`))
-	info := &registry.ModelInfo{CanonicalFree: true, ContextLength: 32768, MaxCompletionTokens: 4096, SupportedParameters: []string{"tools"}, SupportedInputModalities: []string{"text"}, SupportedOutputModalities: []string{"text"}}
+	info := &registry.ModelInfo{CanonicalFree: true, PluginCostTier: "free", ContextLength: 32768, MaxCompletionTokens: 4096, SupportedParameters: []string{"tools"}, SupportedInputModalities: []string{"text"}, SupportedOutputModalities: []string{"text"}}
 	if err != nil || r.Modalities["file"] || !canonicalCompatible(info, r) {
 		t.Fatal(r, err)
 	}
@@ -81,7 +81,7 @@ func TestDraftNativeCatalogUsesFinalSourceNotDecoratedMetadataKey(t *testing.T) 
 		t.Fatal(err)
 	}
 	canonicalSuffixRequirements("model:free(high)", &r)
-	lowOnly := &registry.ModelInfo{CanonicalFree: true, ContextLength: 32768, MaxCompletionTokens: 4096, Thinking: &registry.ThinkingSupport{Levels: []string{"low"}}, SupportedInputModalities: []string{"text"}, SupportedOutputModalities: []string{"text"}}
+	lowOnly := &registry.ModelInfo{CanonicalFree: true, PluginCostTier: "free", ContextLength: 32768, MaxCompletionTokens: 4096, Thinking: &registry.ThinkingSupport{Levels: []string{"low"}}, SupportedInputModalities: []string{"text"}, SupportedOutputModalities: []string{"text"}}
 	if r.ReasoningEffort != "high" || canonicalCompatible(lowOnly, r) {
 		t.Fatal(r)
 	}

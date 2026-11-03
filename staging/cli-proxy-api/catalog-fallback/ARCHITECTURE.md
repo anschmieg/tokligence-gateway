@@ -199,3 +199,24 @@ or a log containing prompts and credential handles.
 explanations containing public model IDs/evidence bands/coverage only, and a
 no-network dry-run CLI. No sidebar, new public management route, prompt logging,
 browser secret, or replica of the existing native management UI is added.
+
+
+## 12. Profile URLs retain client preferences
+
+A base URL selects the routing policy without forcing every coding client to
+share one virtual model. The model remains the preferred target. The native
+coordinator exhausts eligible same-model routes before a fixed alternate chain
+ranked against the original target. Credential priority never outranks similarity
+between different models. Profile model lists filter the native serializers,
+preserving client-specific options and reversible aliases. No new credential
+owner, inference proxy or competing model serializer is introduced.
+
+## 13. Economic permission is separate from authentication
+
+OAuth proves identity, not zero marginal cost. Source-model free-price proof or
+a scoped, expiring, operator-verified no-overage allowance authorizes strict
+no-charge dispatch. The final native guard rechecks current evidence after
+planning, so removal, repricing, expiry or revocation cannot reuse an old permit.
+Hosted tools and upstream-controlled routing with unverified charges are refused
+on strict routes. Unknown entitlement remains usable through explicit normal
+routes under their own cost policy, never silently through a free profile.

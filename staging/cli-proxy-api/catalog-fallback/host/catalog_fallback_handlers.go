@@ -13,6 +13,7 @@ import (
 )
 
 type canonicalRequirements = catalogfallback.Requirements
+type canonicalComparison = catalogfallback.Comparison
 
 func canonicalRequestRequirements(raw []byte) (canonicalRequirements, error) {
 	return catalogfallback.RequirementsFromJSON(raw)
@@ -28,6 +29,7 @@ func (h *BaseAPIHandler) canonicalEvidenceStages(ctx context.Context, base strin
 	now := time.Now()
 	reg := registry.GetGlobalRegistry()
 	routes := []catalogfallback.Route{}
+	planned := map[string]map[string]registry.CanonicalDispatchBinding{}
 	for _, m := range reg.GetAvailableModelInfos() {
 		if m.CanonicalPolicy != "canonical" || m.CanonicalID != m.ID {
 			continue
@@ -39,6 +41,10 @@ func (h *BaseAPIHandler) canonicalEvidenceStages(ctx context.Context, base strin
 		for _, selector := range selectors {
 			for id, info := range reg.CanonicalRouteInfos(selector) {
 				source := canonicalEvidenceSource(info)
+				if planned[m.ID] == nil {
+					planned[m.ID] = map[string]registry.CanonicalDispatchBinding{}
+				}
+				planned[m.ID][id] = registry.NewCanonicalDispatchBinding(id, selector, info)
 				routes = append(routes, catalogfallback.Route{ID: id, ModelID: m.ID, Provider: info.OwnedBy, SourceID: source, FailureDomain: info.OwnedBy, Capabilities: registry.CanonicalFallbackCapabilities(info), Free: info.CanonicalFree, Available: h.AuthManager.CanonicalFallbackAvailable(id, selector, now)})
 			}
 		}
@@ -67,7 +73,11 @@ func (h *BaseAPIHandler) canonicalEvidenceStages(ctx context.Context, base strin
 		for _, id := range candidate.RouteIDs {
 			allowed[id] = true
 		}
-		stages = append(stages, canonicalStage{Model: candidate.ModelID + ":free", Tier: 0, Alternative: true, Allowed: allowed})
+		bindings := map[string]registry.CanonicalDispatchBinding{}
+		for id := range allowed {
+			bindings[id] = planned[candidate.ModelID][id]
+		}
+		stages = append(stages, canonicalStage{Model: candidate.ModelID + ":free", Tier: 0, Alternative: true, Allowed: allowed, PlannedBindings: bindings, Evidence: &candidate.Comparison})
 	}
 	return stages
 }

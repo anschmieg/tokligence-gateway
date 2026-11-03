@@ -1,0 +1,106 @@
+{
+  "counts": {
+    "blocked_native_metadata": 1,
+    "catalog_get": 3,
+    "denied_connect": 0,
+    "inference_posts": 9,
+    "quota_origin": 0,
+    "redirect_origin": 0,
+    "redirect_target": 0,
+    "stream_origin": 6,
+    "unexpected_http": 0
+  },
+  "failures": [],
+  "gates": {
+    "both_plugins_registered": true,
+    "catalog_evidence_loaded": true,
+    "disabled_opencode_preserved": true,
+    "hidden_override_exact_source": true,
+    "network_namespace_isolated": true,
+    "no_final_target_alias_escape": true,
+    "only_canonical_visible": true,
+    "only_deliberate_calls": true,
+    "opaque_history_never_changes_model": true,
+    "policy-free_cost_boundary": true,
+    "policy-free_each_pair_once": true,
+    "policy-free_success": true,
+    "policy-plain_cost_boundary": true,
+    "policy-plain_each_pair_once": true,
+    "policy-plain_success": true,
+    "profile_auth_required": true,
+    "profile_curated_from_full_catalog": true,
+    "profile_native_http_hint_routing": true,
+    "profile_native_messages_stream": true,
+    "profile_native_responses_stream": true,
+    "profile_opaque_unknown_hint_refused": true,
+    "profile_unknown_feature_cost_refused_before_dispatch": true,
+    "qualified_overrides_hidden": true,
+    "stopped_host_auth_ownership": true,
+    "stopped_host_exact_counts": true,
+    "unknown_free_suffix_rejected_before_dispatch": true
+  },
+  "input_sha256": {
+    "binary": "8bd965c334d687c201788657d53c65a2f6c2b14a286aaa27c324ee211ee1ef0e",
+    "free_model_hub": "927df784dedb67537cb37f61d26adace52ec374922820a8f3c001bfe0981e8b0",
+    "opencode": "19ee4302f7f96418ba0c59d443c4682ba1972de67d7cf1d687ea4e9004df354b"
+  },
+  "namespace": {
+    "inner": "net:[4026533517]",
+    "outer": "net:[4026535122]"
+  },
+  "policy_calls": [
+    {
+      "case": "policy-override",
+      "lane": "free",
+      "model": "nvidia/nemotron-3.5-lightning:free"
+    },
+    {
+      "case": "policy-plain",
+      "lane": "free",
+      "model": "nvidia/nemotron-3.5-lightning:free"
+    },
+    {
+      "case": "policy-plain",
+      "lane": "free",
+      "model": "nvidia/nemotron-3.5-lightning:free"
+    },
+    {
+      "case": "policy-plain",
+      "lane": "free",
+      "model": "nvidia/nemotron-3.5-lightning:free"
+    },
+    {
+      "case": "policy-plain",
+      "lane": "paid",
+      "model": "nvidia/nemotron-3.5-lightning:free"
+    },
+    {
+      "case": "policy-free",
+      "lane": "free",
+      "model": "glm-4.7-flash:free"
+    },
+    {
+      "case": "profile-coding",
+      "lane": "free",
+      "model": "glm-4.7-flash:free"
+    },
+    {
+      "case": "profile-messages",
+      "lane": "free",
+      "model": "glm-4.7-flash:free"
+    },
+    {
+      "case": "profile-responses",
+      "lane": "free",
+      "model": "glm-4.7-flash:free"
+    }
+  ],
+  "supervision": {
+    "deadline_seconds": 52,
+    "environment_cleared": true,
+    "exact_plugins_read_only": true,
+    "process_group_killed": true,
+    "unshare_net_required": true
+  },
+  "verdict": "pass"
+}

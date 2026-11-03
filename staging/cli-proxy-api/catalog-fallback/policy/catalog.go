@@ -173,8 +173,20 @@ func (s *Store) Snapshot(now time.Time, maxAge time.Duration) *Snapshot {
 
 var DefaultStore Store
 
-func benchmarkCategory(name string) Task {
+// Canonical benchmark identity is shared by classification, conflict handling,
+// coverage and support counts. Aliases are provenance labels, not new evidence.
+func benchmarkIdentity(name string) string {
 	n := strings.ToLower(strings.NewReplacer("-", "", "_", "", " ", "", "'", "").Replace(name))
+	switch n {
+	case "berkeleyfunctioncallingleaderboard":
+		return "bfcl"
+	case "humanityslastexam":
+		return "hle"
+	}
+	return n
+}
+func benchmarkCategory(name string) Task {
+	n := benchmarkIdentity(name)
 	switch n {
 	case "terminalbench", "swebenchverified", "swebenchpro", "deepswe", "livecodebench", "scicode":
 		return Coding
@@ -294,4 +306,43 @@ func validateJSONKeys(data []byte) error {
 		return errors.New("trailing catalog JSON")
 	}
 	return nil
+}
+
+// ValidateProtocolJSON rejects duplicate keys and excessive nesting without
+// interpreting schema/argument contents as protocol controls.
+func ValidateProtocolJSON(raw []byte) error { return validateJSONKeys(raw) }
+
+// AdvisorySnapshot keeps historical task qualification available through feed
+// outages. Stale data cannot regain benchmark ranking authority or admit a
+// route/cost: those checks use fresh evidence/native state separately.
+func (s *Store) AdvisorySnapshot(source string, now time.Time, maxAge time.Duration) (*Snapshot, bool) {
+	v := s.current.Load()
+	if v == nil || v.source != source || now.Before(v.publishedAt) {
+		return nil, false
+	}
+	return v, maxAge > 0 && now.Sub(v.publishedAt) <= maxAge
+}
+
+// Reference-only lookup: an exact canonical ID or unambiguous exact source ID
+// can anchor a preference even after the provider's route was removed. This
+// never creates a route, aliases names fuzzily, or grants billing permission.
+func (s *Snapshot) ResolveReference(id string) (string, bool) {
+	if s == nil {
+		return "", false
+	}
+	if _, ok := s.models[id]; ok {
+		return id, true
+	}
+	found := ""
+	for key, canonical := range s.links {
+		parts := strings.SplitN(key, "\x00", 2)
+		if len(parts) != 2 || parts[1] != id {
+			continue
+		}
+		if found != "" && found != canonical {
+			return "", false
+		}
+		found = canonical
+	}
+	return found, found != ""
 }

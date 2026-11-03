@@ -13,6 +13,9 @@ import (
 // RequirementsFromJSON reads protocol fields only. It never interprets tool
 // schemas, arguments, result payloads or arbitrary user text as protocol state.
 func RequirementsFromJSON(raw []byte) (Requirements, error) {
+	if err := validateJSONKeys(raw); err != nil {
+		return Requirements{}, err
+	}
 	r := Requirements{Bytes: len(raw), Modalities: map[string]bool{"text": true}, Outputs: map[string]bool{"text": true}}
 	var root map[string]any
 	d := json.NewDecoder(bytes.NewReader(raw))
@@ -20,6 +23,7 @@ func RequirementsFromJSON(raw []byte) (Requirements, error) {
 	if err := d.Decode(&root); err != nil || root == nil {
 		return r, errors.New("expected JSON request object")
 	}
+	r.UnverifiedCostFeatures = !noChargeRequestFeatures(root)
 	if d.Decode(new(any)) != io.EOF {
 		return r, errors.New("trailing JSON request value")
 	}
@@ -186,6 +190,25 @@ func RequirementsFromJSON(raw []byte) (Requirements, error) {
 			}
 		}
 	}
+	// Native Gemini controls are requirements too; do not infer them from the
+	// mere presence of declarations or rely on a downstream translator to reject.
+	if config, ok := root["toolConfig"].(map[string]any); ok {
+		if calls, ok := config["functionCallingConfig"].(map[string]any); ok {
+			mode, _ := calls["mode"].(string)
+			switch strings.ToUpper(mode) {
+			case "ANY":
+				r.Tools = true
+				r.ToolChoice = true
+			case "", "AUTO", "NONE", "VALIDATED":
+			default:
+				parseErr = errors.New("unknown function calling mode")
+			}
+			if names, ok := calls["allowedFunctionNames"].([]any); ok && len(names) > 0 && strings.ToUpper(mode) != "NONE" {
+				r.Tools = true
+				r.ToolChoice = true
+			}
+		}
+	}
 	turns := 0
 	var extras func(map[string]any)
 	extras = func(m map[string]any) {
@@ -318,4 +341,35 @@ func RequirementsFromJSON(raw []byte) (Requirements, error) {
 		r.Task = General
 	}
 	return r, parseErr
+}
+
+// Unverified request-side spending options are separate from base-model price.
+// Caller-executed function declarations are inert proposals; hosted tools,
+// upstream fallback graphs and premium serving tiers need their own cost proof.
+func noChargeRequestFeatures(root map[string]any) bool {
+	for _, key := range []string{"models", "provider", "routing", "route", "web_search", "web_search_options"} {
+		if v, ok := root[key]; ok && v != nil {
+			return false
+		}
+	}
+	if tier, ok := root["service_tier"]; ok && tier != "" && tier != "default" {
+		return false
+	}
+	if tools, ok := root["tools"].([]any); ok {
+		for _, v := range tools {
+			tool, ok := v.(map[string]any)
+			if !ok {
+				return false
+			}
+			if typ, _ := tool["type"].(string); typ != "" && typ != "function" {
+				return false
+			}
+			for _, key := range []string{"googleSearch", "google_search", "googleSearchRetrieval", "urlContext", "codeExecution", "retrieval"} {
+				if _, ok := tool[key]; ok {
+					return false
+				}
+			}
+		}
+	}
+	return true
 }

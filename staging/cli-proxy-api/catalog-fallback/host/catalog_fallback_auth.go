@@ -11,7 +11,7 @@ func (m *Manager) CanonicalFallbackAvailable(id, route string, now time.Time) bo
 		return false
 	}
 	info := registry.GetGlobalRegistry().CanonicalRouteInfos(route)[id]
-	if info == nil {
+	if info == nil || !m.CanonicalNoChargeAllowed(a, info, now) {
 		return false
 	}
 	if !registry.GetGlobalRegistry().CanonicalFallbackRegistryAvailable(id, route, now) {
@@ -26,4 +26,12 @@ func (m *Manager) CanonicalFallbackAvailable(id, route string, now time.Time) bo
 		}
 	}
 	return true
+}
+
+func (m *Manager) CanonicalPriority(id string) int {
+	a, ok := m.GetByID(id)
+	if !ok {
+		return 0
+	}
+	return authPriority(a)
 }

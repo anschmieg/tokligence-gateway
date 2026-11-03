@@ -35,6 +35,7 @@ type Requirements struct {
 	ReasoningBudget                                              *int
 	DisableReasoning                                             bool
 	Continuity, OpaqueState                                      bool
+	UnverifiedCostFeatures                                       bool
 	Modalities, Outputs                                          map[string]bool
 	Task                                                         Task
 }
@@ -50,6 +51,7 @@ type Policy struct {
 	RequireComparable bool
 	Deadline          time.Duration
 	MaxLoss           *float64
+	ReferenceID       string // server-resolved exact reference, never route admission
 }
 type Comparison struct {
 	Matched, ReferenceCount       int
@@ -133,6 +135,9 @@ func CapabilitiesHash(c Capabilities) string {
 	return hex.EncodeToString(h[:])
 }
 func Rank(requested string, r Requirements, routes []Route, s *Snapshot, p Policy) Plan {
+	if r.UnverifiedCostFeatures {
+		return Plan{Refused: "request contains unverified metered features"}
+	}
 	if r.OpaqueState {
 		return Plan{Refused: "opaque conversation state is not transferable"}
 	}
@@ -162,6 +167,15 @@ func Rank(requested string, r Requirements, routes []Route, s *Snapshot, p Polic
 		}
 		sourceID = id
 	}
+	if p.ReferenceID != "" {
+		if _, ok := s.model(p.ReferenceID); !ok {
+			return Plan{Refused: "unknown reference identity"}
+		}
+		if sourceID != "" && sourceID != p.ReferenceID {
+			sourceConflict = true
+		}
+		sourceID = p.ReferenceID
+	}
 	if sourceConflict {
 		return Plan{Refused: "requested canonical group has conflicting catalog identities"}
 	}
@@ -181,18 +195,16 @@ func Rank(requested string, r Requirements, routes []Route, s *Snapshot, p Polic
 		c := Candidate{ModelID: model, Comparison: Comparison{Band: "unknown", RiskLoss: unknownLossPrior}, Reason: "capability-compatible; quality evidence unknown"}
 		identities := map[string]bool{}
 		domains := map[string]bool{}
-		allKnown := true
+		knownRoutes := []Route{}
 		allLatency := true
 		for _, route := range group {
-			c.RouteIDs = append(c.RouteIDs, route.ID)
 			if route.FailureDomain != "" {
 				domains[route.FailureDomain] = true
 			}
 			id, ok := s.Resolve(route.Provider, route.SourceID)
-			if !ok {
-				allKnown = false
-			} else {
+			if ok {
 				identities[id] = true
+				knownRoutes = append(knownRoutes, route)
 			}
 			if route.LatencyP95 == 0 {
 				allLatency = false
@@ -203,7 +215,29 @@ func Rank(requested string, r Requirements, routes []Route, s *Snapshot, p Polic
 		if len(identities) > 1 {
 			continue
 		} // A mislabeled group must not borrow one member's benchmarks.
-		if allKnown && len(identities) == 1 {
+		// Do not erase a known model's evidence when a newly added provider has
+		// no exact identity proof. That route stays outside this ranked attempt
+		// set; it cannot borrow the proof either. Entirely unknown models retain
+		// the separately explicit unknown-evidence policy.
+		if len(knownRoutes) > 0 {
+			group = knownRoutes
+		}
+		c.FailureDomains = nil
+		domains = map[string]bool{}
+		allLatency = true
+		c.LatencyP95 = 0
+		for _, route := range group {
+			c.RouteIDs = append(c.RouteIDs, route.ID)
+			if route.FailureDomain != "" {
+				domains[route.FailureDomain] = true
+			}
+			if route.LatencyP95 == 0 {
+				allLatency = false
+			} else if route.LatencyP95 > c.LatencyP95 {
+				c.LatencyP95 = route.LatencyP95
+			}
+		}
+		if len(identities) == 1 {
 			for id := range identities {
 				c.EvidenceID = id
 			}

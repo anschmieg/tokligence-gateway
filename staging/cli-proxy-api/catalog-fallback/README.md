@@ -1,7 +1,8 @@
-# Catalog-backed fallback: implementation draft
+# Catalog-backed fallback and task profiles
 
-This is a **reviewable, opt-in native extension**, not an installed/deployed plugin.
-Production remains native .14. The draft replaces name-based fallback ranking
+This is an opt-in native extension; [PROFILES.md](PROFILES.md) defines its client
+contract and cost boundaries. Deployment state is recorded in the gateway checkpoint.
+The extension replaces name-based fallback ranking
 inside the existing coordinator; it does not introduce another inference proxy,
 credential store, executor, account scheduler, or refresh owner.
 
@@ -28,7 +29,10 @@ Read [ARCHITECTURE.md](ARCHITECTURE.md) for the decision rationale and boundarie
 
 Exact-model free routes are still tried first. Plain canonical IDs retain their
 same-model free-to-paid behavior, with paid OpenRouter last. This extension only
-assembles cross-model alternatives for `:free`; exact overrides remain unchanged.
+assembles cross-model alternatives for `:free` and named profile URLs; exact
+overrides remain unchanged. Profiles keep the original requested model first,
+then use similarity ranking anchored to that original model. Native credential
+priority/weighting acts within each model, never across the alternate-model chain.
 All eligible free providers use native credential selection, without a brand bonus.
 
 1. Native coordinator owns permission to continue, selected-attempt limits,
@@ -186,14 +190,16 @@ The draft builds. Focused Go race tests and four data-import tests pass. The
 actual native host, with both existing plugins and mandatory network isolation,
 passes the fake-provider end-to-end scenario: plain same-model paid fallback,
 `:free` alternate model, hidden exact-source override, opaque-state refusal,
-source/cost boundaries and preserved disabled OpenCode state (six mock POSTs).
+source/cost boundaries and preserved disabled OpenCode state, plus profile Chat,
+Messages and Responses streaming (nine mock POSTs, six completed streams).
 The real public snapshot imports and decodes 849 models / 220 providers.
 
 See [evidence/verification.json](evidence/verification.json),
 [evidence/isolated-host.json](evidence/isolated-host.json), and
 [SOURCE-PINS.md](SOURCE-PINS.md). These are synthetic integration and data-import
-results, **not real provider quality/live acceptance**. No production change was
-made; deployed .14 still has the previously recorded review findings.
+results, **not real provider quality/live acceptance**. The archived original draft evidence remains historical. See
+[evidence/task-profiles-isolated-host.json](evidence/task-profiles-isolated-host.json)
+for the current artifact; the checkpoint records rollout status separately.
 
 ## Confidence semantics
 
@@ -206,7 +212,8 @@ Confidence combines setting completeness, reference coverage and saturating
 benchmark support `n/(n+1)`. A single useful result contributes without claiming
 full coverage. Sorting is deterministic.
 
-`risk_loss = confidence * observed_mean_loss + (1-confidence) * 0.25`.
+`risk_loss = confidence * (mean_positive_loss + worst_positive_loss)/2 + (1-confidence) * 0.25`.
+Improvements never cancel a benchmark regression; benchmark aliases count once.
 Lower ranks first. The 0.25 unknown-loss prior is conservative policy, **not an
 empirical estimate**; tune it only with real downstream evaluation. Unknown models
 can therefore outrank a model with strong evidence of a severe regression.
