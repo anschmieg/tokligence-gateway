@@ -15,6 +15,7 @@ function mockRequestResponse() {
     writableEnded: false,
     writeHead(status, headers) { this.statusCode = status; this.headers = headers; this.headersSent = true; },
     end(body = "") { this.body = String(body); this.writableEnded = true; this.emit("finish"); },
+    write(chunk) { if (chunk) this.body = (this.body || "") + (Buffer.isBuffer(chunk) ? chunk.toString() : chunk); return true; },
     destroy() { this.destroyed = true; this.emit("close"); },
   });
   return { req, res };
@@ -106,6 +107,55 @@ test("session family history is bounded and stores no model or transcript data",
   assert.equal(entry.families.length, 16);
   assert.equal(entry.families[0], "family-4");
   assert.equal(JSON.stringify(entry).includes("private-model"), false);
+});
+
+test("consent_required on first provider falls through to second eligible provider and succeeds", async () => {
+  const { req, res } = mockRequestResponse();
+  let attemptIndex = 0;
+  const candidates = [
+    { provider: { id: "unorouter", adapter: "middleware" }, upstreamModel: "glm-5.3-flash", protocol: "messages" },
+    { provider: { id: "orcarouter", adapter: "middleware" }, upstreamModel: "glm-5.3-flash", protocol: "messages" },
+  ];
+  const responses = [
+    { statusCode: 403, headers: { "content-type": "application/json" } },
+    { statusCode: 200, headers: { "content-type": "application/json" } },
+  ];
+  const startAttempt = async ({ candidate }) => {
+    const idx = attemptIndex++;
+    const r = responses[idx];
+    const response = new PassThrough();
+    response.statusCode = r.statusCode; response.headers = r.headers;
+    setTimeout(() => {
+      if (r.statusCode === 200) {
+        response.end(Buffer.from(JSON.stringify({ id: "msg", type: "message", role: "assistant", model: candidate.upstreamModel, content: [{ type: "text", text: "ok" }], stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 } })));
+      } else {
+        response.end(Buffer.from(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "consent_required" } })));
+      }
+    }, 10);
+    return { response, upstream: response, target: null, codec: null };
+  };
+  const result = await executeRoutePlan({
+    plan: { publicModel: "glm-5.3-flash", deadline: Date.now() + 2000, required: { streaming: false }, candidates },
+    req, res, path: "/v1/messages", body: { model: "glm-5.3-flash", messages: [{ role: "user", content: "hello" }, { role: "user", content: "tools" }] },
+    startAttempt,
+  });
+  assert.equal(result.committed, true, "second provider should succeed after first returns consent_required");
+  assert.equal(res.statusCode, 200);
+  assert.equal(attemptIndex, 2, "both candidates should have been attempted");
+});
+
+test("single eligible candidate returning 403 consent_required responds with upstream error, no fallback attempted", async () => {
+  const { req, res } = mockRequestResponse();
+  const response = new PassThrough();
+  response.statusCode = 403; response.headers = { "content-type": "application/json" };
+  setTimeout(() => response.end(Buffer.from(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "consent_required" } }))), 10);
+  const result = await executeRoutePlan({
+    plan: { publicModel: "glm-5.3-flash", deadline: Date.now() + 2000, required: { streaming: false }, candidates: [{ provider: { id: "unorouter", adapter: "middleware" }, upstreamModel: "glm-5.3-flash", protocol: "messages" }] },
+    req, res, path: "/v1/messages", body: { model: "glm-5.3-flash", messages: [{ role: "user", content: "hello" }] },
+    startAttempt: async () => ({ response, upstream: response, target: null, codec: null }),
+  });
+  assert.equal(result.committed, false);
+  assert.equal(res.statusCode, 502);
 });
 
 test("session family history evicts least-recently-used sessions at its bound", () => {

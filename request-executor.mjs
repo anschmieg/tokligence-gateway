@@ -580,7 +580,7 @@ function settledSpecialistSse(protocol, document, translated, model) {
   return events.join("") + emit("response.output_item.done", { response_id: id, output_index: 0, item }) + emit("response.completed", { response });
 }
 
-export async function executeRoutePlan({ plan, req, res, path, body, trace = req.requestTrace, env = process.env, runtimeState = {}, adapters = {}, affinityKey = null, historyKey = undefined, onUpstreamResponse, openCodeAccountPool = null, startAttempt: attemptStarter = startAttempt }) {
+export async function executeRoutePlan({ plan, req, res, path, body, trace = req.requestTrace, env = process.env, runtimeState = {}, adapters = {}, affinityKey = null, principalKey = null, historyKey = undefined, onUpstreamResponse, openCodeAccountPool = null, startAttempt: attemptStarter = startAttempt }) {
   const requestId = trace?.id || randomUUID();
   trace?.model(plan.publicModel);
   trace?.stage("executor");
@@ -629,7 +629,7 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
           attemptNumber += 1;
           trace?.emit("attempt_start", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel, attempt_number: attemptNumber });
           try {
-            attemptResult = await startAttemptUntilAbort({ candidate, req, path, body: candidateBody, env, signal: aborter.signal, adapters, trace, accountPool: candidate.provider.adapter === "opencode-zen" ? openCodeAccountPool : null, stickyKey: affinityKey, excludedAccounts }, attemptStarter);
+            attemptResult = await startAttemptUntilAbort({ candidate, req, path, body: candidateBody, env, signal: aborter.signal, adapters, trace, accountPool: candidate.provider.adapter === "opencode-zen" ? openCodeAccountPool : null, stickyKey: affinityKey, principalKey, excludedAccounts }, attemptStarter);
            } catch (error) {
              const failedAccount = error.poolAccount;
              if (failedAccount && !aborter.signal.aborted) {
@@ -663,7 +663,7 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
           }
           status = response.statusCode || 502;
           trace?.emit("upstream_headers", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel, status });
-          status429Info = status === 429 && !candidate.specialist && !attemptResult.nativeBridge ? await status429Diagnostics(response, aborter.signal) : null;
+          status429Info = status === 429 && !candidate.specialist && !attemptResult.nativeBridge && !attemptResult.agyNativeBridge ? await status429Diagnostics(response, aborter.signal) : null;
           if (status >= 200 && status < 300) {
             if (attemptResult.poolAccount && !String(response.headers?.["content-type"] || "").includes("text/event-stream")) {
               openCodeAccountPool.markFailure(attemptResult.poolAccount, new Error("OpenCode returned an unexpected response protocol"));
@@ -749,7 +749,7 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
         const { response, codec, specialist, specialistProtocol, poolAccount, poolGeneration, poolStickyKey, streamPreflight } = attemptResult;
         if (aborter.signal.aborted) break;
         if (status < 200 || status >= 300) {
-          if (attemptResult.nativeBridge) {
+          if (attemptResult.nativeBridge || attemptResult.agyNativeBridge) {
             const raw = await readBodyText(response, aborter.signal, 16384);
             let failure;
             try { failure = JSON.parse(raw)?.error; } catch { /* An invalid worker response is never forwarded verbatim. */ }
@@ -790,11 +790,15 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
             : cooldownMs(response);
           discard(response);
           runtimeState.cooldowns?.set(`${candidate.provider.id}:${candidate.model?.id || candidate.upstreamModel}:${candidate.protocol}`, Date.now() + cooldown);
+          trace?.emit("candidate_fallback", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel, status, reason: status < 200 || status >= 300 ? "non_success_status" : "unknown" });
           continue;
         }
         observeUpstreamResponse(response, candidate, onUpstreamResponse);
-        if (attemptResult.nativeBridge) {
-          for (const name of ["x-opencode-native-version", "x-opencode-native-session"]) {
+        if (attemptResult.nativeBridge || attemptResult.agyNativeBridge) {
+          const bridgeHeaders = attemptResult.agyNativeBridge
+            ? ["x-agy-bridge-protocol", "x-agy-execution-mode", "x-agy-cli-version", "x-agy-native-session"]
+            : ["x-opencode-native-version", "x-opencode-native-session"];
+          for (const name of bridgeHeaders) {
             const value = response.headers[name];
             if (typeof value === "string" && /^[A-Za-z0-9._-]{1,128}$/.test(value)) res.setHeader(name, value);
           }
@@ -978,7 +982,13 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
           res.end(JSON.stringify({ error: { code: error?.statusCode === 400 ? "unsupported_bridge_request" : error?.code === "native_worker_version_mismatch" ? error.code : "native_worker_unavailable", type: "native_bridge_error", message: "The experimental OpenCode native worker is unavailable or incompatible; no legacy fallback was attempted", request_id: requestId } }));
           return { committed: false, requestId, provider: candidate.provider.id };
         }
-        if (isLastCandidate && candidate.provider.adapter === "cline-oauth" && error?.status && error?.code) {
+        if (candidate.provider.adapter === "agy-native") {
+          const status = error?.statusCode === 400 || error?.statusCode === 401 ? error.statusCode : error?.statusCode === 503 ? 503 : 502;
+          res.writeHead(status, { "content-type": "application/json", "x-gateway-request-id": requestId, "x-gateway-provider": candidate.provider.id });
+          res.end(JSON.stringify({ error: { code: error?.code || "agy_native_worker_unavailable", type: "agy_native_bridge_error", message: "The experimental AGY native worker is unavailable or incompatible; no canonical fallback was attempted", request_id: requestId } }));
+          return { committed: false, requestId, provider: candidate.provider.id };
+        }
+        if (isLastCandidate && candidate.provider.adapter === "cliproxyapi" && error?.status && error?.code) {
           runtimeState.cooldowns?.set(`${candidate.provider.id}:${candidate.model?.id || candidate.upstreamModel}:${candidate.protocol}`, Date.now() + errorCooldownMs(error));
           res.writeHead(error.status, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: { code: error.code, message: error.message, type: "cline_oauth_error" } }));
