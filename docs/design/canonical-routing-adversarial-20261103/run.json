@@ -1,0 +1,6 @@
+{
+  "exit_code": 1,
+  "test_type": "offline fake executors; deliberately asserts required invariants",
+  "production_mutations": 0,
+  "provider_requests": 0
+}
