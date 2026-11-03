@@ -504,3 +504,16 @@ when adding keys to share its policy. Native per-key routing/cooling stays nativ
 No Gemini inference was performed. Scoped write/readback preserved all unrelated
 configuration, account state, panel/binary/plugin artifacts and protected holds.
 [Setup evidence](gemini-shared-free-policy-20261103.json).
+
+
+Gemini live acceptance, November3: all3 saved keys passed native-gateway streaming
+on `gemini-3.5-flash-lite`; trace-confirmed round-robin2→3→1, text+stop+DONE.
+A temporary Gemini-only alias isolated the calls from Antigravity; removed after
+verification. No forced credential or automatic replay. The initial2.5FlashLite
+call returned404 (not offered to new users although catalog still lists it);
+that model was removed from the shared policy, leaving7models. A separate3.8Flash
+call returned temporary high-demand503. Five deliberate callers total;3read-only
+catalogGETs each returned200. Shared keys/settings and protected OpenCode state
+preserved. This is representative-model verification, not all-model or billing-tier
+verification, and does not demonstrate independent quota per key.
+[Sanitized live evidence](gemini-keys-live-acceptance-20261103.json).
