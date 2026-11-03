@@ -613,7 +613,10 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
   }
 
   try {
-    candidateLoop: for (const candidate of plan.candidates) {
+    candidateLoop: for (let i = 0; i < plan.candidates.length; i++) {
+      const candidate = plan.candidates[i];
+      if (aborter.signal.aborted) break;
+      const hasNextCandidate = i + 1 < plan.candidates.length;
       if (aborter.signal.aborted) break;
       trace?.stage("attempt");
       const candidateBody = Buffer.from(JSON.stringify({ ...body, model: candidate.upstreamModel }));
@@ -790,7 +793,9 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
             : cooldownMs(response);
           discard(response);
           runtimeState.cooldowns?.set(`${candidate.provider.id}:${candidate.model?.id || candidate.upstreamModel}:${candidate.protocol}`, Date.now() + cooldown);
-          trace?.emit("candidate_fallback", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel, status, reason: status < 200 || status >= 300 ? "non_success_status" : "unknown" });
+          if (hasNextCandidate) {
+            trace?.emit("candidate_fallback", { provider: candidate.provider.id, upstream_model: candidate.upstreamModel, status, reason: status < 200 || status >= 300 ? "non_success_status" : "unknown" });
+          }
           continue;
         }
         observeUpstreamResponse(response, candidate, onUpstreamResponse);

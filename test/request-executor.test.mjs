@@ -144,8 +144,10 @@ test("consent_required on first provider falls through to second eligible provid
   assert.equal(attemptIndex, 2, "both candidates should have been attempted");
 });
 
-test("single eligible candidate returning 403 consent_required responds with upstream error, no fallback attempted", async () => {
+test("single eligible candidate returning 403 consent_required responds with upstream error, no phantom fallback (attempt=1)", async () => {
   const { req, res } = mockRequestResponse();
+  const traceEvents = [];
+  const mockTrace = { id: "t-1", emit: (n, d) => traceEvents.push({ name: n, data: d }), model: () => {}, stage: () => {} };
   const response = new PassThrough();
   response.statusCode = 403; response.headers = { "content-type": "application/json" };
   setTimeout(() => response.end(Buffer.from(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "consent_required" } }))), 10);
@@ -153,9 +155,11 @@ test("single eligible candidate returning 403 consent_required responds with ups
     plan: { publicModel: "glm-5.3-flash", deadline: Date.now() + 2000, required: { streaming: false }, candidates: [{ provider: { id: "unorouter", adapter: "middleware" }, upstreamModel: "glm-5.3-flash", protocol: "messages" }] },
     req, res, path: "/v1/messages", body: { model: "glm-5.3-flash", messages: [{ role: "user", content: "hello" }] },
     startAttempt: async () => ({ response, upstream: response, target: null, codec: null }),
+    trace: mockTrace,
   });
   assert.equal(result.committed, false);
   assert.equal(res.statusCode, 502);
+  assert.equal(traceEvents.filter(e => e.name === "attempt_start").length, 1, "one attempt only — no phantom fallback");
 });
 
 test("session family history evicts least-recently-used sessions at its bound", () => {
