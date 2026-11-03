@@ -1,0 +1,25 @@
+{
+  "phase": "configured",
+  "configured_group": "gemini-free",
+  "key_count": 0,
+  "model_ids": [
+    "gemini-3.8-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3-flash-preview",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite"
+  ],
+  "pricing_source": "https://ai.google.dev/gemini-api/docs/pricing",
+  "pricing_reviewed_date": "2026-11-03",
+  "provider_requests": 0,
+  "inference_requests": 0,
+  "shared_models_at_group_level": true,
+  "empty_group_persisted": true,
+  "unrelated_config_preserved": true,
+  "protected_state_preserved": true,
+  "external_action": "Add real Free Tier project keys to api-keys.gemini group gemini-free keys list in Config Panel; never paste keys in chat",
+  "active_routes": false
+}

@@ -476,3 +476,31 @@ FreeHub periodic callbacks persisted. The actual catalog contains953IDs with
 retired, all other original IDs retained. Protected state/accounts preserved and
 zero real inference/login requests. Exact hashes and rollout checks:
 [deployment evidence](model-discovery-deployment-20261102.json).
+
+
+## Shared Gemini Free Tier group — November 3
+
+Native `api-keys.gemini` now has a `gemini-free` group. Its model list is shared
+by all keys, using the stock v8 grouped configuration (no backend/UI patch).
+No Gemini keys were saved at setup time; the group is prepared but has no active
+routes. Pricing was reviewed at https://ai.google.dev/gemini-api/docs/pricing .
+This is a static centrally maintained chat list, not the compatible-provider
+periodic discovery feature. Free-model availability is not a billing safeguard
+for keys linked to Paid Tier projects. Keep these keys on Free Tier projects.
+
+In **Config Panel**, find the existing `api-keys.gemini` / `name: gemini-free`
+group and replace its `keys: []` with your actual keys, for example:
+
+```yaml
+keys:
+  - api-key: YOUR_FIRST_KEY
+  - api-key: YOUR_SECOND_KEY
+```
+
+The placeholders above are instructions only; none was saved to the gateway.
+Leave `models` at group level. Do not replace the rest of the configuration.
+The ordinary one-key Gemini New form creates a separate group; edit this group
+when adding keys to share its policy. Native per-key routing/cooling stays native.
+No Gemini inference was performed. Scoped write/readback preserved all unrelated
+configuration, account state, panel/binary/plugin artifacts and protected holds.
+[Setup evidence](gemini-shared-free-policy-20261103.json).
