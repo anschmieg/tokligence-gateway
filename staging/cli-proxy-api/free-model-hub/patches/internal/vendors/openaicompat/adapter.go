@@ -319,6 +319,7 @@ func (a *adapter) toModelInfo(models []upstreamModel) []pluginapi.ModelInfo {
 		}
 		return core.ModelDescriptor{
 			ID:                 a.PublicModelID(model.ID),
+ CostTier:a.modelCostTier(model),
 			Name:               name + " (" + a.provider.Name + ")",
 			Description:        a.provider.Name + " model " + model.ID,
 			ContextLength:      model.ContextLength,

@@ -19,10 +19,14 @@ type canonicalAttemptContextKey struct{}
 type canonicalAttemptContext struct {
 	Excluded []string
 	Route    string
+	Bindings map[string]registry.CanonicalDispatchBinding
+	Permit   *registry.CanonicalDispatchPermit
 }
 type canonicalRequirements struct {
 	Bytes, Output                    int
 	Tools, JSON, Reasoning, Parallel bool
+	ToolChoice                       bool
+	Outputs                          map[string]bool
 	Modalities                       map[string]bool
 }
 type canonicalStage struct {
@@ -60,7 +64,7 @@ func canonicalInput(model string) (base, suffix string, freeOnly, ok bool) {
 	return name, suffix, freeOnly, true
 }
 func canonicalRequestRequirements(raw []byte) (canonicalRequirements, error) {
-	r := canonicalRequirements{Bytes: len(raw), Modalities: map[string]bool{"text": true}}
+	r := canonicalRequirements{Bytes: len(raw), Modalities: map[string]bool{"text": true}, Outputs: map[string]bool{"text": true}}
 	var root map[string]any
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &root); err != nil {
@@ -95,9 +99,17 @@ func canonicalRequestRequirements(raw []byte) (canonicalRequirements, error) {
 	}
 	if v := root["tool_choice"]; v != nil && v != "none" {
 		r.Tools = true
+		r.ToolChoice = true
 	}
 	if v := root["reasoning"]; v != nil {
 		r.Reasoning = true
+	}
+	if modes, ok := root["modalities"].([]any); ok {
+		for _, v := range modes {
+			if mode, ok := v.(string); ok {
+				r.Outputs[mode] = true
+			}
+		}
 	}
 	var walk func(any)
 	walk = func(v any) {
@@ -115,6 +127,22 @@ func canonicalRequestRequirements(raw []byte) (canonicalRequirements, error) {
 					r.Modalities["audio"] = true
 				case "video", "video_url", "input_video":
 					r.Modalities["video"] = true
+				}
+			}
+			if _, ok := x["fileData"]; ok {
+				r.Modalities["file"] = true
+			}
+			if _, ok := x["inlineData"]; ok {
+				r.Modalities["file"] = true
+			}
+			if _, ok := x["file_data"]; ok {
+				r.Modalities["file"] = true
+			}
+			if modes, ok := x["responseModalities"].([]any); ok {
+				for _, v := range modes {
+					if mode, ok := v.(string); ok {
+						r.Outputs[strings.ToLower(mode)] = true
+					}
 				}
 			}
 			if n, ok := x["maxOutputTokens"].(float64); ok && n > float64(r.Output) {
@@ -165,6 +193,14 @@ func canonicalCompatible(info *registry.ModelInfo, r canonicalRequirements) bool
 	}
 	// Cross-model substitution is restricted to declared text-output models.
 	if !containsCanonical(info.SupportedOutputModalities, "text") {
+		return false
+	}
+	for modality := range r.Outputs {
+		if !containsCanonical(info.SupportedOutputModalities, modality) {
+			return false
+		}
+	}
+	if r.ToolChoice && !containsCanonical(info.SupportedParameters, "tool_choice") {
 		return false
 	}
 	for modality := range r.Modalities {
@@ -270,7 +306,17 @@ func canonicalRankedFallbacks(base string, r canonicalRequirements, p registry.C
 	return ids
 }
 func (h *BaseAPIHandler) canonicalPlan(ctx context.Context, model string, raw []byte, opts modelExecutionOptions, crossModel bool) (canonicalPlan, bool, *interfaces.ErrorMessage) {
+	if h.AuthManager == nil || !h.AuthManager.CanonicalRoutingEnabled() {
+		return canonicalPlan{}, false, nil
+	}
 	base, suffix, free, ok := canonicalInput(model)
+	explicitOverride := false
+	if info := registry.GetGlobalRegistry().GetModelInfo(thinking.ParseSuffix(model).ModelName, ""); info != nil {
+		explicitOverride = info.CanonicalOverride && info.CanonicalPolicy == "override"
+	}
+	if !ok && strings.HasSuffix(thinking.ParseSuffix(model).ModelName, ":free") && !explicitOverride {
+		return canonicalPlan{}, true, &interfaces.ErrorMessage{StatusCode: 404, Error: errors.New("unknown or unavailable canonical free model")}
+	}
 	if !ok || h.AuthManager == nil {
 		return canonicalPlan{}, false, nil
 	}
@@ -354,7 +400,7 @@ func canonicalBody(raw []byte, model string) []byte {
 	}
 	return updated
 }
-func canonicalHeaders(headers http.Header, p canonicalPlan, stage canonicalStage, selected string, count int) http.Header {
+func canonicalHeaders(headers http.Header, p canonicalPlan, stage canonicalStage, selected string, count int, bindings map[string]registry.CanonicalDispatchBinding) http.Header {
 	if headers == nil {
 		headers = http.Header{}
 	}
@@ -362,27 +408,36 @@ func canonicalHeaders(headers http.Header, p canonicalPlan, stage canonicalStage
 	headers.Set("X-Gateway-Requested-Model", p.Requested)
 	headers.Set("X-Gateway-Resolved-Model", resolved)
 	headers.Set("X-Gateway-Cost-Policy", p.Policy)
-	if info := registry.GetGlobalRegistry().CanonicalRouteInfos(stage.Model)[selected]; info != nil {
-		headers.Set("X-Gateway-Provider", info.OwnedBy)
+	if b, ok := bindings[selected]; ok {
+		headers.Set("X-Gateway-Provider", b.Owner)
 	}
 	log.WithFields(log.Fields{"requested_model": p.Requested, "resolved_model": resolved, "provider": headers.Get("X-Gateway-Provider"), "cost_policy": p.Policy, "attempts": count}).Info("canonical request resolved")
 	return headers
 }
-func canonicalAttemptContextFor(ctx context.Context, stage canonicalStage, excluded []string, selected *string) context.Context {
+func canonicalAttemptContextFor(ctx context.Context, stage canonicalStage, r canonicalRequirements, tried, quota map[string]bool, selected *string) (context.Context, map[string]registry.CanonicalDispatchBinding) {
 	previous := selectedAuthIDCallbackFromContext(ctx)
-	ctx = context.WithValue(ctx, canonicalAttemptContextKey{}, canonicalAttemptContext{Excluded: excluded, Route: stage.Model})
+	excluded := canonicalExclusions(stage, r, tried, quota)
+	blocked := map[string]bool{}
+	for _, id := range excluded {
+		blocked[id] = true
+	}
+	bindings := map[string]registry.CanonicalDispatchBinding{}
+	for id, info := range registry.GetGlobalRegistry().CanonicalRouteInfos(stage.Model) {
+		if !blocked[id] {
+			bindings[id] = registry.NewCanonicalDispatchBinding(id, stage.Model, info)
+		}
+	}
+	ctx = context.WithValue(ctx, canonicalAttemptContextKey{}, canonicalAttemptContext{Excluded: excluded, Route: stage.Model, Bindings: bindings, Permit: &registry.CanonicalDispatchPermit{}})
 	return WithSelectedAuthIDCallback(ctx, func(id string) {
 		*selected = id
 		if previous != nil {
 			previous(id)
 		}
-	})
+	}), bindings
 }
-func canonicalRecordAttempt(stage canonicalStage, selected string, tried map[string]bool) {
-	if info := registry.GetGlobalRegistry().CanonicalRouteInfos(stage.Model)[selected]; info != nil {
-		tried[canonicalPair(selected, info)] = true
-	} else {
-		tried[selected+"\x00"+stage.Model] = true
+func canonicalRecordAttempt(stage canonicalStage, selected string, bindings map[string]registry.CanonicalDispatchBinding, tried map[string]bool) {
+	if b, ok := bindings[selected]; ok {
+		tried[selected+"\x00"+b.PairSource] = true
 	}
 }
 func (h *BaseAPIHandler) executeWithAuthManagerFormats(ctx context.Context, entry, exit, model string, raw []byte, alt string, image bool, opts modelExecutionOptions) ([]byte, http.Header, *interfaces.ErrorMessage) {
@@ -403,14 +458,14 @@ func (h *BaseAPIHandler) executeWithAuthManagerFormats(ctx context.Context, entr
 	for _, stage := range p.Stages {
 		for count < p.Limit {
 			selected := ""
-			attemptCtx := canonicalAttemptContextFor(ctx, stage, canonicalExclusions(stage, p.Requirements, tried, quota), &selected)
+			attemptCtx, bindings := canonicalAttemptContextFor(ctx, stage, p.Requirements, tried, quota, &selected)
 			body, headers, err := h.executeCanonicalNonstreamAttempt(attemptCtx, entry, exit, stage.Model+p.Suffix, canonicalBody(raw, stage.Model+p.Suffix), alt, image, opts)
 			if selected != "" {
 				count++
-				canonicalRecordAttempt(stage, selected, tried)
+				canonicalRecordAttempt(stage, selected, bindings, tried)
 			}
 			if err == nil {
-				return body, canonicalHeaders(headers, p, stage, selected, count), nil
+				return body, canonicalHeaders(headers, p, stage, selected, count, bindings), nil
 			}
 			if selected != "" || last == nil {
 				last = err
@@ -462,11 +517,11 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context
 		for count < p.Limit {
 			selected := ""
 			attemptCtx, cancel := context.WithCancel(ctx)
-			attemptCtx = canonicalAttemptContextFor(attemptCtx, stage, canonicalExclusions(stage, p.Requirements, tried, quota), &selected)
+			attemptCtx, bindings := canonicalAttemptContextFor(attemptCtx, stage, p.Requirements, tried, quota, &selected)
 			data, headers, errs := h.executeCanonicalStreamAttempt(attemptCtx, entry, exit, stage.Model+p.Suffix, canonicalBody(raw, stage.Model+p.Suffix), alt, image, opts)
 			if selected != "" {
 				count++
-				canonicalRecordAttempt(stage, selected, tried)
+				canonicalRecordAttempt(stage, selected, bindings, tried)
 			}
 			var first []byte
 			var open bool
@@ -480,7 +535,7 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context
 			}
 			if open {
 				out := make(chan []byte)
-				headers = canonicalHeaders(headers, p, stage, selected, count)
+				headers = canonicalHeaders(headers, p, stage, selected, count, bindings)
 				go func() {
 					defer close(out)
 					defer cancel()

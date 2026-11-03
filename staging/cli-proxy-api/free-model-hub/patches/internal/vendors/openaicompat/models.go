@@ -25,6 +25,7 @@ type upstreamModel struct {
 	OutputModalities []string
 	ParametersKnown  bool
 	free             bool
+	pricingPresent   bool
 }
 
 // parseModels accepts {"data":[...]}, {"models":[...]} and bare arrays, the
@@ -95,9 +96,20 @@ func parseModels(body []byte) ([]upstreamModel, error) {
 			}
 		}
 		if pricing, ok := entry["pricing"].(map[string]any); ok {
+			model.pricingPresent = true
 			model.verifiedZero = (zeroPrice(pricing["prompt"]) && zeroPrice(pricing["completion"])) || (zeroPrice(pricing["input"]) && zeroPrice(pricing["output"]))
 		}
-		if strings.HasSuffix(id, ":free") || strings.HasSuffix(id, "/free") {
+		if model.pricingPresent {
+			if pricing, ok := entry["pricing"].(map[string]any); ok {
+				for _, price := range pricing {
+					if !zeroPrice(price) {
+						model.verifiedZero = false
+					}
+				}
+			}
+			model.free = model.verifiedZero
+		}
+		if !model.pricingPresent && strings.HasSuffix(id, ":free") || (!model.pricingPresent && strings.HasSuffix(id, "/free")) {
 			model.free = true
 		}
 		models = append(models, model)

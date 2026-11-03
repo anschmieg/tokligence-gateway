@@ -41,13 +41,19 @@ def planned_config(raw):
  if found!=1:raise RuntimeError('shared Gemini group is ambiguous')
  return yaml.serialize(root).encode()
 def main():
- os.umask(0o077);p=argparse.ArgumentParser();p.add_argument('--native-sha',required=True);p.add_argument('--source',required=True);p.add_argument('--check-only',action='store_true');p.add_argument('--cooldown-fix',action='store_true');a=p.parse_args()
+ os.umask(0o077);p=argparse.ArgumentParser();p.add_argument('--native-sha',required=True);p.add_argument('--source',required=True);p.add_argument('--check-only',action='store_true');p.add_argument('--cooldown-fix',action='store_true');p.add_argument('--hardening',action='store_true');p.add_argument('--plugin-sha');a=p.parse_args()
+ if a.hardening and not a.plugin_sha:p.error('--hardening requires --plugin-sha')
+ if a.hardening and a.cooldown_fix:p.error('select one upgrade')
  token=json.load(sys.stdin)['token'];key=(R/'secrets/management.key').read_text().strip()
  lock=(R/'state/freehub-deployment.lock').open('a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
- version='v2' if a.cooldown_fix else 'v1'
- journal=R/('canonical-policy-deployment-'+version+'.json');target=R/'bin/cli-proxy-api';pending=R/('canonical-policy-cooldown-native.pending' if a.cooldown_fix else 'canonical-policy-native.pending');backup=R/('bin/cli-proxy-api-before-canonical-policy-'+version);conf=R/'config/config.yaml';config_backup=R/('secrets/config-before-canonical-policy-'+version+'.yaml')
+ version='v3' if a.hardening else 'v2' if a.cooldown_fix else 'v1'
+ preserve_config=a.hardening or a.cooldown_fix
+ journal=R/('canonical-policy-deployment-'+version+'.json');target=R/'bin/cli-proxy-api';pending=R/('canonical-policy-hardening-native.pending' if a.hardening else 'canonical-policy-cooldown-native.pending' if a.cooldown_fix else 'canonical-policy-native.pending');backup=R/('bin/cli-proxy-api-before-canonical-policy-'+version);conf=R/'config/config.yaml';config_backup=R/('secrets/config-before-canonical-policy-'+version+'.yaml')
  if any(x.exists() for x in [journal,backup,config_backup]):raise RuntimeError('existing operation; inspect, never replay')
  old='55c14635d9a60d2264300ea0bd3c7a26a36c45272a3cd1ae1bdb5fb0384290e9' if a.cooldown_fix else OLD
+ if a.hardening:old='729572b5532f2f3ecf27c673fccc164fb138cadbbd49a84e2c2a17013dc1f569'
+ plugin=R/'plugins/free-model-hub.so';plugin_pending=R/'canonical-policy-hardening-plugin.pending';plugin_backup=R/'bin/free-model-hub-before-canonical-hardening.so'
+ if a.hardening and (plugin_backup.exists() or sha(plugin)!='51fc4af90894999977ceb2c3f8fd0cdaf1302e669743021194d2c1b44dc093c9' or sha(plugin_pending)!=a.plugin_sha):raise RuntimeError('plugin artifact or existing backup differs')
  if sha(target)!=old or sha(pending)!=a.native_sha:raise RuntimeError('native artifact differs')
  runtime=(R/'state/coolify-runtime.lock').open('r')
  def held():
@@ -68,21 +74,22 @@ def main():
  def cool(path,method='GET'):return req('http://127.0.0.1:8000/api/v1/'+path,token,method)
  before=api('/v8/management/config');client=before['access']['api-keys'][0]
  old_rows=req(origin()+'/v1/models',client)['data']
- raw=conf.read_bytes();config_hash=sha(conf);planned=raw if a.cooldown_fix else planned_config(raw)
+ raw=conf.read_bytes();config_hash=sha(conf);planned=raw if preserve_config else planned_config(raw)
  if a.check_only:
   print(json.dumps({'admission':'ready','deployment_lock_free':True,'one_owner':True,'config_prepared':bool(planned),'native_sha':a.native_sha,'provider_inference_requests':0}));return
  # Compare only the intended two policy additions and the existing Free Tier group's label.
  expected=normalized(before)
- if not a.cooldown_fix:
+ if not preserve_config:
   expected.setdefault('models',{})['canonical-only']=True
   expected['models']['canonical-routing']={'max-attempts':8,'max-fallback-models':3}
   for group in expected['api-keys']['gemini']:
    if group.get('name')=='gemini-free':group['free-tier']=True
- protected=[R/'plugins/opencode.so',R/'plugins/free-model-hub.so',R/'config/static/management.html']
+ protected=[R/'plugins/opencode.so',R/'config/static/management.html']
+ if not a.hardening:protected.append(plugin)
  protected += [x for x in (R/'auth').glob('*.json') if json.loads(x.read_text()).get('type')=='opencode']
  protected += list(R.glob('*live*.json'))
  protected_hashes={str(x):sha(x) for x in protected};auth_names={x.name for x in (R/'auth').glob('*.json')}
- result={'phase':'prepared','source_commit':a.source,'backend_sha256':a.native_sha,'provider_inference_requests':0,'models_before':len(old_rows)}
+ result={'phase':'prepared','source_commit':a.source,'backend_sha256':a.native_sha,'freehub_sha256':a.plugin_sha if a.hardening else sha(plugin),'provider_inference_requests':0,'models_before':len(old_rows)}
  def save():journal.write_text(json.dumps(result,indent=2)+'\n')
  with journal.open('x') as f:json.dump(result,f)
  stopped=False;swapped=False
@@ -98,9 +105,11 @@ def main():
   if sha(conf)!=config_hash:raise RuntimeError('config changed while stopping')
   shutil.copyfile(conf,config_backup);config_backup.chmod(0o600)
   shutil.copyfile(target,backup);backup.chmod(0o700)
-  if not a.cooldown_fix:
+  if not preserve_config:
    temporary=conf.with_suffix('.canonical-policy.pending');temporary.write_bytes(planned);temporary.chmod(0o600);os.replace(temporary,conf)
   os.replace(pending,target);target.chmod(0o700);swapped=True
+  if a.hardening:
+   shutil.copyfile(plugin,plugin_backup);plugin_backup.chmod(0o700);os.replace(plugin_pending,plugin);plugin.chmod(0o700)
   fcntl.flock(runtime,fcntl.LOCK_UN)
   deployment=cool('applications/'+APP+'/start','POST').get('deployment_uuid')
   if not deployment:raise RuntimeError('missing deployment identity')
@@ -116,7 +125,7 @@ def main():
   # Omitted false/empty default fields are normalized by native serialization.
   actual.setdefault('models',{}).get('canonical-routing',{}).pop('free-fallbacks',None)
   if actual!=expected:raise RuntimeError('unrelated config changed or policy not loaded')
-  if a.cooldown_fix and sha(conf)!=config_hash:raise RuntimeError('cooldown-only upgrade changed configuration')
+  if preserve_config and sha(conf)!=config_hash:raise RuntimeError('cooldown-only upgrade changed configuration')
   deadline=time.monotonic()+110
   while True:
    rows=req(origin()+'/v1/models',client)['data'];byid={m['id']:m for m in rows}
@@ -125,9 +134,10 @@ def main():
    time.sleep(1)
   if any(name.endswith((':free',':paid')) for name in byid):raise RuntimeError('internal selectors visible')
   if any(sha(Path(name))!=digest for name,digest in protected_hashes.items()):raise RuntimeError('protected state changed')
+  if sha(target)!=a.native_sha or (a.hardening and sha(plugin)!=a.plugin_sha):raise RuntimeError('runtime artifact changed')
   if not auth_names<={x.name for x in (R/'auth').glob('*.json')}:raise RuntimeError('credential removed')
   # Sanitized model inventory has no auth indexes or credentials.
-  (R/'state/canonical-policy-models-20261103.json').write_text(json.dumps({'data':rows},indent=2)+'\n')
+  (R/('state/canonical-policy-models-20261103-'+version+'.json')).write_text(json.dumps({'data':rows},indent=2)+'\n')
   result.update(phase='deployed',one_native_owner=True,model_count=len(rows),all_visible_models_canonical=True,hidden_policy_selectors=True,unrelated_config_preserved=True,protected_state_preserved=True,all_account_files_preserved=True,free_only_models=sum(bool(m.get('has_free_routes')) for m in rows),runtime_claim='Canonical publication checked; isolated real-host policy tests passed; no new real inference in rollout.')
   save();print(json.dumps(result),flush=True)
  except Exception as e:

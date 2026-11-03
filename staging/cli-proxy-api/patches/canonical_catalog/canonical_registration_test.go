@@ -12,7 +12,7 @@ func TestCanonicalRegistrationIncludesEverySourceAndExplicitOverride(t *testing.
 	cfg := &config.Config{Models: registry.CatalogSources{CanonicalOnly: true}}
 	s := &Service{}
 	a := &coreauth.Auth{ID: "fixture", Provider: "freehub"}
-	sources := []*ModelInfo{{ID: "llm7-llm7/GLM-5.3-Flash", OwnedBy: "llm7"}, {ID: "llm7-llm7/gpt-oss:20b", OwnedBy: "llm7"}}
+	sources := []*ModelInfo{{ID: "llm7-llm7/GLM-5.3-Flash", OwnedBy: "llm7", PluginCostTier: "free"}, {ID: "llm7-llm7/gpt-oss:20b", OwnedBy: "llm7", PluginCostTier: "free"}}
 	got := s.canonicalizeRegisteredModels(cfg, a, sources)
 	byid := map[string]*ModelInfo{}
 	for _, m := range got {
@@ -115,11 +115,23 @@ func TestCanonicalPluginDisplayAliasDoesNotSplitSourceCooldown(t *testing.T) {
 	cfg := &config.Config{Models: registry.CatalogSources{CanonicalOnly: true}}
 	s := &Service{}
 	a := &coreauth.Auth{ID: "canonical-plugin-cooldown", Provider: "freehub"}
-	for _, m := range s.canonicalizeRegisteredModels(cfg, a, []*ModelInfo{{ID: "glm-5.3-flash", OwnedBy: "llm7"}, {ID: "llm7-llm7/GLM-5.3-Flash", OwnedBy: "llm7"}}) {
+	for _, m := range s.canonicalizeRegisteredModels(cfg, a, []*ModelInfo{{ID: "glm-5.3-flash", OwnedBy: "llm7", PluginCostTier: "free"}, {ID: "llm7-llm7/GLM-5.3-Flash", OwnedBy: "llm7", PluginCostTier: "free"}}) {
 		if m.CanonicalPolicy == "canonical" || m.CanonicalPolicy == "free" {
 			if m.CanonicalSourceID != "llm7-llm7/GLM-5.3-Flash" {
 				t.Fatal(m)
 			}
+		}
+	}
+}
+
+func TestCanonicalCatalogExtraChargesNeverFree(t *testing.T) {
+	for _, pricing := range []string{`{"prompt":"0","completion":"0","request":"1"}`, `{"prompt":"0","completion":"0","image":"1"}`} {
+		s, err := parseDiscoveryCatalog([]byte(`{"data":[{"id":"source:free","pricing":`+pricing+`}]}`), "review", "review.invalid", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(s.models) > 0 {
+			t.Fatal("nonzero auxiliary fee admitted", pricing)
 		}
 	}
 }

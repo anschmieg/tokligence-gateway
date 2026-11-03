@@ -113,7 +113,7 @@ def inner(outer_ns):
                 self.reply(500)
             elif self.path == '/api/gateway/models':
                 count('catalog_get')
-                self.reply(200, json.dumps({'data': ([{'id':'glm-4.7-flash:free','context_length':8192,'max_completion_tokens':128,'architecture':{'input_modalities':['text'],'output_modalities':['text']},'pricing':{'prompt':'0','completion':'0'}}] if policy_mode else []) + ([{'id':'fixture-new:free','pricing':{'prompt':'0','completion':'0'}},{'id':'fixture-paid','pricing':{'prompt':'1','completion':'1'}}] if catalog_mode and not (WORK/'catalog-retired').exists() else []) + [{'id': MODEL, 'isFree': True,
+                self.reply(200, json.dumps({'data': ([{'id':'fixture-paid','pricing':{'prompt':'1','completion':'1'}},{'id':'glm-4.7-flash:free','context_length':8192,'max_completion_tokens':128,'architecture':{'input_modalities':['text'],'output_modalities':['text']},'pricing':{'prompt':'0','completion':'0'}}] if policy_mode else []) + ([{'id':'fixture-new:free','pricing':{'prompt':'0','completion':'0'}},{'id':'fixture-paid','pricing':{'prompt':'1','completion':'1'}}] if catalog_mode and not (WORK/'catalog-retired').exists() else []) + [{'id': MODEL, 'isFree': True,
                     'context_length': 8192, 'supported_parameters': ['max_tokens'], 'pricing': {'prompt': '0', 'completion': '0'}}]}).encode())
             elif multi_mode and self.path == '/api/v1/ai/cline/recommended-models':
                 count('catalog_get')
@@ -330,8 +330,9 @@ def inner(outer_ns):
             config['models']['canonical-only']=True
             config['models']['canonical-routing']={'max-attempts':6,'free-fallbacks':{'nemotron':['glm-4.7-flash']}}
             config['api-keys']={'openai-compatibility':[
-                {'name':'openrouter','prefix':'freefixture','base-url':'https://api.kilo.ai/api/gateway','keys':[{'api-key':'fixture-openrouter'}],'disable-redirects':True,'model-discovery':{'enabled':True,'free-only':True,'refresh-seconds':60},'models':[{'name':MODEL}]},
-                {'name':'paidfixture','prefix':'paidfixture','base-url':'https://api.kilo.ai/api/gateway','keys':[{'api-key':'fixture-paid'}],'disable-redirects':True,'models':[{'name':MODEL}]}]}
+                {'name':'openrouter','prefix':'freefixture','base-url':'https://api.kilo.ai/api/gateway','keys':[{'api-key':'fixture-openrouter'}],'disable-redirects':True,'model-discovery':{'enabled':True,'free-only':True,'refresh-seconds':60},'models':[{'name':MODEL,'alias':'fixture-free-display'},{'name':'fixture-paid','alias':MODEL}]},
+                {'name':'paidfixture','prefix':'paidfixture','base-url':'https://api.kilo.ai/api/gateway','keys':[{'api-key':'fixture-paid'}],'disable-redirects':True,'models':[{'name':MODEL}]},
+                {'name':'retiredfixture','base-url':'https://api.kilo.ai/api/gateway','keys':[{'api-key':'fixture-retired'}],'disable-redirects':True,'model-discovery':{'enabled':True,'free-only':True,'refresh-seconds':60},'models':[{'name':'removed-model:free'}]}]}
         (WORK/'config.yaml').write_text(json.dumps(config))
         serve(18443, Mock, True)
         serve(18444, Mock, True)
@@ -370,6 +371,9 @@ def inner(outer_ns):
             (WORK/'canonical-models.json').write_text(json.dumps(rows,indent=2))
             gate('only_canonical_visible',all(m.get('canonical') and not m['id'].endswith((':free',':paid')) for m in rows))
             gate('qualified_overrides_hidden','kilo-kilo/'+MODEL not in byid and 'paidfixture/'+MODEL not in byid)
+            before=counts['inference_posts']
+            status,_=api('/v1/chat/completions',CLIENT_KEY,{'model':'removed-model:free','stream':True,'messages':[{'role':'user','content':'policy-unknown'}]})
+            gate('unknown_free_suffix_rejected_before_dispatch',status>=400 and counts['inference_posts']==before)
             base={'stream':True,'max_tokens':8,'messages':[{'role':'user','content':'policy-override'}]}
             status,raw=api('/v1/chat/completions',CLIENT_KEY,dict(base,model='kilo-kilo/'+MODEL))
             gate('hidden_override_exact_source',status==200 and b'[DONE]' in raw and policy_calls[-1][2]==MODEL)
@@ -378,6 +382,7 @@ def inner(outer_ns):
                 status,raw=api('/v1/chat/completions',CLIENT_KEY,dict(base,model=model,messages=[{'role':'user','content':case}]))
                 calls=policy_calls[start:]
                 gate(case+'_success',status==200 and b'[DONE]' in raw)
+                gate('no_final_target_alias_escape',all(c[2]!='fixture-paid' for c in policy_calls))
                 gate(case+'_each_pair_once',len(calls)==len({(c[1],c[2]) for c in calls}))
                 gate(case+'_cost_boundary',(calls[-1][1]=='Bearer fixture-paid' if case=='policy-plain' else calls[-1][2]=='glm-4.7-flash:free' and all(c[1]!='Bearer fixture-paid' for c in calls)))
             gate('disabled_opencode_preserved',digest(WORK/'auth/opencode-fixture.json')==seeded_hash)

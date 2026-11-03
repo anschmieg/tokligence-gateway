@@ -33,7 +33,7 @@ func TransportSource(source, owner string) string {
 	source = strings.TrimSpace(source)
 	owner = strings.ToLower(strings.TrimSpace(owner))
 	if owner != "" && !strings.Contains(owner, ",") {
-		if strings.HasPrefix(strings.ToLower(source), owner+"-") {
+		if strings.HasPrefix(strings.ToLower(source), owner+"-"+owner+"/") {
 			source = source[len(owner)+1:]
 		}
 		if strings.HasPrefix(strings.ToLower(source), owner+"/") {

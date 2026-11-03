@@ -54,9 +54,15 @@ func (s *Service) canonicalizeRegisteredModels(cfg *config.Config, a *coreauth.A
 		copy.HideFromDiscovery = true
 		copy.CanonicalSourceID = ""
 		copy.CanonicalPolicy = "override"
+		if a.Provider == "freehub" && m.PluginSourceModelID != "" && m.ID == strings.ToLower(m.OwnedBy)+"-"+m.PluginSourceModelID {
+			copy.CanonicalOverride = true
+		}
 		out = append(out, &copy)
 		original[m.ID] = &copy
 		source := m.MetadataModelID
+		if a.Provider == "freehub" && m.PluginSourceModelID != "" {
+			source = m.PluginSourceModelID
+		}
 		if source == "" {
 			source = m.ID
 		}
@@ -74,16 +80,9 @@ func (s *Service) canonicalizeRegisteredModels(cfg *config.Config, a *coreauth.A
 		if compat == nil {
 			switch a.Provider {
 			case "freehub":
-				free = false
-				switch strings.ToLower(m.OwnedBy) {
-				case "kilo", "openrouter", "cline", "zai", "llm7":
-					free = true
-				}
-				for _, owner := range cfg.Models.FreeTierProviders {
-					if strings.EqualFold(owner, "freehub:"+m.OwnedBy) {
-						free = true
-					}
-				}
+				// Only model-level, producer-supplied cost evidence admits free.
+				// Unknown metadata, including old plugin binaries, is paid-only.
+				free = m.PluginCostTier == "free" || m.PluginCostTier == "included"
 			case "gemini":
 				free = a.AuthKind() != coreauth.AuthKindAPIKey
 				if entry := resolveConfigGeminiKeyForConfig(cfg, a); entry != nil && entry.FreeTier {
@@ -108,6 +107,9 @@ func (s *Service) canonicalizeRegisteredModels(cfg *config.Config, a *coreauth.A
 		label = strings.TrimSpace(label)
 		if label != "" && !strings.Contains(label, ",") {
 			override := label + "/" + modelidentity.TransportSource(source, m.OwnedBy)
+			if override == m.ID {
+				copy.CanonicalOverride = true
+			}
 			if override != m.ID {
 				route := cloneModelInfoForCatalogRoute(m)
 				route.ID = override

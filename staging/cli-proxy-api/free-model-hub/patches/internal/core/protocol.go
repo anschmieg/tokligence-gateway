@@ -28,7 +28,8 @@ func ModelInfoToPluginAPI(vendorID string, info ModelDescriptor) pluginapi.Model
 		name = id
 	}
 	out := pluginapi.ModelInfo{
-		ID:                       id,
+		ID:            id,
+		SourceModelID: id, CostTier: info.CostTier,
 		Object:                   "model",
 		OwnedBy:                  vendorID,
 		Type:                     "chat",
@@ -81,6 +82,7 @@ func ModelInfoToPluginAPI(vendorID string, info ModelDescriptor) pluginapi.Model
 // Upstream model structures vary greatly across vendors; only the fields actually used when registering with the host are kept here,
 // and each vendor performs the conversion within its own package.
 type ModelDescriptor struct {
+	CostTier         string
 	VendorID         string
 	Parameters       []string
 	ParametersKnown  bool

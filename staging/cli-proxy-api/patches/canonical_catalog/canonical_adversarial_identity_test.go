@@ -1,0 +1,11 @@
+package modelidentity
+
+import "testing"
+
+func TestAdversarialReviewFamilyPrefixNotTransport(t *testing.T) {
+	for _, v := range []struct{ id, owner string }{{"mistral-small-3.2", "Mistral"}, {"deepseek-v4", "deepseek"}, {"qwen-3.7", "qwen"}} {
+		if got := Name(v.id, v.owner, false); got != v.id {
+			t.Errorf("real family prefix removed: %s (owner %s) -> %s", v.id, v.owner, got)
+		}
+	}
+}

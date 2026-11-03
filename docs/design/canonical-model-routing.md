@@ -42,8 +42,9 @@ reviewed equivalence exists.
 
 Cost admission is conservative. Native compatible routes require a fresh,
 zero-price catalog admission; stale/removed/repriced sources lose free eligibility.
-FreeHub's existing free-only pools remain free; unproven account-specific
-entitlements are not inferred from a token. The operator's shared `gemini-free`
+FreeHub models carry explicit source/cost evidence; a per-credential ledger
+rechecks it at dispatch. Provider names and paid-visibility toggles never grant
+free admission. Unproven account-specific entitlements are not inferred from a token. The operator's shared `gemini-free`
 group is explicitly marked `free-tier: true`; do not put billed projects in it.
 OAuth subscription/included-allowance lanes do not gain paid-credit escalation.
 Unknown pricing remains eligible only for plain/explicit requests, never `:free`.
@@ -60,3 +61,10 @@ Implementation: pinned native extension under
 by `prepare_canonical_catalog.py`. It is not stock CLIProxyAPI configuration:
 registration, discovery filtering and bounded coordination are custom; native
 translation, auth ownership, execution and cooldown handling remain in use.
+
+Adversarial hardening on Nov3: canonical sources bypass subsequent alias/pool
+resolution, a shared one-use executor permit prevents hidden replay, and cost
+bindings are checked at dispatch. Unknown canonical :free names fail closed;
+only registered overrides with positive provider provenance bypass policy.
+See [the fix report](canonical-routing-hardening-20261103.md) and its isolated
+host evidence. The earlier review remains an immutable record of the failures.

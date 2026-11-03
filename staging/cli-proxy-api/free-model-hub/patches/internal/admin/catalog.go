@@ -352,6 +352,7 @@ func (c *Catalog) CacheProbedModels(vendorID string, models []pluginapi.ModelInf
 // the mismatch of "the list is new, but the multiplier is still from the previous batch".
 func (c *Catalog) cacheProbed(vendorID string, models []pluginapi.ModelInfo) bool {
 	if len(models) == 0 {
+
 		logger.Info("models: %s probe returned 0 model(s); keeping %d cached",
 			vendorID, len(c.Registered(vendorID)))
 		return false
@@ -577,6 +578,8 @@ func (c *Catalog) LoadCachedState(cached []core.CachedModel) {
 			SupportsImages:  item.SupportsImages,
 			SupportsTools:   item.SupportsTool,
 		})
+		model.CostTier = item.CostTier
+		model.SourceModelID = item.SourceModelID
 		model.Thinking = thinkingFromCached(item)
 		entry.models = append(entry.models, model)
 		// Rates are normalized by the provider before writing to the cache (cacheProbed → creditsFromProvider),
@@ -613,6 +616,7 @@ func (c *Catalog) CachedState() []core.CachedModel {
 		for _, model := range entry.models {
 			cachedModel := core.CachedModel{
 				VendorID: vendorID, ID: model.ID, Name: model.Name,
+				CostTier: model.CostTier, SourceModelID: model.SourceModelID,
 				Description: model.Description, ContextLength: model.ContextLength,
 				MaxOutputTokens: model.MaxCompletionTokens,
 				Credits:         entry.credits[model.ID],
@@ -708,6 +712,9 @@ func (c *Catalog) ApplyAliases(vendorID string, models []pluginapi.ModelInfo) []
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	for i := range models {
+		if models[i].SourceModelID == "" {
+			models[i].SourceModelID = models[i].ID
+		}
 		if models[i].OwnedBy == "" {
 			models[i].OwnedBy = vendorID
 		}
