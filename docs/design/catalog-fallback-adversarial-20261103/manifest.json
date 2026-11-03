@@ -1,0 +1,16 @@
+{
+  "reviewed_commit": "2ec1410e3aefbba1c6f38bf096e8530809594bc1",
+  "production_changes": false,
+  "implementation_changes": false,
+  "provider_inference_requests": 0,
+  "counterexamples": 6,
+  "all_counterexample_assertions_failed_as_expected": true,
+  "control_packages_race": "pass",
+  "files": {
+    "controls.txt": "8bd7c5b9b053c3ae40ebe0773b3cedc11ae91494a08ae36a00b8d6e5fe3b5516",
+    "handlers_repro_test.go.txt": "0ac346c2b1470e11146e38ef28d515f3880bdd8d4b9b9ffde247cff526ff75a5",
+    "results.txt": "4e71b14dfa1f38e1dbfd25a414aab8f895041db540c85403efcf924055f054e5",
+    "policy_repro_test.go.txt": "0d2051312cfe4554d48118b96448866856c23bba86d198e6b0587760e7e8fe0b",
+    "protocol_repro_test.go.txt": "8a0e95f926227638e6ff0a6ee4ea845e6e9ddab7a56f914cf31f934ff3ca4229"
+  }
+}
