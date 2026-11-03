@@ -590,3 +590,9 @@ preservation. Focused race regressions and the exact paired artifacts' isolated
 host test passed. Configuration, accounts, dashboard and OpenCode quarantine
 were preserved. No real inference was issued for this correction; the earlier
 live acceptance records remain the current provider evidence.
+
+Nov3 routing correction: implementation order does not imply provider preference.
+All admitted free/included routes now share native credential selection; only
+paid OpenRouter keeps its explicitly requested last priority. Native .13 rollout
+and isolated-host evidence: [deployment](canonical-free-peers-deployment-20261103.json),
+[fixture](canonical-free-peers-isolated-20261103.json). No new provider inference.
