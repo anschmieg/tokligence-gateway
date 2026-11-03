@@ -1,0 +1,59 @@
+{
+  "counts": {
+    "blocked_native_metadata": 1,
+    "catalog_get": 3,
+    "denied_connect": 0,
+    "inference_posts": 1,
+    "quota_origin": 0,
+    "redirect_origin": 0,
+    "redirect_target": 0,
+    "stream_origin": 1,
+    "unexpected_http": 0
+  },
+  "failures": [],
+  "gates": {
+    "auto_model_native_dispatch": true,
+    "automatic_free_model_added": true,
+    "both_plugins_registered": true,
+    "canonical_alias_added": true,
+    "canonical_removed_on_source_removal": true,
+    "canonical_restored_on_source_return": true,
+    "catalog_gets_only_before_caller": true,
+    "console_without_key_401": true,
+    "disabled_opencode_unpublished": true,
+    "final_auth_ownership": true,
+    "login_providers_visible": true,
+    "management_without_key_401": true,
+    "manual_alias_preserved": true,
+    "manual_alias_survives_catalog_changes": true,
+    "network_namespace_isolated": true,
+    "no_reconciliation_inference": true,
+    "no_startup_inference": true,
+    "no_unexpected_provider_requests": true,
+    "only_kilo_auth_and_preserved_opencode": true,
+    "paid_model_not_automatically_added": true,
+    "protected_keyless_console": true,
+    "published_kilo_selection": true,
+    "removed_canonical_fails_before_dispatch": true,
+    "stopped_host_auth_ownership": true,
+    "stopped_host_exact_counts": true,
+    "vendor_admission": true
+  },
+  "input_sha256": {
+    "binary": "f7db6a6a16d82fc87a22d5e052f117f86d00e243c8237e71546fc15c7aa6f768",
+    "free_model_hub": "51fc4af90894999977ceb2c3f8fd0cdaf1302e669743021194d2c1b44dc093c9",
+    "opencode": "19ee4302f7f96418ba0c59d443c4682ba1972de67d7cf1d687ea4e9004df354b"
+  },
+  "namespace": {
+    "inner": "net:[4026533516]",
+    "outer": "net:[4026535122]"
+  },
+  "supervision": {
+    "deadline_seconds": 52,
+    "environment_cleared": true,
+    "exact_plugins_read_only": true,
+    "process_group_killed": true,
+    "unshare_net_required": true
+  },
+  "verdict": "pass"
+}

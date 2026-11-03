@@ -164,6 +164,10 @@ func TestCatalogAutoPeriodicPassAddsAndWithdrawsWithoutConfigWrites(t *testing.T
 		if r.Method != "GET" {
 			t.Error("inference sent by catalog worker")
 		}
+		if generation.Load() == 2 {
+			w.WriteHeader(503)
+			return
+		}
 		if generation.Load() == 0 {
 			w.Write([]byte(`{"data":[{"id":"new-a","pricing":{"request":"0"}}]}`))
 		} else {
@@ -178,6 +182,7 @@ func TestCatalogAutoPeriodicPassAddsAndWithdrawsWithoutConfigWrites(t *testing.T
 	defer func() { discoveryHTTPClient = oldClient }()
 	p := discoveryFixture()
 	p.BaseURL = server.URL + "/v1"
+	p.ModelDiscovery.Aliases = []config.OpenAICompatibilityModel{{Name: "new-a", Alias: "canonical-a"}}
 	p.Models = []config.OpenAICompatibilityModel{{Name: "manual-source", Alias: "manual-alias"}}
 	cfg := &config.Config{OpenAICompatibility: []config.OpenAICompatibility{*p}}
 	manager := coreauth.NewManager(nil, &coreauth.RoundRobinSelector{}, nil)
@@ -214,5 +219,69 @@ func TestCatalogAutoPeriodicPassAddsAndWithdrawsWithoutConfigWrites(t *testing.T
 	after, _ := json.Marshal(cfg)
 	if string(before) != string(after) {
 		t.Fatal("worker rewrote provider configuration")
+	}
+	generation.Store(2)
+	s.catalogDiscoveryPass(context.Background(), now.Add(2802*time.Second))
+	for _, m := range registry.GetGlobalRegistry().GetModelsForClient(auth.ID) {
+		if m.ID == "new-b" || m.ID == "canonical-a" {
+			t.Fatal("stale automatic catalog retained", m)
+		}
+	}
+
+}
+
+func TestCatalogAutoAliasesFollowFreeSourceAndPreserveQualifiedIDs(t *testing.T) {
+	p := discoveryFixture()
+	p.ModelDiscovery.Aliases = []config.OpenAICompatibilityModel{{Name: "z-ai/glm-5.3-flash-free", Alias: "glm-5.3-flash"}}
+	manual := []*ModelInfo{{ID: "operator-choice", MetadataModelID: "manual"}}
+	s := &Service{}
+	if got := s.discoveredCompatModels(p, manual); len(got) != 1 {
+		t.Fatal("alias without successful catalog", got)
+	}
+	for _, tc := range []struct {
+		body string
+		want bool
+	}{
+		{`{"data":[{"id":"z-ai/glm-5.3-flash-free","pricing":{"request":"0"}}]}`, true},
+		{`{"data":[{"id":"z-ai/glm-5.3-flash-free","pricing":{"request":"1"}}]}`, false},
+		{`{"data":[]}`, false},
+		{`{"data":[{"id":"z-ai/glm-5.3-flash-thinking","pricing":{"request":"0"}}]}`, false},
+		{`{"data":[{"id":"z-ai/glm-5.3-flash-free","pricing":{"request":"0"}}]}`, true},
+	} {
+		snapshot, err := parseDiscoveryCatalog([]byte(tc.body), "fixture", "fixture.invalid", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.catalogDiscovery.snapshots = map[string]discoverySnapshot{discoveryKey(p): snapshot}
+		got := s.discoveredCompatModels(p, manual)
+		seen := map[string]bool{}
+		for _, m := range got {
+			seen[m.ID] = true
+			if m.ID == "glm-5.3-flash" && m.MetadataModelID != "z-ai/glm-5.3-flash-free" {
+				t.Fatal("lost exact upstream", m)
+			}
+		}
+		if seen["glm-5.3-flash"] != tc.want || !seen["operator-choice"] {
+			t.Fatal(tc.body, got)
+		}
+		if tc.want && !seen["z-ai/glm-5.3-flash-free"] {
+			t.Fatal("qualified/source route lost")
+		}
+	}
+	// An explicit operator route with this ID wins, rather than becoming ambiguous.
+	snapshot, _ := parseDiscoveryCatalog([]byte(`{"data":[{"id":"z-ai/glm-5.3-flash-free","pricing":{"request":"0"}}]}`), "fixture", "fixture.invalid", true)
+	s.catalogDiscovery.snapshots[discoveryKey(p)] = snapshot
+	got := s.discoveredCompatModels(p, []*ModelInfo{{ID: "glm-5.3-flash", MetadataModelID: "operator-upstream"}})
+	count := 0
+	for _, m := range got {
+		if m.ID == "glm-5.3-flash" {
+			count++
+			if m.MetadataModelID != "operator-upstream" {
+				t.Fatal("operator override lost")
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatal(count)
 	}
 }

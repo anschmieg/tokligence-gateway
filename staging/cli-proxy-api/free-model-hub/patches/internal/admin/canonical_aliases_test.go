@@ -36,3 +36,38 @@ func TestCanonicalAliasMissingSourceDoesNotRoute(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestOperatorAliasFollowsCatalogRemovalAndReturn(t *testing.T) {
+	c := newTestCatalog(t)
+	c.Configure(ModelSettings{ModelNameTag: ModelNameTagPrefix})
+	source := []pluginapi.ModelInfo{{ID: "llm7/GLM-5.3-Flash"}}
+	c.CacheProbedModels("llm7", source)
+	c.SetAlias("llm7", source[0].ID, "glm-5.3-flash")
+	got := c.ApplyAliases("llm7", source)
+	if len(got) != 2 || got[0].ID != "llm7-llm7/GLM-5.3-Flash" || got[1].ID != "glm-5.3-flash" {
+		t.Fatal(got)
+	}
+	if got := c.ResolveOutboundModel("llm7", "glm-5.3-flash"); got != source[0].ID {
+		t.Fatal(got)
+	}
+	other := []pluginapi.ModelInfo{{ID: "llm7/other-model"}}
+	c.CacheProbedModels("llm7", other)
+	for _, m := range c.ApplyAliases("llm7", other) {
+		if m.ID == "glm-5.3-flash" {
+			t.Fatal("removed canonical retained")
+		}
+	}
+	if got := c.ResolveOutboundModel("llm7", "glm-5.3-flash"); got != "glm-5.3-flash" {
+		t.Fatal("stale reverse alias", got)
+	}
+	c.CacheProbedModels("llm7", source)
+	if got := c.ApplyAliases("llm7", source); len(got) != 2 || got[1].ID != "glm-5.3-flash" {
+		t.Fatal("source return not restored", got)
+	}
+	if got := c.ApplyAliases("llm7", nil); len(got) != 0 {
+		t.Fatal("empty runtime catalog retained an alias")
+	}
+	if got := c.ResolveOutboundModel("kilo", "glm-5.3-flash"); got != "glm-5.3-flash" {
+		t.Fatal("alias crossed vendor boundary")
+	}
+}

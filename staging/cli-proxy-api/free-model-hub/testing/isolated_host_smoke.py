@@ -111,7 +111,7 @@ def inner(outer_ns):
                 self.reply(500)
             elif self.path == '/api/gateway/models':
                 count('catalog_get')
-                self.reply(200, json.dumps({'data': ([{'id':'fixture-new:free','pricing':{'prompt':'0','completion':'0'}},{'id':'fixture-paid','pricing':{'prompt':'1','completion':'1'}}] if catalog_mode else []) + [{'id': MODEL, 'isFree': True,
+                self.reply(200, json.dumps({'data': ([{'id':'fixture-new:free','pricing':{'prompt':'0','completion':'0'}},{'id':'fixture-paid','pricing':{'prompt':'1','completion':'1'}}] if catalog_mode and not (WORK/'catalog-retired').exists() else []) + [{'id': MODEL, 'isFree': True,
                     'context_length': 8192, 'supported_parameters': ['max_tokens'], 'pricing': {'prompt': '0', 'completion': '0'}}]}).encode())
             elif multi_mode and self.path == '/api/v1/ai/cline/recommended-models':
                 count('catalog_get')
@@ -308,7 +308,7 @@ def inner(outer_ns):
         if catalog_mode:
             provider=config['api-keys']['openai-compatibility'][0]
             provider['prefix']='disc'
-            provider['model-discovery']={'enabled':True,'free-only':True,'refresh-seconds':60}
+            provider['model-discovery']={'enabled':True,'free-only':True,'refresh-seconds':60,'aliases':[{'name':'fixture-new:free','alias':'fixture-canonical','is-compat':True}]}
             provider['models']=[{'name':MODEL,'alias':'fixture-manual'}]
         (WORK/'config.yaml').write_text(json.dumps(config))
         serve(18443, Mock, True)
@@ -373,8 +373,30 @@ def inner(outer_ns):
             gate('manual_alias_preserved','disc/fixture-manual' in ids)
             gate('paid_model_not_automatically_added','disc/fixture-paid' not in ids)
             gate('catalog_gets_only_before_caller',counts['catalog_get']>=2 and counts['inference_posts']==0)
-            status,raw=api('/v1/chat/completions',CLIENT_KEY,dict(request,model='disc/fixture-new:free'))
+            status,raw=api('/v1/chat/completions',CLIENT_KEY,dict(request,model='disc/fixture-canonical'))
             gate('auto_model_native_dispatch',status==200 and b'[DONE]' in raw and counts['inference_posts']==1)
+            gate('canonical_alias_added','disc/fixture-canonical' in ids and 'disc/fixture-new:free' in ids)
+            # Change only this isolated fixture's local catalog/config generation.
+            # The same production worker reconciles a removal and a re-addition.
+            for generation,retired in [(1,True),(2,False)]:
+                if retired:(WORK/'catalog-retired').touch()
+                else:(WORK/'catalog-retired').unlink()
+                provider['headers']={'X-Fixture-Generation':str(generation)}
+                (WORK/'config.yaml').write_text(json.dumps(config))
+                deadline=time.monotonic()+16
+                while True:
+                    changed_ids={m['id'] for m in get_json('/v1/models',CLIENT_KEY)['data']}
+                    if ('disc/fixture-canonical' in changed_ids)==(not retired) and ('disc/fixture-new:free' in changed_ids)==(not retired):break
+                    if time.monotonic()>deadline:raise GateFailure('canonical_catalog_reconciliation')
+                    time.sleep(.2)
+                gate('canonical_removed_on_source_removal' if retired else 'canonical_restored_on_source_return',True)
+                gate('manual_alias_survives_catalog_changes','disc/fixture-manual' in changed_ids)
+                gate('no_reconciliation_inference',counts['inference_posts']==1)
+                if retired:
+                    rejected_status,_=api('/v1/chat/completions',CLIENT_KEY,dict(request,model='disc/fixture-canonical'))
+                    gate('removed_canonical_fails_before_dispatch',rejected_status>=400 and counts['inference_posts']==1)
+
+
             gate('no_unexpected_provider_requests',counts['unexpected_http']==0 and counts['denied_connect']==0)
             gate('final_auth_ownership',auth_gate())
             return 0

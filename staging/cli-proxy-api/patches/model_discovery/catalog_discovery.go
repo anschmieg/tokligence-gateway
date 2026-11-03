@@ -27,9 +27,10 @@ import (
 
 type catalogRefreshContextKey struct{}
 type discoverySnapshot struct {
-	models  []*ModelInfo
-	seen    map[string]bool
-	details map[string]*ModelInfo
+	models    []*ModelInfo
+	seen      map[string]bool
+	details   map[string]*ModelInfo
+	checkedAt time.Time
 }
 type catalogDiscoveryState struct {
 	mu        sync.RWMutex
@@ -101,6 +102,42 @@ func (s *Service) discoveredCompatModels(p *config.OpenAICompatibility, manual [
 	for _, m := range snapshot.models {
 		if !mapped[m.ID] {
 			out = append(out, m)
+		}
+	}
+	if !p.ModelDiscovery.FreeOnly {
+		return out
+	}
+	// Discovery aliases are additive and must be backed by this successful FREE
+	// snapshot. A manual alias wins; qualified/source IDs remain untouched.
+	present := map[string]bool{}
+	for _, m := range out {
+		present[m.ID] = true
+	}
+	for _, alias := range p.ModelDiscovery.Aliases {
+		ambiguous := false
+		for _, other := range p.ModelDiscovery.Aliases {
+			if other.Alias == alias.Alias && other.Name != alias.Name {
+				ambiguous = true
+				break
+			}
+		}
+		if ambiguous {
+			continue
+		}
+		if alias.Alias == "" || alias.Name == "" || present[alias.Alias] {
+			continue
+		}
+		for _, source := range snapshot.models {
+			if source.ID != alias.Name {
+				continue
+			}
+			clone := cloneModelInfoForCatalogRoute(source)
+			clone.ID, clone.Name, clone.DisplayName = alias.Alias, alias.Alias, alias.Alias
+			clone.MetadataModelID = alias.Name
+			clone.IsCompat = alias.IsCompat
+			out = append(out, &clone)
+			present[alias.Alias] = true
+			break
 		}
 	}
 	return out
@@ -198,7 +235,23 @@ func (s *Service) catalogDiscoveryPass(ctx context.Context, now time.Time) {
 		}
 		snapshot, err := fetchDiscoveryCatalog(ctx, cfg, p, candidates[0])
 		if err != nil {
-			log.WithField("provider", p.Name).Warn("model catalog refresh failed; retained last good catalog")
+			// Expire automatic routes after two missed periods. Never retain a
+			// supposedly free canonical route indefinitely after loss of metadata.
+			s.catalogDiscovery.mu.Lock()
+			old, exists := s.catalogDiscovery.snapshots[key]
+			expired := exists && !old.checkedAt.IsZero() && !now.Before(old.checkedAt.Add(2*discoveryPeriod(p)))
+			if expired {
+				old.models = nil
+				old.details = nil
+				s.catalogDiscovery.snapshots[key] = old
+			}
+			s.catalogDiscovery.mu.Unlock()
+			if expired {
+				for _, a := range candidates {
+					s.refreshModelRegistrationForAuthWithContext(context.WithValue(ctx, catalogRefreshContextKey{}, true), a, nil)
+				}
+			}
+			log.WithField("provider", p.Name).Warn("model catalog refresh failed; automatic routes expire after two periods")
 			continue
 		}
 		// A configuration changed while the GET was in flight: discard stale data.
@@ -210,7 +263,8 @@ func (s *Service) catalogDiscoveryPass(ctx context.Context, now time.Time) {
 			s.catalogDiscovery.snapshots = map[string]discoverySnapshot{}
 		}
 		previous, had := s.catalogDiscovery.snapshots[key]
-		changed := !had || !reflect.DeepEqual(previous, snapshot)
+		snapshot.checkedAt = now
+		changed := !had || !reflect.DeepEqual(previous.models, snapshot.models) || !reflect.DeepEqual(previous.details, snapshot.details)
 		s.catalogDiscovery.snapshots[key] = snapshot
 		s.catalogDiscovery.mu.Unlock()
 		if changed {

@@ -42,3 +42,40 @@ in the prepared tree, focused FreeHub catalog tests, and the existing isolated h
 smoke with `--catalog-discovery`. The latter verifies automatic publication,
 manual alias preservation, paid exclusion, and dispatch of an automatically added
 model against a network-isolated fake provider. It does not prove live entitlement.
+
+## Catalog-backed canonical identities (native.9)
+
+Configure exact routes in each existing provider's `model-discovery` block:
+
+```yaml
+aliases:
+  - name: z-ai/glm-5.3-flash-free
+    alias: glm-5.3-flash
+    is-compat: true
+```
+
+The provider must have `enabled: true` and `free-only: true`. Aliases are added
+only if the exact source is in the successfully fetched, free-admitted snapshot.
+Source/qualified IDs remain available. Manual aliases win; conflicting multiple
+sources for one canonical alias in the same provider fail closed. Native alias
+resolution sends the original source ID, including its free suffix. No model-name
+normalizer, second dispatcher, same-request replay or free-to-paid fallback exists.
+
+Aliases disappear after removal/price change and reappear when the exact eligible
+source returns. Two failed refresh periods expire automatic models and aliases
+(30minutes at the deployed15minute interval); explicit manual selections remain.
+A successful empty catalog also withdraws automatic routes. Credential/provider
+removal is owned by native registration epochs. Publication retains native quota
+state; catalog reconciliation never resets account cooldowns or runs inference.
+
+FreeHub uses its existing vendor-scoped model-alias setting and additive alias
+publication. Runtime registration uses the vendor's current filtered model list;
+a removed/free-policy-ineligible source provides no canonical route for that auth.
+No free/public fallback is enabled for OpenCode, and no quarantined record changes.
+
+Focused tests cover native exact reverse dispatch, manual override, source removal,
+price increase, empty catalog, return, stale expiry, qualified-ID preservation,
+FreeHub vendor boundaries and alias lifecycle. The isolated host fixture sends one
+mock canonical request, checks its exact upstream ID, removes the source, verifies
+rejection before dispatch, restores it, and checks publication without extra
+provider inference. All network traffic remains inside an isolated namespace.
