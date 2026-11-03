@@ -150,7 +150,7 @@ def inner(outer_ns):
                 policy_calls.append((case,token,model))
                 if model not in [MODEL,'glm-4.7-flash:free']:
                     count('unexpected_http');self.reply(500);return
-                if case in ['policy-plain','policy-free'] and model==MODEL and token!='Bearer fixture-paid':
+                if case in ['policy-plain','policy-free','policy-opaque'] and model==MODEL and token!='Bearer fixture-paid':
                     self.reply(503,b'{"error":{"message":"fixture busy"}}');return
                 if case=='policy-free' and token=='Bearer fixture-paid':
                     count('unexpected_http');self.reply(500);return
@@ -385,6 +385,10 @@ def inner(outer_ns):
                 gate('no_final_target_alias_escape',all(c[2]!='fixture-paid' for c in policy_calls))
                 gate(case+'_each_pair_once',len(calls)==len({(c[1],c[2]) for c in calls}))
                 gate(case+'_cost_boundary',(calls[-1][1]=='Bearer fixture-paid' if case=='policy-plain' else calls[-1][2]=='glm-4.7-flash:free' and all(c[1]!='Bearer fixture-paid' for c in calls)))
+            start=len(policy_calls)
+            status,raw=api('/v1/chat/completions',CLIENT_KEY,dict(base,model='nemotron-3.5-lightning:free',previous_response_id='resp_fixture',messages=[{'role':'user','content':'policy-opaque'}]))
+            opaque_calls=policy_calls[start:]
+            gate('opaque_history_never_changes_model',status>=400 and all(c[2]==MODEL and c[1]!='Bearer fixture-paid' for c in opaque_calls))
             gate('disabled_opencode_preserved',digest(WORK/'auth/opencode-fixture.json')==seeded_hash)
             gate('only_deliberate_calls',counts['inference_posts']==len(policy_calls) and counts['unexpected_http']==0)
             report['policy_calls']=[{'case':c,'lane':('paid' if t=='Bearer fixture-paid' else 'free'),'model':m} for c,t,m in policy_calls]

@@ -10,9 +10,9 @@ No `paygo/` namespace is introduced.
   selection, then paid routes for **that same model**, with paid OpenRouter last.
 - `glm-5.3-flash:free`: never selects a paid route. After original-model free
   routes fail or are unavailable, considers up to three compatible free models.
-  Family presets rank GLM 4.7 Flash, GLM 4.5 Flash, then Beam; other families have
-  conservative presets and same-family candidates. Removed/unavailable models
-  disappear from consideration automatically.
+  A context-aware similarity ranker considers all compatible free canonical
+  models, prioritizing family continuity for ongoing portable agent history.
+  Removed/repriced/suspended routes lose eligibility automatically.
 - Explicit override, e.g. `orca/z-ai/glm-5.3-flash-free`: exact source selection;
   no cross-provider or cross-model coordinator.
 
@@ -34,36 +34,47 @@ that every provider/model is healthy or that failed upstream requests cost zero.
 Cross-model fallback is chat/text only, requires declared compatible modalities,
 context/output limits and requested tool/JSON/reasoning features. Unknown
 capabilities fail closed; opaque media/document input is not substituted.
-Similarity is a curated family heuristic, not a claim that different weights
-produce identical answers. Configure `models.canonical-routing.free-fallbacks`
-to override family lists. Preset members rank first; other same-family models
-rank afterward, with reverse lexicographic ID ordering for ties (not numeric
-version or measured quality). The current registry and request requirements
-are checked afresh per request; this is not a semantic similarity score. Provider-specific variants, search, reasoning modes,
-quantizations and dated versions retain distinct identities unless an exact
-reviewed equivalence exists.
+Similarity is an explainable metadata/name feature score, not a quality benchmark,
+weight-equivalence claim, or external LLM classifier. No hardcoded model presets
+remain. Provider-specific variants, search, reasoning modes, quantizations and
+dated versions retain distinct identities unless reviewed equivalence exists.
 
-The actual alternate-model chain is assembled per request:
+The alternate-model chain is assembled per request:
 
-1. Classify the requested canonical ID by its name prefix (GLM, Gemini, Claude,
-   GPT/GPT-OSS, Nemotron, Llama, Qwen, Mistral, MiniMax, DeepSeek, Kimi or Beam;
-   otherwise the shared default bucket).
-2. Read the configured family list, or use the built-in preset. GLM uses
-   `glm-4.7-flash`, `glm-4.5-flash`, `beam-free`. Gemini uses
-   `gemini-3.8-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`,
-   `nemotron-3.5-lightning`, `beam-free`. Other/default families use
-   `nemotron-3.5-lightning`, `beam-free`, `glm-4.7-flash`.
-3. Intersect with current canonical registrations having at least one
-   capability-compatible free route. Exclude the requested model and search,
-   `auto/` and `router/` IDs. Non-preset models enter only if their family bucket
-   matches. Unknown families sharing the default bucket is a coarse heuristic.
-4. Sort preset members by list position, then non-preset family members by
-   reverse lexicographic ID. Keep up to three alternatives by default (hard
-   maximum six). This does not estimate semantic distance or model quality.
-5. Exhaust selectable original-model free routes before alternatives, subject
-   to the shared attempt budget and terminal-error rules above. Recheck each
-   alternative route's capabilities and final cost/source binding. A 429 excludes
-   that credential from remaining free alternatives in the same request.
+1. Detect requirements from the original request and conversation history,
+   including historical tool calls/results and unsigned reasoning. Ordinary
+   portable history stays intact; it is never stripped to make a candidate fit.
+2. Recognized signed thinking, encrypted/redacted reasoning, Responses item or
+   conversation references, and server-managed built-in tool history disable
+   cross-model substitution. A shared family name is not evidence that these
+   states are portable. Original-model provider selection is unchanged; even
+   that does not prove a provider-bound signature can move between providers.
+3. Enumerate current canonical registrations across **all families**. Require a
+   free route with declared compatible capabilities and sufficient context/output
+   limits. Exclude known non-chat endpoints and recorded route suspensions/quota
+   holds. Native selection and final dispatch guards remain authoritative.
+4. Score family and numeric generation proximity, coding/math specialization,
+   fast/large naming profile, known parameter-count scale, context/output scale,
+   supported-parameter overlap, modalities and reasoning profile. Unknown data
+   gets no invented score; mandatory capability unknowns remain excluded. Use
+   the least similar eligible route for a model, since native selection may
+   choose any eligible credential. Duplicate credentials never increase a score.
+5. For ongoing tool loops, unsigned reasoning history or multiple assistant
+   turns, compatible same-family candidates precede other families. For portable
+   new tasks, stronger specialization/capability fit can outrank family match.
+   A bounded continuity shortlist reserves its last slot for a cross-family
+   rescue if otherwise every slot would be same-family (when the limit is >1).
+6. Default maximum is three alternate models (hard maximum six), within the
+   existing shared request-attempt budget. Equal scores use ascending ID solely
+   for deterministic ties. Numeric version ordering is never lexicographic.
+
+`models.canonical-routing.free-fallbacks` now provides optional ranked preference
+**bonuses** by family (or `default`), not a closed list; it cannot admit paid or
+incompatible candidates, override opaque-state refusal, or outrank the agent
+continuity class. Thus new eligible models can enter without editing lists.
+Debug logs expose candidate IDs, total/component scores and continuity flags;
+no prompt content, tool arguments, credentials or history payload is logged.
+See [the scoring and verification contract](canonical-similarity-20261103.md).
 
 Cost admission is conservative. Native compatible routes require a fresh,
 zero-price catalog admission; stale/removed/repriced sources lose free eligibility.

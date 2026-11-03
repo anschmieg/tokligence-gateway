@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"sort"
 	"strings"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/interfaces"
@@ -26,6 +25,7 @@ type canonicalRequirements struct {
 	Bytes, Output                    int
 	Tools, JSON, Reasoning, Parallel bool
 	ToolChoice                       bool
+	Continuity, OpaqueState          bool
 	Outputs                          map[string]bool
 	Modalities                       map[string]bool
 }
@@ -41,14 +41,6 @@ type canonicalPlan struct {
 	Requirements                    canonicalRequirements
 }
 
-func canonicalFamily(id string) string {
-	for _, family := range []string{"glm", "gemini", "claude", "gpt-oss", "gpt", "nemotron", "llama", "qwen", "mistral", "minimax", "deepseek", "kimi", "beam"} {
-		if strings.HasPrefix(id, family+"-") || id == family {
-			return family
-		}
-	}
-	return "default"
-}
 func canonicalInput(model string) (base, suffix string, freeOnly, ok bool) {
 	parsed := thinking.ParseSuffix(model)
 	name := parsed.ModelName
@@ -177,6 +169,7 @@ func canonicalRequestRequirements(raw []byte) (canonicalRequirements, error) {
 		}
 	}
 	walk(root)
+	canonicalHistoryRequirements(root, &r)
 	return r, nil
 }
 func containsCanonical(values []string, value string) bool {
@@ -188,7 +181,7 @@ func containsCanonical(values []string, value string) bool {
 	return false
 }
 func canonicalCompatible(info *registry.ModelInfo, r canonicalRequirements) bool {
-	if info == nil || !info.CanonicalFree {
+	if r.OpaqueState || info == nil || !info.CanonicalFree || !canonicalConversationCandidate(info) {
 		return false
 	}
 	// Cross-model substitution is restricted to declared text-output models.
@@ -242,68 +235,6 @@ func canonicalCompatible(info *registry.ModelInfo, r canonicalRequirements) bool
 		}
 	}
 	return true
-}
-func canonicalRankedFallbacks(base string, r canonicalRequirements, p registry.CanonicalRoutingConfig) []string {
-	family := canonicalFamily(base)
-	preferred := p.FreeFallbacks[family]
-	if len(preferred) == 0 {
-		switch family {
-		case "glm":
-			preferred = []string{"glm-4.7-flash", "glm-4.5-flash", "beam-free"}
-		case "gemini":
-			preferred = []string{"gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "nemotron-3.5-lightning", "beam-free"}
-		default:
-			preferred = []string{"nemotron-3.5-lightning", "beam-free", "glm-4.7-flash"}
-		}
-	}
-	ranks := map[string]int{}
-	for i, id := range preferred {
-		ranks[id] = i
-	}
-	type candidate struct {
-		id   string
-		rank int
-	}
-	all := []candidate{}
-	for _, info := range registry.GetGlobalRegistry().GetAvailableModelInfos() {
-		id := info.ID
-		if id == base || info.CanonicalPolicy != "canonical" || strings.Contains(id, "search") || strings.Contains(id, "auto/") || strings.Contains(id, "router/") {
-			continue
-		}
-		eligible := false
-		for _, route := range registry.GetGlobalRegistry().CanonicalRouteInfos(id + ":free") {
-			if canonicalCompatible(route, r) {
-				eligible = true
-				break
-			}
-		}
-		if !eligible {
-			continue
-		}
-		rank, explicit := ranks[id]
-		if explicit {
-			rank += 0
-		} else if canonicalFamily(id) == family {
-			rank = 100
-		} else {
-			continue
-		}
-		all = append(all, candidate{id, rank})
-	}
-	sort.Slice(all, func(i, j int) bool {
-		if all[i].rank != all[j].rank {
-			return all[i].rank < all[j].rank
-		}
-		return all[i].id > all[j].id
-	})
-	ids := []string{}
-	for _, v := range all {
-		ids = append(ids, v.id)
-		if len(ids) >= p.FallbackLimit() {
-			break
-		}
-	}
-	return ids
 }
 func (h *BaseAPIHandler) canonicalPlan(ctx context.Context, model string, raw []byte, opts modelExecutionOptions, crossModel bool) (canonicalPlan, bool, *interfaces.ErrorMessage) {
 	if h.AuthManager == nil || !h.AuthManager.CanonicalRoutingEnabled() {
