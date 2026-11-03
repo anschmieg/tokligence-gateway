@@ -16,7 +16,9 @@ No `paygo/` namespace is introduced.
 - Explicit override, e.g. `orca/z-ai/glm-5.3-flash-free`: exact source selection;
   no cross-provider or cross-model coordinator.
 
-The coordinator uses the native auth manager/selector and its cooldowns. Default
+The coordinator uses the native auth manager/selector and its cooldowns.
+Canonical aliases resolve to a stable source identity: native compatible upstream
+IDs or plugin transport IDs, so display aliases cannot create fresh cooldown keys. Default
 budget is eight selected credential/model attempts, bounded to twelve even if
 configured higher. Every physical pair can be attempted only once per request;
 SDK retries, streaming bootstrap retries, request-driven 401 refresh/replay,

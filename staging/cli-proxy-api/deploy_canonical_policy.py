@@ -41,12 +41,14 @@ def planned_config(raw):
  if found!=1:raise RuntimeError('shared Gemini group is ambiguous')
  return yaml.serialize(root).encode()
 def main():
- os.umask(0o077);p=argparse.ArgumentParser();p.add_argument('--native-sha',required=True);p.add_argument('--source',required=True);p.add_argument('--check-only',action='store_true');a=p.parse_args()
+ os.umask(0o077);p=argparse.ArgumentParser();p.add_argument('--native-sha',required=True);p.add_argument('--source',required=True);p.add_argument('--check-only',action='store_true');p.add_argument('--cooldown-fix',action='store_true');a=p.parse_args()
  token=json.load(sys.stdin)['token'];key=(R/'secrets/management.key').read_text().strip()
  lock=(R/'state/freehub-deployment.lock').open('a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
- journal=R/'canonical-policy-deployment-v1.json';target=R/'bin/cli-proxy-api';pending=R/'canonical-policy-native.pending';backup=R/'bin/cli-proxy-api-before-canonical-policy';conf=R/'config/config.yaml';config_backup=R/'secrets/config-before-canonical-policy.yaml'
+ version='v2' if a.cooldown_fix else 'v1'
+ journal=R/('canonical-policy-deployment-'+version+'.json');target=R/'bin/cli-proxy-api';pending=R/('canonical-policy-cooldown-native.pending' if a.cooldown_fix else 'canonical-policy-native.pending');backup=R/('bin/cli-proxy-api-before-canonical-policy-'+version);conf=R/'config/config.yaml';config_backup=R/('secrets/config-before-canonical-policy-'+version+'.yaml')
  if any(x.exists() for x in [journal,backup,config_backup]):raise RuntimeError('existing operation; inspect, never replay')
- if sha(target)!=OLD or sha(pending)!=a.native_sha:raise RuntimeError('native artifact differs')
+ old='55c14635d9a60d2264300ea0bd3c7a26a36c45272a3cd1ae1bdb5fb0384290e9' if a.cooldown_fix else OLD
+ if sha(target)!=old or sha(pending)!=a.native_sha:raise RuntimeError('native artifact differs')
  runtime=(R/'state/coolify-runtime.lock').open('r')
  def held():
   try:fcntl.flock(runtime,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -66,14 +68,16 @@ def main():
  def cool(path,method='GET'):return req('http://127.0.0.1:8000/api/v1/'+path,token,method)
  before=api('/v8/management/config');client=before['access']['api-keys'][0]
  old_rows=req(origin()+'/v1/models',client)['data']
- raw=conf.read_bytes();config_hash=sha(conf);planned=planned_config(raw)
+ raw=conf.read_bytes();config_hash=sha(conf);planned=raw if a.cooldown_fix else planned_config(raw)
  if a.check_only:
   print(json.dumps({'admission':'ready','deployment_lock_free':True,'one_owner':True,'config_prepared':bool(planned),'native_sha':a.native_sha,'provider_inference_requests':0}));return
  # Compare only the intended two policy additions and the existing Free Tier group's label.
- expected=normalized(before);expected.setdefault('models',{})['canonical-only']=True
- expected['models']['canonical-routing']={'max-attempts':8,'max-fallback-models':3}
- for group in expected['api-keys']['gemini']:
-  if group.get('name')=='gemini-free':group['free-tier']=True
+ expected=normalized(before)
+ if not a.cooldown_fix:
+  expected.setdefault('models',{})['canonical-only']=True
+  expected['models']['canonical-routing']={'max-attempts':8,'max-fallback-models':3}
+  for group in expected['api-keys']['gemini']:
+   if group.get('name')=='gemini-free':group['free-tier']=True
  protected=[R/'plugins/opencode.so',R/'plugins/free-model-hub.so',R/'config/static/management.html']
  protected += [x for x in (R/'auth').glob('*.json') if json.loads(x.read_text()).get('type')=='opencode']
  protected += list(R.glob('*live*.json'))
@@ -94,7 +98,8 @@ def main():
   if sha(conf)!=config_hash:raise RuntimeError('config changed while stopping')
   shutil.copyfile(conf,config_backup);config_backup.chmod(0o600)
   shutil.copyfile(target,backup);backup.chmod(0o700)
-  temporary=conf.with_suffix('.canonical-policy.pending');temporary.write_bytes(planned);temporary.chmod(0o600);os.replace(temporary,conf)
+  if not a.cooldown_fix:
+   temporary=conf.with_suffix('.canonical-policy.pending');temporary.write_bytes(planned);temporary.chmod(0o600);os.replace(temporary,conf)
   os.replace(pending,target);target.chmod(0o700);swapped=True
   fcntl.flock(runtime,fcntl.LOCK_UN)
   deployment=cool('applications/'+APP+'/start','POST').get('deployment_uuid')
@@ -111,6 +116,7 @@ def main():
   # Omitted false/empty default fields are normalized by native serialization.
   actual.setdefault('models',{}).get('canonical-routing',{}).pop('free-fallbacks',None)
   if actual!=expected:raise RuntimeError('unrelated config changed or policy not loaded')
+  if a.cooldown_fix and sha(conf)!=config_hash:raise RuntimeError('cooldown-only upgrade changed configuration')
   deadline=time.monotonic()+110
   while True:
    rows=req(origin()+'/v1/models',client)['data'];byid={m['id']:m for m in rows}

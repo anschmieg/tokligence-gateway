@@ -3,6 +3,7 @@ package auth
 import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	"testing"
+	"time"
 )
 
 func TestCanonicalReverseMappingIsCredentialScopedAndKeepsOverrides(t *testing.T) {
@@ -24,5 +25,20 @@ func TestCanonicalReverseMappingIsCredentialScopedAndKeepsOverrides(t *testing.T
 	}
 	if got := rewriteModelForAuth("orca/z-ai/glm-5.3-flash-free", a); got != "z-ai/glm-5.3-flash-free" {
 		t.Fatal("legacy override lost", got)
+	}
+}
+
+func TestCanonicalSelectorUsesExistingSourceCooldown(t *testing.T) {
+	r := registry.GetGlobalRegistry()
+	a := &Auth{ID: "canonical-held-source", Prefix: "orca", Provider: "openai-compatible-orcarouter", ModelStates: map[string]*ModelState{"z-ai/glm-5.3-flash": {Unavailable: true, NextRetryAfter: time.Now().Add(time.Hour)}}}
+	defer r.UnregisterClient(a.ID)
+	r.RegisterClient(a.ID, a.Provider, []*registry.ModelInfo{{ID: "glm-5.3-flash:paid", HideFromDiscovery: true, CanonicalID: "glm-5.3-flash", CanonicalPolicy: "paid", CanonicalSourceID: "z-ai/glm-5.3-flash"}})
+	m := NewManager(nil, nil, nil)
+	source := m.selectionModelForAuth(a, "glm-5.3-flash:paid")
+	if source != "z-ai/glm-5.3-flash" {
+		t.Fatal(source)
+	}
+	if blocked, _, _ := isAuthBlockedForModel(a, source, time.Now()); !blocked {
+		t.Fatal("new selector bypassed existing upstream cooldown")
 	}
 }

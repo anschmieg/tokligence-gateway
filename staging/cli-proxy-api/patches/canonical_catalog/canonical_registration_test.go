@@ -96,3 +96,30 @@ func TestCanonicalCatalogPriceAndRemovalReconcile(t *testing.T) {
 		}
 	}
 }
+
+func TestCanonicalCompatibleAliasUsesStableUpstreamCooldownIdentity(t *testing.T) {
+	cfg := &config.Config{Models: registry.CatalogSources{CanonicalOnly: true}, OpenAICompatibility: []config.OpenAICompatibility{{Name: "OrcaRouter", BaseURL: "https://api.orcarouter.ai/v1"}}}
+	s := &Service{}
+	a := &coreauth.Auth{ID: "canonical-cooldown", Provider: "openai-compatible-orcarouter", Prefix: "orca", Attributes: map[string]string{"compat_name": "OrcaRouter", "provider_key": "orcarouter"}}
+	source := []*ModelInfo{{ID: "orca/operator-alias", MetadataModelID: "z-ai/glm-5.3-flash", OwnedBy: "OrcaRouter"}}
+	for _, m := range s.canonicalizeRegisteredModels(cfg, a, source) {
+		if m.CanonicalPolicy == "canonical" || m.CanonicalPolicy == "paid" {
+			if m.CanonicalSourceID != "z-ai/glm-5.3-flash" {
+				t.Fatal("operator alias would split native source cooldown", m)
+			}
+		}
+	}
+}
+
+func TestCanonicalPluginDisplayAliasDoesNotSplitSourceCooldown(t *testing.T) {
+	cfg := &config.Config{Models: registry.CatalogSources{CanonicalOnly: true}}
+	s := &Service{}
+	a := &coreauth.Auth{ID: "canonical-plugin-cooldown", Provider: "freehub"}
+	for _, m := range s.canonicalizeRegisteredModels(cfg, a, []*ModelInfo{{ID: "glm-5.3-flash", OwnedBy: "llm7"}, {ID: "llm7-llm7/GLM-5.3-Flash", OwnedBy: "llm7"}}) {
+		if m.CanonicalPolicy == "canonical" || m.CanonicalPolicy == "free" {
+			if m.CanonicalSourceID != "llm7-llm7/GLM-5.3-Flash" {
+				t.Fatal(m)
+			}
+		}
+	}
+}

@@ -132,6 +132,10 @@ func (s *Service) canonicalizeRegisteredModels(cfg *config.Config, a *coreauth.A
 		if requiresCatalog && !catalogSources[source] {
 			continue
 		} // Keep explicit override, but do not advertise a vanished/stale source.
+		dispatchSource := m.ID
+		if compat != nil {
+			dispatchSource = source
+		} // Stable upstream identity also preserves existing source cooldowns.
 		candidate := cloneModelInfoForCatalogRoute(m)
 		candidate.ID = name
 		candidate.Name = name
@@ -141,11 +145,9 @@ func (s *Service) canonicalizeRegisteredModels(cfg *config.Config, a *coreauth.A
 		candidate.CanonicalOverride = false
 		candidate.CanonicalPolicy = "canonical"
 		candidate.CanonicalFree = free
-		if name != m.ID {
-			candidate.CanonicalSourceID = m.ID
-		}
+		candidate.CanonicalSourceID = dispatchSource
 		prev := canonical[name]
-		if prev == nil || (free && !prev.CanonicalFree) || (free == prev.CanonicalFree && (m.ID == name || (prev.CanonicalSourceID != "" && m.ID < prev.CanonicalSourceID))) {
+		if prev == nil || (free && !prev.CanonicalFree) || (free == prev.CanonicalFree && canonicalPreferSource(a.Provider, m.OwnedBy, dispatchSource, prev.CanonicalSourceID)) {
 			canonical[name] = &candidate
 		}
 		policy := cloneModelInfoForCatalogRoute(&candidate)
@@ -159,8 +161,8 @@ func (s *Service) canonicalizeRegisteredModels(cfg *config.Config, a *coreauth.A
 			policy.CanonicalPolicy = "paid"
 		}
 		policy.Name = policy.ID
-		policy.CanonicalSourceID = m.ID
-		if prev := canonical[policy.ID]; prev == nil || m.ID < prev.CanonicalSourceID {
+		policy.CanonicalSourceID = dispatchSource
+		if prev := canonical[policy.ID]; prev == nil || canonicalPreferSource(a.Provider, m.OwnedBy, dispatchSource, prev.CanonicalSourceID) {
 			canonical[policy.ID] = &policy
 		}
 
@@ -209,4 +211,16 @@ func canonicalPolicySignature(cfg *config.Config) [32]byte {
 		Gemini []bool
 	}{cfg.Models, flags})
 	return sha256.Sum256(body)
+}
+
+// Prefer plugin transport source IDs over equivalent display aliases so aliases
+// cannot create a fresh availability key for an existing cooled source.
+func canonicalPreferSource(provider, owner, next, previous string) bool {
+	stable := func(id string) bool {
+		return provider == "freehub" && strings.HasPrefix(strings.ToLower(id), strings.ToLower(owner)+"-")
+	}
+	if stable(next) != stable(previous) {
+		return stable(next)
+	}
+	return previous == "" || next < previous
 }

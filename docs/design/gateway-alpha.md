@@ -561,3 +561,13 @@ Protected settings/accounts/OpenCode evidence were unchanged. These tests used
 the native origin via SSH with real upstream providers, not a renewed public
 Cloudflare ingress test or acceptance of every participating key/model.
 [Actual live evidence](canonical-live-acceptance-20261103.json).
+
+Nov3 canonical routing rollout: native `.10` now exposes canonical model IDs only
+(468 at deployment; dynamic catalog counts will change), with 219 IDs advertising
+free lanes. Plain IDs try free routes then PAYGO for the same model; append
+`:free` to prohibit paid routes and permit compatible free-model fallbacks.
+Provider-qualified overrides remain callable but hidden from discovery.
+See [the routing contract](canonical-model-routing.md) for attempt limits,
+capability gates, price freshness and response disclosure. Accounts and settings
+were preserved. Isolated host verification includes free→paid and free-only
+cross-model boundaries; that evidence is distinct from real provider acceptance.

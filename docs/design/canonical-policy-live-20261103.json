@@ -1,0 +1,21 @@
+{
+  "case": "canonical-policy-live-20261103-v1",
+  "phase": "completed",
+  "model": "glm-5.3-flash:free",
+  "caller_requests": 1,
+  "max_selected_attempts": 8,
+  "cost_policy": "free-only",
+  "test_surface": "native origin via SSH, real upstream inference",
+  "started_at": "2026-11-03T11:35:50.051250+00:00",
+  "http_status": 403,
+  "elapsed_seconds": 1.867,
+  "nonempty_text": false,
+  "finish_reasons": [],
+  "done": false,
+  "response_models": [],
+  "resolution": {},
+  "protected_opencode_unchanged": true,
+  "response_sha256": "029f63ad44b2a438137668dc16ae8974620cd58a88e4c354b4ef7173c3291569",
+  "pass": false,
+  "error_code": "insufficient_quota"
+}
