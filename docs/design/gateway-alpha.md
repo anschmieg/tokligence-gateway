@@ -605,3 +605,26 @@ requested model. No fixed model presets or provider favoritism.
 [deployment](canonical-similarity-deployment-20261103.json), and
 [isolated-host evidence](canonical-similarity-isolated-20261103.json).
 No new real inference during this rollout.
+
+
+## Coding routing profile (November 3)
+
+Native .15 exposes `https://code.nothing.pink/coding/v1` with the existing
+inference API key. Keep each client's preferred canonical model ID. Eligible
+routes for that model run first; only then does a fixed similarity-ranked chain
+use other no-additional-charge models, anchored to the original request. Native
+credential priorities and weights act within each model.
+
+`/v1/models` retains the full canonical catalog (463 at deployment);
+`/coding/v1/models` currently curates three positively evidenced coding models.
+The small picker is not a whitelist for explicit preferences. Chat Completions,
+Messages and Responses streaming are supported; WebSockets, compact-state and
+media endpoints are not added under this profile. See
+[the profile contract](../../staging/cli-proxy-api/catalog-fallback/PROFILES.md).
+
+Strict no-charge routing requires source-price proof or a verified scoped
+no-overage allowance; an OAuth login or Gemini free-tier label alone is
+insufficient. Existing account settings are preserved. Native-origin discovery
+and isolated real-host streaming passed, with no real-provider inference during
+this rollout. Automated public checks hit existing Cloudflare1010 on both old
+and new model URLs, so external client acceptance is not claimed from those checks.
