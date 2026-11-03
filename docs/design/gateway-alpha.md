@@ -517,3 +517,34 @@ catalogGETs each returned200. Shared keys/settings and protected OpenCode state
 preserved. This is representative-model verification, not all-model or billing-tier
 verification, and does not demonstrate independent quota per key.
 [Sanitized live evidence](gemini-keys-live-acceptance-20261103.json).
+
+
+## Canonical model IDs — November 3
+
+Request `glm-5.3-flash` for the reviewed free GLM routes, or
+`nemotron-3.5-lightning` for the reviewed free Lightning routes. The first uses
+LLM7 plus Orca's explicit free source; Lightning uses Kilo, OpenRouter and Requesty.
+Native credential/provider routing remains responsible for selection and cooldowns.
+Existing provider-qualified IDs still force an explicit provider/model route.
+No same-request replay, paid fallback or OpenCode quarantine change was introduced.
+
+These are exact provider-declared identities. Search/thinking/paid/unknown variants
+remain separate. Canonical routes follow successful fresh free catalogs, disappear
+on source removal/price increase, and return when the same eligible source returns.
+Native automatic entries expire after two failed refresh intervals (30minutes at
+current settings). Manual explicit selections remain operator-owned. This does not
+promise permanent free entitlement or independently verify weights/quantization.
+
+Native.9/source`ddf283f`, deployment`ks6c2wauihd2kbfhfivsft12`, is live. All prior
+published IDs survived; user accounts/configuration/Gemini settings/panel/OpenCode
+state were preserved. Shared metadata advertises only common verified capabilities;
+GLM tools/reasoning remain unknown. Focused custom race tests plus the exact-artifact
+network-isolated host check passed canonical dispatch, exact upstream IDs, source
+removal/local rejection and return, without additional upstream mock inference.
+Zero new live provider inference was sent for this rollout.
+
+[Reviewed rules](model-identity-rules-20261103.md),
+[deployment evidence](model-identities-deployment-20261103.json),
+[isolated host evidence](model-identities-isolated-20261103.json).
+Other candidate identity groups remain unmerged pending explicit identity review;
+this is not a universal name-normalization feature.
