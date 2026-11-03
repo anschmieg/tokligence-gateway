@@ -548,3 +548,16 @@ Zero new live provider inference was sent for this rollout.
 [isolated host evidence](model-identities-isolated-20261103.json).
 Other candidate identity groups remain unmerged pending explicit identity review;
 this is not a universal name-normalization feature.
+
+
+Canonical live acceptance, November3: `nemotron-3.5-lightning` passed through
+Requesty; `glm-5.3-flash` initially received LLM7's503 busy-model response, then
+one separate diagnostic request selected Orca and passed. Z.ai's direct free
+`zai-zai/glm-4.7-flash` also passed; previous1113 errors remain historical evidence.
+No billing/account change was made or inferred as the cause. Each successful
+stream returned200, text, stop and DONE. Four actual caller requests total,
+no automatic retries/forced credential/redirect/fallback/configuration changes.
+Protected settings/accounts/OpenCode evidence were unchanged. These tests used
+the native origin via SSH with real upstream providers, not a renewed public
+Cloudflare ingress test or acceptance of every participating key/model.
+[Actual live evidence](canonical-live-acceptance-20261103.json).
