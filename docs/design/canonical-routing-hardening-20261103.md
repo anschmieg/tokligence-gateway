@@ -53,3 +53,10 @@ management-panel changes or second refresh owner are required for this rollout.
 Native and FreeHub artifacts must be swapped together under the existing
 single-owner deployment lock. Existing account/settings/config bytes, dashboard,
 OpenCode plugin and protected account state must remain unchanged.
+
+Deployment completed: source5403559, native `.12` and FreeHub `.1.7`, Coolify
+`g8kawvmrayjlhpraylv18iyw`. The paired artifact swap preserved exact config bytes,
+all account files, the dashboard and protected OpenCode plugin/account state.
+Both native plugins registered; backups are outside the plugin autoload directory.
+The deployment performed no real inference. Detailed record:
+`canonical-hardening-deployment-20261103.json`.

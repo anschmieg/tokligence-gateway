@@ -112,3 +112,10 @@ they are counterexamples, not new passing acceptance tests. One exploratory
 fallback-liveness test only logged a bounded candidate selection and is not
 counted as a finding. No live paid inference or exploitation was attempted.
 Existing OpenCode holds and all completed live journals remain untouched.
+
+## Resolution
+
+All six findings were fixed and deployed in source5403559 (native `.12` +
+FreeHub `.1.7`). Original counterexamples and results above are preserved as
+review evidence. See `canonical-routing-hardening-20261103.md` for the fixes,
+passing permanent regressions, isolated host verification and deployment scope.

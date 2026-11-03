@@ -1,0 +1,18 @@
+{
+  "phase": "deployed",
+  "source_commit": "5403559",
+  "backend_sha256": "ffdcdac567f4871832ea75836bcb0aa70fc03f18e17758eb5c7764b07f945c4e",
+  "freehub_sha256": "927df784dedb67537cb37f61d26adace52ec374922820a8f3c001bfe0981e8b0",
+  "provider_inference_requests": 0,
+  "models_before": 469,
+  "deployment_uuid": "g8kawvmrayjlhpraylv18iyw",
+  "one_native_owner": true,
+  "model_count": 469,
+  "all_visible_models_canonical": true,
+  "hidden_policy_selectors": true,
+  "unrelated_config_preserved": true,
+  "protected_state_preserved": true,
+  "all_account_files_preserved": true,
+  "free_only_models": 215,
+  "runtime_claim": "Canonical publication checked; isolated real-host policy tests passed; no new real inference in rollout."
+}

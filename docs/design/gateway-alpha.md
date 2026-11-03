@@ -582,3 +582,11 @@ retried or converted to paid inference. Native labels 403 as `insufficient_quota
 which alone does not establish a billing or quota cause. Final `.11` had focused
 cooldown regression and exact-host isolated verification; no additional real
 inference was issued during that binary-only correction.
+
+Nov3 adversarial hardening is deployed (native `.12` + FreeHub `.1.7`): final
+source/cost binding, one-use dispatch permits, explicit per-model/per-credential
+free admission, fail-closed missing free IDs, modality checks and family-name
+preservation. Focused race regressions and the exact paired artifacts' isolated
+host test passed. Configuration, accounts, dashboard and OpenCode quarantine
+were preserved. No real inference was issued for this correction; the earlier
+live acceptance records remain the current provider evidence.
