@@ -571,3 +571,14 @@ See [the routing contract](canonical-model-routing.md) for attempt limits,
 capability gates, price freshness and response disclosure. Accounts and settings
 were preserved. Isolated host verification includes free→paid and free-only
 cross-model boundaries; that evidence is distinct from real provider acceptance.
+
+Canonical routing follow-up: `.11` preserves stable source cooldown identities
+across native operator aliases and plugin display aliases; configuration and
+credentials were unchanged. Final publication snapshot: 467 canonical entries,
+216 with admitted free lanes (dynamic, not a fixed promise). A real `.10`
+`nemotron-3.5-lightning:free` call passed via OpenRouter with text/stop/DONE and
+cost-policy disclosure. The GLM `:free` call returned a provider 403; it was not
+retried or converted to paid inference. Native labels 403 as `insufficient_quota`,
+which alone does not establish a billing or quota cause. Final `.11` had focused
+cooldown regression and exact-host isolated verification; no additional real
+inference was issued during that binary-only correction.
