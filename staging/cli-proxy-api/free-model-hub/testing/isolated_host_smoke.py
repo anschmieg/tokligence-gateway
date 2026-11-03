@@ -63,9 +63,11 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def inner(outer_ns):
     global MODEL
+    policy_mode = (WORK/'canonical-policy').exists()
+    policy_calls=[]
     canonical_mode = (WORK/'canonical-routing').exists()
     catalog_mode = (WORK/'catalog-discovery').exists()
-    if canonical_mode: MODEL = 'nvidia/nemotron-3.5-lightning:free'
+    if canonical_mode or policy_mode: MODEL = 'nvidia/nemotron-3.5-lightning:free'
     os.umask(0o077)
     report = {'verdict': 'fail', 'failures': [], 'gates': {}, 'counts': {
         'catalog_get': 0, 'stream_origin': 0, 'redirect_origin': 0,
@@ -111,7 +113,7 @@ def inner(outer_ns):
                 self.reply(500)
             elif self.path == '/api/gateway/models':
                 count('catalog_get')
-                self.reply(200, json.dumps({'data': ([{'id':'fixture-new:free','pricing':{'prompt':'0','completion':'0'}},{'id':'fixture-paid','pricing':{'prompt':'1','completion':'1'}}] if catalog_mode and not (WORK/'catalog-retired').exists() else []) + [{'id': MODEL, 'isFree': True,
+                self.reply(200, json.dumps({'data': ([{'id':'glm-4.7-flash:free','context_length':8192,'max_completion_tokens':128,'architecture':{'input_modalities':['text'],'output_modalities':['text']},'pricing':{'prompt':'0','completion':'0'}}] if policy_mode else []) + ([{'id':'fixture-new:free','pricing':{'prompt':'0','completion':'0'}},{'id':'fixture-paid','pricing':{'prompt':'1','completion':'1'}}] if catalog_mode and not (WORK/'catalog-retired').exists() else []) + [{'id': MODEL, 'isFree': True,
                     'context_length': 8192, 'supported_parameters': ['max_tokens'], 'pricing': {'prompt': '0', 'completion': '0'}}]}).encode())
             elif multi_mode and self.path == '/api/v1/ai/cline/recommended-models':
                 count('catalog_get')
@@ -141,6 +143,20 @@ def inner(outer_ns):
                 count('unexpected_http')
                 self.reply(500)
                 return
+            if policy_mode:
+                token=self.headers.get('Authorization','kilo-public')
+                model=body.get('model')
+                case=body.get('messages',[{}])[-1].get('content')
+                policy_calls.append((case,token,model))
+                if model not in [MODEL,'glm-4.7-flash:free']:
+                    count('unexpected_http');self.reply(500);return
+                if case in ['policy-plain','policy-free'] and model==MODEL and token!='Bearer fixture-paid':
+                    self.reply(503,b'{"error":{"message":"fixture busy"}}');return
+                if case=='policy-free' and token=='Bearer fixture-paid':
+                    count('unexpected_http');self.reply(500);return
+                count('stream_origin')
+                frame={'id':'fixture-policy','object':'chat.completion.chunk','model':model,'choices':[{'index':0,'delta':{'content':'fixture ok'},'finish_reason':'stop'}]}
+                self.reply(200,b'data: '+json.dumps(frame).encode()+b'\n\ndata: [DONE]\n\n','text/event-stream');return
             account = account_tokens.get(self.headers.get('Authorization'))
             expected_model = 'fixture-new:free' if catalog_mode else 'fixture/solar' if self.path == '/api/v1/chat/completions' else MODEL
             if (body.get('model') != expected_model or body.get('stream') is not True
@@ -310,6 +326,12 @@ def inner(outer_ns):
             provider['prefix']='disc'
             provider['model-discovery']={'enabled':True,'free-only':True,'refresh-seconds':60,'aliases':[{'name':'fixture-new:free','alias':'fixture-canonical','is-compat':True}]}
             provider['models']=[{'name':MODEL,'alias':'fixture-manual'}]
+        if policy_mode:
+            config['models']['canonical-only']=True
+            config['models']['canonical-routing']={'max-attempts':6,'free-fallbacks':{'nemotron':['glm-4.7-flash']}}
+            config['api-keys']={'openai-compatibility':[
+                {'name':'openrouter','prefix':'freefixture','base-url':'https://api.kilo.ai/api/gateway','keys':[{'api-key':'fixture-openrouter'}],'disable-redirects':True,'model-discovery':{'enabled':True,'free-only':True,'refresh-seconds':60},'models':[{'name':MODEL}]},
+                {'name':'paidfixture','prefix':'paidfixture','base-url':'https://api.kilo.ai/api/gateway','keys':[{'api-key':'fixture-paid'}],'disable-redirects':True,'models':[{'name':MODEL}]}]}
         (WORK/'config.yaml').write_text(json.dumps(config))
         serve(18443, Mock, True)
         serve(18444, Mock, True)
@@ -328,7 +350,7 @@ def inner(outer_ns):
                 registered = {p['id']: p for p in get_json('/v8/management/plugins')['plugins']}
                 model_ids = [m['id'] for m in get_json('/v1/models', CLIENT_KEY)['data']]
                 if (all(registered.get(p, {}).get('registered') for p in ('opencode', 'free-model-hub'))
-                        and any(MODEL in m and 'kilo' in m for m in model_ids)
+                        and (('nemotron-3.5-lightning' in model_ids) if policy_mode else any(MODEL in m and 'kilo' in m for m in model_ids))
                         and ((multi_mode and any('fixture/solar' in m for m in model_ids))
                             or (not multi_mode and (WORK/'auth/kilo-free.json').exists()))):
                     break
@@ -337,6 +359,31 @@ def inner(outer_ns):
             time.sleep(.15)
         gate('both_plugins_registered', all(registered.get(p, {}).get('registered')
             and registered[p].get('effective_enabled') for p in ('opencode', 'free-model-hub')))
+        if policy_mode:
+            stage='canonical_cost_policy'
+            deadline=time.monotonic()+20
+            while True:
+                rows=get_json('/v1/models',CLIENT_KEY)['data'];byid={m['id']:m for m in rows}
+                if byid.get('glm-4.7-flash',{}).get('has_free_routes'):break
+                if time.monotonic()>deadline:raise GateFailure('free_catalog_policy_missing')
+                time.sleep(.2)
+            (WORK/'canonical-models.json').write_text(json.dumps(rows,indent=2))
+            gate('only_canonical_visible',all(m.get('canonical') and not m['id'].endswith((':free',':paid')) for m in rows))
+            gate('qualified_overrides_hidden','kilo-kilo/'+MODEL not in byid and 'paidfixture/'+MODEL not in byid)
+            base={'stream':True,'max_tokens':8,'messages':[{'role':'user','content':'policy-override'}]}
+            status,raw=api('/v1/chat/completions',CLIENT_KEY,dict(base,model='kilo-kilo/'+MODEL))
+            gate('hidden_override_exact_source',status==200 and b'[DONE]' in raw and policy_calls[-1][2]==MODEL)
+            for case,model in [('policy-plain','nemotron-3.5-lightning'),('policy-free','nemotron-3.5-lightning:free')]:
+                start=len(policy_calls)
+                status,raw=api('/v1/chat/completions',CLIENT_KEY,dict(base,model=model,messages=[{'role':'user','content':case}]))
+                calls=policy_calls[start:]
+                gate(case+'_success',status==200 and b'[DONE]' in raw)
+                gate(case+'_each_pair_once',len(calls)==len({(c[1],c[2]) for c in calls}))
+                gate(case+'_cost_boundary',(calls[-1][1]=='Bearer fixture-paid' if case=='policy-plain' else calls[-1][2]=='glm-4.7-flash:free' and all(c[1]!='Bearer fixture-paid' for c in calls)))
+            gate('disabled_opencode_preserved',digest(WORK/'auth/opencode-fixture.json')==seeded_hash)
+            gate('only_deliberate_calls',counts['inference_posts']==len(policy_calls) and counts['unexpected_http']==0)
+            report['policy_calls']=[{'case':c,'lane':('paid' if t=='Bearer fixture-paid' else 'free'),'model':m} for c,t,m in policy_calls]
+            return 0
         stage = 'management_console'
         gate('management_without_key_401', api(MGMT+'/vendors', key=None)[0] == 401)
         gate('console_without_key_401', api(MGMT+'/console', key=None)[0] == 401)
@@ -489,10 +536,10 @@ def inner(outer_ns):
         # turn a previously passing snapshot into unnoticed extra dispatches.
         if not report['failures']:
             try:
-                gate('stopped_host_exact_counts', counts['inference_posts'] == (1 if catalog_mode else 3 if canonical_mode else 6 if multi_mode else 2)
+                gate('stopped_host_exact_counts', counts['inference_posts'] == (len(policy_calls) if policy_mode else 1 if catalog_mode else 3 if canonical_mode else 6 if multi_mode else 2)
                     and counts['quota_origin'] == (1 if multi_mode else int(quota_mode))
-                    and counts['stream_origin'] == (1 if catalog_mode else 3 if canonical_mode else 5 if multi_mode else 1)
-                    and counts['redirect_origin'] == (0 if catalog_mode or canonical_mode or multi_mode else int(not quota_mode))
+                    and counts['stream_origin'] == (3 if policy_mode else 1 if catalog_mode else 3 if canonical_mode else 5 if multi_mode else 1)
+                    and counts['redirect_origin'] == (0 if policy_mode or catalog_mode or canonical_mode or multi_mode else int(not quota_mode))
                     and counts['redirect_target'] == 0 and counts['unexpected_http'] == 0
                     and counts['denied_connect'] == 0)
                 gate('stopped_host_auth_ownership', auth_gate(check_runtime=False))
@@ -517,11 +564,12 @@ def main():
     parser.add_argument('--opencode-plugin', required=True, help='Exact native OpenCode .so')
     parser.add_argument('--output', required=True, help='NEW private evidence directory')
     parser.add_argument('--quota-error', action='store_true', help='Test upstream429 instead of redirect, in a fresh host')
+    parser.add_argument('--canonical-policy',action='store_true',help='All-model canonical free/paid boundaries with fake upstreams only')
     parser.add_argument('--catalog-discovery', action='store_true', help='Native automatic free catalog publication and one mock inference; zero external network')
     parser.add_argument('--canonical-routing', action='store_true', help='Canonical alias with native OpenRouter + FreeHub Kilo; three isolated mock requests')
     parser.add_argument('--multiple-credentials', action='store_true', help='Two fake Kilo keys and two fake Cline OAuth accounts; six local mock calls')
     args = parser.parse_args()
-    if sum([args.quota_error,args.multiple_credentials,args.canonical_routing,args.catalog_discovery])>1:
+    if sum([args.canonical_policy,args.quota_error,args.multiple_credentials,args.canonical_routing,args.catalog_discovery])>1:
         parser.error('select one scenario')
     os.umask(0o077)
     bwrap = shutil.which('bwrap')
@@ -542,6 +590,8 @@ def main():
         (out/'multiple-credentials').touch()
     if args.canonical_routing:
         (out/'canonical-routing').touch()
+    if args.canonical_policy:
+        (out/'canonical-policy').touch()
     if args.catalog_discovery:
         (out/'catalog-discovery').touch()
     verdict = out/'verdict.json'
