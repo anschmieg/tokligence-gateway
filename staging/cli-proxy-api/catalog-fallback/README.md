@@ -15,10 +15,12 @@ Read [ARCHITECTURE.md](ARCHITECTURE.md) for the decision rationale and boundarie
   fencing, diagnostics and the existing catalog-updater lifecycle.
 - `prepare.py`: creates a NEW scratch backend from the reviewed pinned .9 source
   using the existing canonical preparation. It does not edit a deployed tree.
-- `refresh_modelsdev.py`: data-only public repository snapshot importer, with
+- `policy/live_cache.go` and `github_catalog.go`: native live refresh, conditional
+  HTTP, bounded data-only GitHub parsing and atomic disk-cache persistence.
+- `refresh_modelsdev.py`: optional data-only public repository snapshot importer, with
   commit/archive provenance and atomic output. No upstream code/Git execution.
-- `cmd/`: offline catalog validator and request/route preview, never an inference
-  client. Credential handles are omitted from diagnostic JSON.
+- `cmd/`: catalog validator, public-metadata refresh and offline request/route
+  preview, never an inference client. Credential handles are omitted from diagnostic JSON.
 - `prepare_smoke.py`: derives an evidence-enabled scenario from the shared
   network-isolated actual-host fixture, rather than copying its supervisor.
 
@@ -38,13 +40,15 @@ All eligible free providers use native credential selection, without a brand bon
 4. Infer only defensible task requirements: tools/history imply agent/tool-use;
    JSON implies structured work; requested reasoning implies reasoning; otherwise
    general. The pure API can take an explicit task; no prompt classifier is used.
-5. Use comparable task-specific benchmark *priors*, not name similarity or an
-   intelligence score inferred from architecture. Require matching benchmark,
-   version, harness, variant/settings, dataset and metric. Missing contexts,
-   ambiguous units, arbitrary Elo and descriptive strings stay unknown.
-6. More complete comparable priors outrank partial/unknown evidence; among fully
-   comparable records minimize observed worst degradation then mean loss.
-   Family continuity is an explicit publisher-scoped, soft tie-breaker only.
+5. Compare task-specific published benchmark evidence. Known differences in
+   benchmark version, harness, settings or dataset prevent comparison. Missing
+   settings reduce confidence instead of erasing the result. Unclear score units,
+   unsupported metrics, contradictory duplicate reports and missing values stay
+   unknown; scores from unrelated benchmarks are never directly compared.
+6. Rank by confidence-weighted expected degradation, using a conservative unknown
+   loss prior rather than giving every measured model precedence over unknowns.
+   Coverage, independent benchmark count and available evaluation settings affect
+   confidence. Family continuity remains a publisher-scoped soft tie-breaker.
 7. Passive exact-route latency and declared transport-domain hints can help break
    ties and diversify the shortlist. The draft native adapter supplies domain
    hints but does not manufacture latency/quality telemetry or run probes.
@@ -80,22 +84,51 @@ models:
   canonical-routing:
     max-attempts: 8
     max-fallback-models: 3
-    evidence-catalog: /absolute/path/modelsdev-evidence.json
+    evidence-catalog: https://api.github.com/repos/anomalyco/models.dev/commits/dev
+    evidence-cache: /absolute/existing/state/directory/model-evidence-cache.json
     evidence-max-age-hours: 168
     require-comparable-evidence: false
 ```
 
-A documented public `https://models.dev/catalog.json` source is also supported.
-It returned403 from this development environment; the public GitHub data import
-was exercised successfully instead. No browser identity spoofing is used.
+The gateway refreshes on startup and the existing native three-hour catalog
+cadence. There is no network lookup or cache write during inference. The cache
+parent directory must exist and be writable by the gateway owner.
 
-An absent/disabled evidence source disables alternate-model assembly in this
-candidate. With a configured source, failed updates retain the last valid
-in-memory snapshot. Once evidence exceeds its age limit, quality becomes unknown;
-compatible last-resort candidates remain possible unless strict evidence is set.
-Local files require retrieval timestamps: rereading a stale file does not make its
-contents fresh. Existing native updaters reload sources on their normal cadence.
-No platform automation, new watcher, cron or production configuration is created.
+Two explicit live sources are supported: `https://models.dev/catalog.json`, and
+the GitHub commit endpoint shown above. The JSON endpoint still returns 403 from
+this development environment; native GitHub refresh was exercised successfully.
+It resolves the current commit, downloads its immutable archive only when needed,
+parses bounded TOML metadata using the host's existing TOML dependency and records
+commit/archive provenance. It never executes upstream code or extracts files.
+There is no hidden source switch, browser spoofing or paid feed.
+
+HTTP ETag/Last-Modified validators avoid unnecessary downloads. Valid 304 responses
+renew the origin-validation time. Valid 200 responses atomically replace complete
+snapshots. Invalid/oversized responses, redirects, fetch errors and rate limits
+retain the last valid cache **without renewing its age**. Private 0600 disk writes
+use a temporary file and atomic rename. A valid source-bound disk cache bootstraps
+memory on restart before the first background network request finishes. Disk-write
+failure retains fresh memory and logs the loss of persistence.
+
+Expired evidence loses ranking authority at the configured maximum age; compatible
+unknown-quality last resorts remain possible unless strict evidence is enabled.
+Provider route removal, repricing and cooldowns are enforced separately by native
+state even when metadata is cached. Source/cache configuration changes reuse the
+native updater's cancellation and generation fencing. No new platform watcher,
+cron, schedule or production configuration was created.
+
+Absolute timestamped local files are still supported for offline/operator use.
+An absent/disabled source disables alternate-model assembly in this candidate.
+The live disk envelope is not the same as an imported local catalog JSON; use the
+live URL plus `evidence-cache` for automatic operation.
+
+The metadata-only CLI exercises the same live code without provider calls:
+
+```sh
+go run ./cmd/catalog-fallback-preview \
+  --refresh-source https://api.github.com/repos/anomalyco/models.dev/commits/dev \
+  --cache /absolute/existing/state/directory/model-evidence-cache.json --check
+```
 
 The data-only refresh command can be invoked by existing authorized automation:
 
@@ -161,3 +194,22 @@ See [evidence/verification.json](evidence/verification.json),
 [SOURCE-PINS.md](SOURCE-PINS.md). These are synthetic integration and data-import
 results, **not real provider quality/live acceptance**. No production change was
 made; deployed .14 still has the previously recorded review findings.
+
+## Confidence semantics
+
+The weight is an explicit routing heuristic, **not a calibrated probability**.
+Missing version/harness/variant/dataset multiply evidence weight by 0.8/0.7/0.75/0.9;
+known conflicts exclude the pair. Each independent benchmark contributes at most
+once; repeated reports, variants and credentials cannot inflate support. Prefer
+best-established comparable conditions and take the worse degradation on ties.
+Confidence combines setting completeness, reference coverage and saturating
+benchmark support `n/(n+1)`. A single useful result contributes without claiming
+full coverage. Sorting is deterministic.
+
+`risk_loss = confidence * observed_mean_loss + (1-confidence) * 0.25`.
+Lower ranks first. The 0.25 unknown-loss prior is conservative policy, **not an
+empirical estimate**; tune it only with real downstream evaluation. Unknown models
+can therefore outrank a model with strong evidence of a severe regression.
+Strict comparable mode and explicit loss bounds retain their stronger evidence
+requirements. Neither the score nor the live cache supplies benchmarks absent
+from the upstream data; MiniMax's missing records remain missing.

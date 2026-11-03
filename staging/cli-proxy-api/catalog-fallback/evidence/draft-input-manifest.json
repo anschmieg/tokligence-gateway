@@ -5,14 +5,20 @@
     "host/catalog_fallback_handlers_test.go": "ed9aa233fefa37fd854b077dd899f8ad73bdf64433c4e4ba18f8e7f08854f3b2",
     "host/catalog_fallback_capabilities.go": "8e635fd170201d66e622295163ca98c7e905877a9eaea67929dd45376ac07bea",
     "host/catalog_fallback_auth.go": "3617a59d7b6374640ed93c8f93d6a9b6e109bc16edc43be962412d5c0fac0cae",
-    "host/catalog_fallback_registry.go": "282b682533b23acdfcbd0e5972ddba54d9776dcc512d6c0dee4bb8e5a9ee16d3",
+    "host/catalog_fallback_registry.go": "7ca3796162939cf9420111c8cb7a59d684cc353a58e0d501a6f210e708e75125",
     "host/catalog_fallback_auth_test.go": "1e7879d49c664a8b26a1214c9062894ccdab9557fc58ac8d0e2648be47b00273",
-    "host/catalog_fallback_handlers.go": "6c8489745609374d757afbde3c4ee98389ca1e1b5a35f491b645d5e969d9827a",
+    "host/catalog_fallback_handlers.go": "bb5451d2a5f938b8a03e66f2caf3611dc0c0e8e2c2dce8e30166cf2600e3f53d",
     "host/catalog_fallback_registry_test.go": "1ff20729c601c3936174b5471e2d582d9401dc0306fb07fd2493e2e7dc9e4a8d",
-    "policy/policy.go": "a755487fd42ad20b71066e0ac4ba527fd623dd33d4cc9baf26a5501368ef952b",
+    "policy/live_cache_test.go": "639767d9709d1bd754577127603ea3f99f5bd5c6853d686df6347d17af617ee4",
+    "policy/policy.go": "479d5bdaf461f96d87a0b90a751886da0ac192c982b542839cdeec48a9b52683",
+    "policy/evidence.go": "05ade605e2e1f24fda5fd5cd24f543cebcca357e41e959469c9f72ded7992a8e",
     "policy/request.go": "d1cd6e88c6e6955848c5a58178bba6c997bef999b930e551b04607f3334bb013",
+    "policy/live_cache.go": "692c66ca3509726b171e4e05f0a03d74101979bca54b6c53dc46edc52cfae22a",
+    "policy/github_catalog.go": "cc1553a6cb94c167b9311c72f848a35a89b9453fbcce8f22b6bdfe013237b0cf",
+    "policy/github_catalog_test.go": "3aa06511ee54900e5a5d9038d4e88fd7b70befbb82b28fd63439843c9fbb376a",
     "policy/request_test.go": "a19c377301e416de3fbeded9222b3c10e183289f5c5ba32917245bd3c3352d66",
-    "policy/catalog.go": "c1e78bf88fcf48ffbe620f2bd44b0b994b09c0d652299088b49401ec28270429",
-    "policy/policy_test.go": "0a125bb71b8698aaf58f99587271dac9b4c13e4f7d7b84ec2bd5db643a268922"
+    "policy/evidence_test.go": "e954485c015b677b69b54ba1e775115b3cc8a14ca9dcafc5869f6e6913632ba1",
+    "policy/catalog.go": "f3b12365687d6f86ba218ca977c3ae8ffbd87510bc84a6e41be3e2ceb6fe341e",
+    "policy/policy_test.go": "1def7a06036d0e2d5fd48c6ba2be06df6fd6da7b60546d4a73b2ca78785e4b6b"
   }
 }

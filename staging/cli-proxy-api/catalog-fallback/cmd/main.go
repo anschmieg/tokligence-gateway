@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -30,16 +31,24 @@ func main() {
 	}
 }
 func run() error {
+	refreshSource := flag.String("refresh-source", "", "refresh public metadata only; no inference")
+	cachePath := flag.String("cache", "", "absolute persistent metadata cache path")
 	catalog := flag.String("catalog", "", "combined metadata snapshot")
 	requested := flag.String("model", "", "requested canonical model")
 	request := flag.String("request", "", "offline request JSON (never sent)")
 	routeFile := flag.String("routes", "", "offline native-admitted route JSON")
 	check := flag.Bool("check", false, "validate metadata only")
 	flag.Parse()
-	if *catalog == "" {
-		return fmt.Errorf("--catalog is required")
+	var data []byte
+	var err error
+	fresh := false
+	if *refreshSource != "" {
+		data, fresh, err = catalogfallback.NewLiveCache(nil).Refresh(context.Background(), *refreshSource, *cachePath, time.Now())
+	} else if *catalog != "" {
+		data, err = read(*catalog, catalogfallback.MaxCatalogBytes)
+	} else {
+		return fmt.Errorf("--catalog or --refresh-source is required")
 	}
-	data, err := read(*catalog, catalogfallback.MaxCatalogBytes)
 	if err != nil {
 		return err
 	}
@@ -50,7 +59,7 @@ func run() error {
 	}
 	snapshot := store.Snapshot(now, 7*24*time.Hour)
 	if *check {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"catalog_available": snapshot != nil, "models": snapshot.Count(), "provider_inference_requests": 0})
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"catalog_available": snapshot != nil, "models": snapshot.Count(), "origin_validated_this_run": fresh, "provider_inference_requests": 0})
 	}
 	if *requested == "" || *request == "" || *routeFile == "" {
 		return fmt.Errorf("--model, --request and --routes required for ranking")

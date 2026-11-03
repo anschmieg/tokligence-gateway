@@ -8,7 +8,7 @@ not another proxy or independently refreshing plugin.
 **Right high-level choice:** a policy proposes alternatives; the existing owner
 continues to authorize, select and execute physical attempts.
 
-**Draft:** a pure in-tree policy package plus narrow adapters to the existing
+**Draft:** an in-tree policy package plus narrow adapters to the existing
 canonical coordinator. The pinned v8.0.49 SDK `ModelRouter.RouteModel` returns a
 pre-selection target. `Scheduler.Pick` chooses credentials; lifecycle events are
 terminal/asynchronous. Neither exposes an ordered, post-failure alternate-model
@@ -73,18 +73,19 @@ are not interchangeable. Missing results must not be treated as failure or zero.
 **Right choice:** preserve provenance and conditions, expose uncertainty and avoid
 filling gaps with a synthetic universal intelligence number.
 
-**Draft:** a small benchmark-category taxonomy (not per-model profiles) selects
-relevant evidence. Comparisons require the same benchmark/version/harness/variant/
-dataset/metric. Recognized unambiguous percentage records are normalized; null,
-ambiguous fraction/percentage values, arbitrary Elo and descriptive strings are
-not converted. Duplicate conflicting evaluations are discarded.
+**Draft:** a small task/benchmark taxonomy, exact benchmark/metric matching and
+explicit conflict rejection. Missing evaluation settings attenuate confidence;
+they no longer erase useful partial results. Independent task coverage and
+saturating support prevent duplicate reports/accounts from inflating confidence.
+The rank combines observed degradation with an explicit unknown-loss prior.
+Its confidence is a policy weight, not a calibrated statistical probability.
+Known-bad evidence need not beat an unknown alternative merely because it exists.
 
-`comparable` requires at least two matching records covering the reference set;
-`partial` retains coverage but does not pretend differing matched subsets form
-one precise quality ordering; `unknown` is an explicit last resort. These are
-record-comparability bands, not statistical confidence intervals. Current records
-are conservatively described as publisher-reported priors. A strict pure-library
-loss bound rejects incomplete evidence but still is not a runtime quality SLA.
+A strict evidence mode and optional loss bound remain available. Unrelated scores,
+ambiguous units and missing values are never invented or directly compared.
+The formula/weights are documented in README so this small policy can be evaluated
+and tuned without maintaining per-model profiles. No claim of runtime quality SLA
+or an empirically optimal uncertainty prior is made.
 
 ## 6. Let the request establish requirements without exporting its contents
 
@@ -122,11 +123,17 @@ another source's snapshot. Malformed/oversized/duplicate-key updates are refused
 Expired evidence loses ranking authority; strict mode can refuse unknown quality.
 The route registry remains independently authoritative for model removal/repricing.
 
-The public JSON endpoint was not accessible from this environment, so a tested
-data-only GitHub snapshot importer is supplied as an alternative. It pins commits,
-records archive hashes, limits size and resolves data aliases only inside the
-archive. It never executes downloaded code or extracts filesystem paths. No new
-platform timers/watchers are installed; source automation is a deployment choice.
+The source is live, the immutable snapshot is its inference-time cache. Reuse the
+native startup/three-hour updater, conditional HTTP and atomic source-bound disk
+persistence. Bootstrap from disk on restart; keep original age on outage. Only an
+origin 200/valid 304 renews validation time. Disk failure logs loss of durability
+while retaining fresh memory. Inference never waits for a metadata request.
+
+The public JSON endpoint remains inaccessible here, so the native adapter also
+supports an explicit fixed GitHub commit source. It pins each fetched archive,
+parses data only using the already-present TOML library, and bounds compression,
+records and aliases. It never executes code/extracts paths. The Python importer
+remains optional for offline use. No platform timers/watchers are installed.
 
 ## 8. Preserve native availability semantics and dispatch fencing
 

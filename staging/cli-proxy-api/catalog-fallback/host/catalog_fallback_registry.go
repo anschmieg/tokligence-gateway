@@ -17,12 +17,59 @@ import (
 
 // Reuse the host catalog-updater lifecycle/generation fencing. This source is
 // advisory evidence only: it does not publish routes, auths, costs or aliases.
+var fallbackLiveCache = catalogfallback.NewLiveCache(nil)
 var fallbackEvidenceUpdater = newFallbackEvidenceUpdater()
 
+type fallbackEvidenceSource struct {
+	Source string
+	Cache  string
+}
+
+func configureFallbackEvidence(ctx context.Context, source, cache string) {
+	if source == "disabled" {
+		fallbackEvidenceUpdater.configure(ctx, source)
+		return
+	}
+	descriptor, _ := json.Marshal(fallbackEvidenceSource{source, cache})
+	// Disk bootstrap makes last-good evidence available before the first network
+	// attempt completes. Age still comes from its actual origin validation time.
+	if source == catalogfallback.LiveCatalogURL || source == catalogfallback.GitCatalogURL {
+		if data, ok := fallbackLiveCache.Cached(source, cache, time.Now()); ok {
+			if err := catalogfallback.DefaultStore.PublishFrom(source, data, time.Now()); err != nil {
+				log.Warn("fallback evidence disk cache rejected")
+			}
+		}
+	}
+	fallbackEvidenceUpdater.configure(ctx, string(descriptor))
+}
+
 func newFallbackEvidenceUpdater() *catalogUpdater {
-	u := &catalogUpdater{fetch: readFallbackEvidence}
+	u := &catalogUpdater{fetch: func(ctx context.Context, descriptor string) ([]byte, error) {
+		var d fallbackEvidenceSource
+		if json.Unmarshal([]byte(descriptor), &d) != nil {
+			return nil, errors.New("invalid evidence refresh configuration")
+		}
+		if d.Source == catalogfallback.LiveCatalogURL || d.Source == catalogfallback.GitCatalogURL {
+			data, fresh, err := fallbackLiveCache.Refresh(ctx, d.Source, d.Cache, time.Now())
+			if err != nil {
+				log.Warn("fallback evidence refresh/cache unavailable")
+			}
+			if !fresh && len(data) > 0 {
+				log.Warn("fallback evidence origin unavailable; retained last-good age")
+			}
+			if len(data) > 0 {
+				return data, nil
+			}
+			return nil, err
+		}
+		return readFallbackEvidence(ctx, d.Source)
+	}}
 	u.publish = func(data []byte) ([]string, error) {
-		err := catalogfallback.DefaultStore.PublishFrom(u.source, data, time.Now())
+		var d fallbackEvidenceSource
+		if json.Unmarshal([]byte(u.source), &d) != nil {
+			return nil, errors.New("invalid evidence publication configuration")
+		}
+		err := catalogfallback.DefaultStore.PublishFrom(d.Source, data, time.Now())
 		if err == nil {
 			log.Info("fallback evidence metadata loaded")
 		}
@@ -102,6 +149,9 @@ func (r *ModelRegistry) CanonicalFallbackRegistryAvailable(client, route string,
 
 func ValidateFallbackEvidenceSource(source string) error {
 	if source == "" || source == "disabled" || filepath.IsAbs(source) {
+		return nil
+	}
+	if source == catalogfallback.GitCatalogURL {
 		return nil
 	}
 	u, err := url.Parse(source)

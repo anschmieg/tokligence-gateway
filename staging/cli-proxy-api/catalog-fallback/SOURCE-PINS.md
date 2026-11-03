@@ -10,7 +10,8 @@ This package is a draft; none of these artifacts was installed in production.
 - Canonical schema: https://github.com/anomalyco/models.dev/blob/011577f3bdeab38a8b5a409446ace39d640783d0/packages/core/src/schema-v2.ts
 - Public combined catalog: https://models.dev/catalog.json (HTTP403 from this
   environment; the data-only archive importer was exercised instead).
-- The importer records commit, retrieval time and archive SHA256 in each output.
+- Both native live reader and offline importer record commit, retrieval time and
+  archive SHA256 in each output.
   It reads version2 TOML model/provider data, not the unrelated root `models.json`.
 - Models.dev metadata license: MIT; retained in `NOTICE-modelsdev.txt`.
 - Imported snapshot: 849 canonical models, 220 provider namespaces. The full
@@ -43,3 +44,12 @@ into the verified candidate. The actual-host fixture keeps these existing plugin
 No paid benchmark feed, authenticated enrichment adapter, passive telemetry
 collector or inference-based classifier is implemented. No provider inference,
 OAuth refresh, account mutation or production deployment was performed.
+
+## Live-cache revision
+
+Live GitHub API/archive requests are made by the background gateway updater itself;
+no Python process or external exporter is required. It uses the TOML dependency
+already pinned by the host (`github.com/pelletier/go-toml/v2`), without a new module
+version or downloaded executable. This revision retains strict conflicts and hard
+native admission, while replacing all-or-nothing benchmark ranking with explicit
+confidence-weighted degradation. See README for formula and limitations.

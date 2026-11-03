@@ -54,6 +54,7 @@ type Policy struct {
 type Comparison struct {
 	Matched, ReferenceCount       int
 	Coverage, MeanLoss, WorstLoss float64
+	Confidence, RiskLoss          float64
 	Band                          string
 }
 type Candidate struct {
@@ -131,50 +132,6 @@ func CapabilitiesHash(c Capabilities) string {
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
 }
-func compare(s *Snapshot, baseID, candidateID string, task Task) Comparison {
-	out := Comparison{Band: "unknown"}
-	base, baseOK := s.model(baseID)
-	other, otherOK := s.model(candidateID)
-	if !baseOK || !otherOK {
-		return out
-	}
-	source := benchmarkPoints(base, task)
-	target := benchmarkPoints(other, task)
-	out.ReferenceCount = len(source)
-	for key, a := range source {
-		if b, ok := target[key]; ok {
-			out.Matched++
-			loss := a - b
-			out.MeanLoss += loss
-			if loss > out.WorstLoss {
-				out.WorstLoss = loss
-			}
-		}
-	}
-	if out.Matched > 0 {
-		out.MeanLoss /= float64(out.Matched)
-		out.Coverage = float64(out.Matched) / float64(out.ReferenceCount)
-		out.Band = "partial"
-	}
-	// This means comparable *publisher-reported* evidence, not independent proof.
-	if out.Matched >= 2 && out.Matched == out.ReferenceCount {
-		out.Band = "comparable"
-	}
-	return out
-}
-func band(c Comparison) int {
-	switch c.Band {
-	case "comparable":
-		return 0
-	case "partial":
-		return 1
-	default:
-		return 2
-	}
-}
-
-// Rank only proposes alternate models. Native selection owns routes/credentials.
-// No positive admission comes from the external catalog, architecture or names.
 func Rank(requested string, r Requirements, routes []Route, s *Snapshot, p Policy) Plan {
 	if r.OpaqueState {
 		return Plan{Refused: "opaque conversation state is not transferable"}
@@ -221,7 +178,7 @@ func Rank(requested string, r Requirements, routes []Route, s *Snapshot, p Polic
 	}
 	candidates := []Candidate{}
 	for model, group := range byModel {
-		c := Candidate{ModelID: model, Comparison: Comparison{Band: "unknown"}, Reason: "capability-compatible; quality evidence unknown"}
+		c := Candidate{ModelID: model, Comparison: Comparison{Band: "unknown", RiskLoss: unknownLossPrior}, Reason: "capability-compatible; quality evidence unknown"}
 		identities := map[string]bool{}
 		domains := map[string]bool{}
 		allKnown := true
@@ -257,7 +214,7 @@ func Rank(requested string, r Requirements, routes []Route, s *Snapshot, p Polic
 			c.Continuity = r.Continuity && sourceFamily != "" && sourceFamily == c.Family
 			c.Comparison = compare(s, sourceID, c.EvidenceID, r.Task)
 			if c.Comparison.Matched > 0 {
-				c.Reason = "matched benchmark version/harness/variant; publisher-reported evidence"
+				c.Reason = "confidence-weighted published benchmark evidence; missing settings reduce confidence"
 			}
 		}
 		if !allLatency {
@@ -281,17 +238,11 @@ func Rank(requested string, r Requirements, routes []Route, s *Snapshot, p Polic
 	}
 	sort.Slice(candidates, func(i, j int) bool {
 		a, b := candidates[i], candidates[j]
-		if band(a.Comparison) != band(b.Comparison) {
-			return band(a.Comparison) < band(b.Comparison)
+		if a.Comparison.RiskLoss != b.Comparison.RiskLoss {
+			return a.Comparison.RiskLoss < b.Comparison.RiskLoss
 		}
-		if a.Comparison.Coverage != b.Comparison.Coverage {
-			return a.Comparison.Coverage > b.Comparison.Coverage
-		}
-		if a.Comparison.Band == "comparable" && a.Comparison.WorstLoss != b.Comparison.WorstLoss {
-			return a.Comparison.WorstLoss < b.Comparison.WorstLoss
-		}
-		if a.Comparison.Band == "comparable" && a.Comparison.MeanLoss != b.Comparison.MeanLoss {
-			return a.Comparison.MeanLoss < b.Comparison.MeanLoss
+		if a.Comparison.Confidence != b.Comparison.Confidence {
+			return a.Comparison.Confidence > b.Comparison.Confidence
 		}
 		if a.Continuity != b.Continuity {
 			return a.Continuity
@@ -312,7 +263,7 @@ func Rank(requested string, r Requirements, routes []Route, s *Snapshot, p Polic
 		pick := 0
 		first := candidates[0]
 		for i, c := range candidates {
-			if band(c.Comparison) != band(first.Comparison) || c.Comparison.WorstLoss != first.Comparison.WorstLoss || c.Comparison.Coverage != first.Comparison.Coverage {
+			if c.Comparison.RiskLoss != first.Comparison.RiskLoss || c.Comparison.Confidence != first.Comparison.Confidence {
 				break
 			}
 			fresh := false

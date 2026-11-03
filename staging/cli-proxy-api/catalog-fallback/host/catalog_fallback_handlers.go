@@ -57,7 +57,7 @@ func (h *BaseAPIHandler) canonicalEvidenceStages(ctx context.Context, base strin
 	plan := catalogfallback.Rank(base, r, routes, catalogfallback.DefaultStore.SnapshotForSource(p.EvidenceCatalog, now, age), policy)
 	summary := []map[string]any{}
 	for _, c := range plan.Candidates {
-		summary = append(summary, map[string]any{"model": c.ModelID, "catalog_model": c.EvidenceID, "band": c.Comparison.Band, "matched": c.Comparison.Matched, "coverage": c.Comparison.Coverage, "worst_loss": c.Comparison.WorstLoss, "reason": c.Reason})
+		summary = append(summary, map[string]any{"model": c.ModelID, "catalog_model": c.EvidenceID, "band": c.Comparison.Band, "matched": c.Comparison.Matched, "coverage": c.Comparison.Coverage, "confidence": c.Comparison.Confidence, "risk_loss": c.Comparison.RiskLoss, "worst_loss": c.Comparison.WorstLoss, "reason": c.Reason})
 	}
 	details, _ := json.Marshal(map[string]any{"requested_model": base, "candidates": summary, "refused": plan.Refused})
 	log.Debugf("catalog fallback decision %s", details)

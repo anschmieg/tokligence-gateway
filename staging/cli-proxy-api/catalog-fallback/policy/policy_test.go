@@ -53,7 +53,7 @@ func TestDraftMissingAndIncomparableEvidenceIsNotZero(t *testing.T) {
 	m.Benchmarks[1].Variant = "max-effort"
 	s.models[m.ID] = m
 	p := Rank("glm-5.3-flash", fixtureReq(), fixtureRoutes(), s, Policy{AllowUnknown: true})
-	if len(p.Candidates) != 2 || p.Candidates[0].ModelID != "glm-4.7-flash" || p.Candidates[1].Comparison.Band != "unknown" || p.Candidates[1].Comparison.Matched != 0 {
+	if len(p.Candidates) != 2 || p.Candidates[0].ModelID != "minimax-3.1" || p.Candidates[0].Comparison.Band != "unknown" || p.Candidates[0].Comparison.Matched != 0 {
 		t.Fatal(p)
 	}
 	if got := Rank("glm-5.3-flash", fixtureReq(), fixtureRoutes(), s, Policy{RequireComparable: true}); len(got.Candidates) != 1 {

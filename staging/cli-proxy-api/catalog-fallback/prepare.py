@@ -51,14 +51,15 @@ edit('internal/registry/routing_types.go','Free                                 
 edit('internal/registry/routing_types.go','CostTier: info.PluginCostTier, Free: info.CanonicalFree','CostTier: info.PluginCostTier, Free: info.CanonicalFree,Capabilities:catalogfallback.CapabilitiesHash(CanonicalFallbackCapabilities(info))')
 edit('internal/registry/routing_types.go','import "sync/atomic"','import ("sync/atomic";"github.com/router-for-me/CLIProxyAPI/v8/internal/catalogfallback")')
 edit('internal/registry/routing_types.go','type CanonicalRoutingConfig struct {','''type CanonicalRoutingConfig struct {
+ EvidenceCache string `yaml:"evidence-cache,omitempty" json:"evidence-cache,omitempty"`
  EvidenceCatalog string `yaml:"evidence-catalog,omitempty" json:"evidence-catalog,omitempty"`
  EvidenceMaxAgeHours int `yaml:"evidence-max-age-hours,omitempty" json:"evidence-max-age-hours,omitempty"`
  RequireComparableEvidence bool `yaml:"require-comparable-evidence,omitempty" json:"require-comparable-evidence,omitempty"`
 ''')
-edit('internal/registry/catalog_config.go','func (m CatalogSources) Validate() error {','func (m CatalogSources) Validate() error {\n if err:=ValidateFallbackEvidenceSource(m.CanonicalRouting.EvidenceCatalog);err!=nil{return err};if m.CanonicalRouting.EvidenceMaxAgeHours<0||m.CanonicalRouting.EvidenceMaxAgeHours>2160{return fmt.Errorf("evidence max age out of range")}')
+edit('internal/registry/catalog_config.go','func (m CatalogSources) Validate() error {','func (m CatalogSources) Validate() error {\n if err:=ValidateFallbackEvidenceSource(m.CanonicalRouting.EvidenceCatalog);err!=nil{return err};if m.CanonicalRouting.EvidenceCache!=""&&!filepath.IsAbs(m.CanonicalRouting.EvidenceCache){return fmt.Errorf("evidence cache path must be absolute")};if m.CanonicalRouting.EvidenceMaxAgeHours<0||m.CanonicalRouting.EvidenceMaxAgeHours>2160{return fmt.Errorf("evidence max age out of range")}')
 edit('internal/registry/catalog_sources.go','sources = effectiveCatalogSources(sources, local, home)','''evidenceSource:=sources.CanonicalRouting.EvidenceCatalog
  if evidenceSource==""||home {evidenceSource="disabled"}
- fallbackEvidenceUpdater.configure(ctx,evidenceSource)
+ configureFallbackEvidence(ctx,evidenceSource,sources.CanonicalRouting.EvidenceCache)
  sources = effectiveCatalogSources(sources, local, home)''')
 manifest={str(p.relative_to(HERE)):hashlib.sha256(p.read_bytes()).hexdigest() for folder in ['host','policy'] for p in (HERE/folder).glob('*.go')}
 (a.output/'catalog-fallback-draft.json').write_text(json.dumps({'draft':True,'production_changes':False,'files':manifest},indent=2)+'\n')

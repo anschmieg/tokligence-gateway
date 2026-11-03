@@ -196,11 +196,14 @@ func benchmarkCategory(name string) Task {
 // Unknown contexts and arbitrary metrics (e.g. Elo) stay unknown. Only documented
 // accuracy/pass-rate percentage metrics are normalized here, not arbitrary data.
 func normalizedBenchmark(b Benchmark, task Task) (string, float64, bool) {
-	category := benchmarkCategory(b.Name)
-	if category == "" || (task != General && category != task && !(task == Agent && category == Coding)) {
+	if b.Version == "" || b.Harness == "" || b.Variant == "" {
 		return "", 0, false
 	}
-	if b.Version == "" || b.Harness == "" || b.Variant == "" {
+	return benchmarkValue(b, task)
+}
+func benchmarkValue(b Benchmark, task Task) (string, float64, bool) {
+	category := benchmarkCategory(b.Name)
+	if category == "" || (task != General && category != task && !(task == Agent && category == Coding)) {
 		return "", 0, false
 	}
 	u, err := url.Parse(b.Source)
@@ -224,24 +227,6 @@ func normalizedBenchmark(b Benchmark, task Task) (string, float64, bool) {
 	encoded, _ := json.Marshal(fields)
 	return string(encoded), value / 100, true
 }
-func benchmarkPoints(m Model, task Task) map[string]float64 {
-	out := map[string]float64{}
-	ambiguous := map[string]bool{}
-	for _, b := range m.Benchmarks {
-		key, value, ok := normalizedBenchmark(b, task)
-		if !ok || ambiguous[key] {
-			continue
-		}
-		if previous, exists := out[key]; exists && previous != value {
-			delete(out, key)
-			ambiguous[key] = true
-			continue
-		}
-		out[key] = value
-	}
-	return out
-}
-
 func (s *Snapshot) String() string { return fmt.Sprintf("catalog models=%d", s.Count()) }
 
 func (s *Store) SnapshotForSource(source string, now time.Time, maxAge time.Duration) *Snapshot {

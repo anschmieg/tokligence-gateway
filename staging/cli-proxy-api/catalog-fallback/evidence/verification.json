@@ -1,7 +1,7 @@
 {
   "status": "draft_verified_not_deployed",
-  "native_version": "8.0.49-tokligence.catalog-draft",
-  "binary_sha256": "9936dc775504a7903f6a73f2a5cbc8ef3b31bdb1cf508d480b1f51f02577322f",
+  "native_version": "8.0.49-tokligence.catalog-live-draft",
+  "binary_sha256": "4afb2516f2112dc1daae345bdf1d6f68cb089e1ffccf82f1a748a544eb836dd8",
   "focused_go_race_packages": [
     "internal/catalogfallback",
     "sdk/api/handlers",
@@ -22,5 +22,9 @@
     "No authenticated enrichment adapter or native passive latency collector",
     "Single ranking snapshot per request, native per-attempt admission remains authoritative",
     "Production .14 retains previous review findings until separately reviewed deployment"
-  ]
+  ],
+  "live_metadata_fetch": "pass: native GitHub commit/archive parser, real public data",
+  "cache_tests": "pass: 200/304, restart, stale-on-error, poison/source mismatch, redirects, Git provenance/aliases",
+  "confidence_tests": "pass: missing settings attenuate, explicit conflicts excluded, one benchmark contributes, duplicates do not boost, known severe regressions can rank below unknown",
+  "refresh_lifecycle": "native startup and three-hour cadence; no inference-path I/O"
 }
