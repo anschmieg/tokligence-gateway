@@ -1,0 +1,18 @@
+{
+  "draft": true,
+  "production_changes": false,
+  "files": {
+    "host/catalog_fallback_handlers_test.go": "ed9aa233fefa37fd854b077dd899f8ad73bdf64433c4e4ba18f8e7f08854f3b2",
+    "host/catalog_fallback_capabilities.go": "8e635fd170201d66e622295163ca98c7e905877a9eaea67929dd45376ac07bea",
+    "host/catalog_fallback_auth.go": "3617a59d7b6374640ed93c8f93d6a9b6e109bc16edc43be962412d5c0fac0cae",
+    "host/catalog_fallback_registry.go": "282b682533b23acdfcbd0e5972ddba54d9776dcc512d6c0dee4bb8e5a9ee16d3",
+    "host/catalog_fallback_auth_test.go": "1e7879d49c664a8b26a1214c9062894ccdab9557fc58ac8d0e2648be47b00273",
+    "host/catalog_fallback_handlers.go": "6c8489745609374d757afbde3c4ee98389ca1e1b5a35f491b645d5e969d9827a",
+    "host/catalog_fallback_registry_test.go": "1ff20729c601c3936174b5471e2d582d9401dc0306fb07fd2493e2e7dc9e4a8d",
+    "policy/policy.go": "a755487fd42ad20b71066e0ac4ba527fd623dd33d4cc9baf26a5501368ef952b",
+    "policy/request.go": "d1cd6e88c6e6955848c5a58178bba6c997bef999b930e551b04607f3334bb013",
+    "policy/request_test.go": "a19c377301e416de3fbeded9222b3c10e183289f5c5ba32917245bd3c3352d66",
+    "policy/catalog.go": "c1e78bf88fcf48ffbe620f2bd44b0b994b09c0d652299088b49401ec28270429",
+    "policy/policy_test.go": "0a125bb71b8698aaf58f99587271dac9b4c13e4f7d7b84ec2bd5db643a268922"
+  }
+}
