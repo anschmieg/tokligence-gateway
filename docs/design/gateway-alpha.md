@@ -596,3 +596,12 @@ All admitted free/included routes now share native credential selection; only
 paid OpenRouter keeps its explicitly requested last priority. Native .13 rollout
 and isolated-host evidence: [deployment](canonical-free-peers-deployment-20261103.json),
 [fixture](canonical-free-peers-isolated-20261103.json). No new provider inference.
+
+Nov3 native .14: `:free` alternatives now use context-aware similarity across
+all compatible free model families. Portable agent history prefers family
+continuity; recognized opaque signed/encrypted/server-managed state stays on the
+requested model. No fixed model presets or provider favoritism.
+[Scoring contract](canonical-similarity-20261103.md),
+[deployment](canonical-similarity-deployment-20261103.json), and
+[isolated-host evidence](canonical-similarity-isolated-20261103.json).
+No new real inference during this rollout.
