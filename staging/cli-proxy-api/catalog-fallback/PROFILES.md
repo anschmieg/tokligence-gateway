@@ -1,6 +1,7 @@
 # Task profiles and preferred-model routing
 
-The native coordinator exposes `chat` (general task) and `coding` profiles. Their
+The native coordinator exposes `chat` (general task), `coding`, and `assistant`
+(general task for meeting/transcript copilots) profiles. Their
 selection, billing, control API and telemetry contract is in
 [SESSION-BILLING.md](SESSION-BILLING.md); brief client instructions are in
 [docs/gateway-client-setup.md](../../../docs/gateway-client-setup.md).
@@ -42,6 +43,11 @@ models:
         max-models: 12
         preferred-model: nemotron-3-ultra-550b-a55b
         cost-policy: session
+      assistant:
+        task: general
+        max-models: 8
+        preferred-model: glm-5.3-flash
+        cost-policy: session
       coding:
         task: coding
         max-models: 12
@@ -77,3 +83,16 @@ SUB receipts require verified included subscription allowance. OAuth and a
 free-tier label alone prove neither. New source models inherit no old receipt.
 Revocation/expiry is checked again at physical dispatch, even after planning.
 No production receipt is invented by the implementation or deployment helper.
+
+## Assistant profile
+
+Use `/assistant/v1` with the app's preferred canonical model, or `/v1` with
+virtual alias `assistant`. SUB defaults and session isolation apply unchanged.
+Initial preference is GLM 5.3 Flash; this is an operator choice, not a measured
+latency/meeting-quality result. General-task evidence and original-reference
+similarity govern alternatives. There is no separate latency ranking yet, and no
+system-prompt injection or forced reasoning setting. Apps retain their transcript
+instructions and output-token limits. Required audio, tools and context remain
+per-request admission constraints; text-only routes do not gain audio support
+from the profile name. A provider catalog entry alone is not evidence of
+meeting quality or subjective response speed.

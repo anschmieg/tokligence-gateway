@@ -8,6 +8,13 @@ Never commit keys. Cloudflare login and the Management Key are for administratio
 
 - Default conversational agent: **chat**.
 - Development agents: **coding**.
+- Meeting/transcript copilots: **assistant**, base `https://code.nothing.pink/assistant/v1`
+  or normal `/v1` with model `assistant`. Initial preference: `glm-5.3-flash`;
+  SUB default. Anthropic base: `https://code.nothing.pink/assistant`.
+  This is a general-task profile with similarity fallback, not a measured
+  low-latency ranking or a meeting-specific system prompt. Keep the app's
+  transcript instructions and concise-output limits; prefer streaming. Audio
+  and tool capabilities must be supported by each selected route.
 - Easiest OpenAI-compatible setup, including Rakazo: base URL
   `https://code.nothing.pink/v1`, model **`chat`** or **`coding`**. These virtual
   aliases explicitly enable profile routing. Chat prefers
@@ -40,7 +47,7 @@ provider-qualified overrides allow exact provider control.
 Default billing permission is **SUB**: verified FREE plus verified included
 subscription allowances, no PAYGO. Explicit PAID permits PAYGO, after FREE/SUB for
 each model. `:free` restricts one request to FREE only, excluding subscriptions.
-On ordinary model IDs it cannot change the model; `chat:free`/`coding:free` remain
+On ordinary model IDs it cannot change the model; `chat:free`/`coding:free`/`assistant:free` remain
 explicit profile aliases. Unknown entitlement never qualifies for FREE/SUB.
 
 ## Sessions, commands and status
