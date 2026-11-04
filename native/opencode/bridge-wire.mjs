@@ -1,0 +1,201 @@
+// Wire adaptation only. OpenCode owns model resolution, auth, request
+// preparation, provider serialization and inference. This module executes no tools.
+export class BridgeInputError extends Error {
+  constructor(message, code = "unsupported_bridge_request") {
+    super(message);
+    this.status = 400;
+    this.code = code;
+  }
+}
+
+export class BridgeStreamError extends BridgeInputError {
+  constructor(message, code) { super(message, code); this.status = 502; }
+}
+
+const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const fail = (message) => { throw new BridgeInputError(message); };
+const textParts = (content) => {
+  if (content == null) return [];
+  if (typeof content === "string") return [{ type: "text", text: content }];
+  if (!Array.isArray(content)) return fail("Message content must be text or an array of text parts");
+  return content.map((part) => {
+    if (!object(part) || part.type !== "text" || typeof part.text !== "string") {
+      return fail("The experimental native bridge currently supports text and function tools only");
+    }
+    return { type: "text", text: part.text };
+  });
+};
+
+export function decodeChatRequest(body) {
+  if (!object(body)) return fail("Request must be a JSON object");
+  const supported = new Set(["model", "messages", "stream", "stream_options", "max_tokens", "max_completion_tokens", "temperature", "top_p", "stop", "tools", "tool_choice", "parallel_tool_calls", "reasoning_effort", "user"]);
+  for (const key of Object.keys(body)) if (!supported.has(key)) return fail(`Unsupported native bridge request field: ${key}`);
+  if (typeof body.model !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(body.model)) return fail("Select a bare model ID from the native worker catalog");
+  if (!Array.isArray(body.messages) || !body.messages.length || body.messages.length > 4096) return fail("messages must contain between 1 and 4096 messages");
+  if (body.stream !== undefined && typeof body.stream !== "boolean") return fail("stream must be boolean");
+  if (body.stream_options && (!object(body.stream_options) || Object.keys(body.stream_options).some((key) => key !== "include_usage"))) return fail("Unsupported stream_options");
+  if (body.user !== undefined) return fail("The native bridge does not forward user attribution; use the gateway session header");
+
+  const calls = new Map();
+  const system = [];
+  let conversationStarted = false;
+  const messages = body.messages.map((message) => {
+    if (!object(message) || !["system", "user", "assistant", "tool"].includes(message.role)) return fail("Unsupported message role");
+    const allowed = new Set(["role", "content", "reasoning_content", "reasoning", "tool_calls", "tool_call_id", "provider_metadata"]);
+    for (const key of Object.keys(message)) if (!allowed.has(key)) return fail(`Unsupported native bridge message field: ${key}`);
+    const content = textParts(message.content);
+    if (message.provider_metadata !== undefined) return fail("Opaque provider metadata replay is not supported by this experimental bridge");
+    if (message.role === "system") {
+      if (conversationStarted) return fail("System messages must precede conversation history");
+      system.push(...content);
+      return null;
+    }
+    conversationStarted = true;
+    const reasoning = message.reasoning_content ?? message.reasoning;
+    if (reasoning !== undefined) {
+      if (message.role !== "assistant" || typeof reasoning !== "string") return fail("reasoning_content is supported only as assistant text");
+      content.unshift({ type: "reasoning", text: reasoning });
+    }
+    if (message.tool_calls !== undefined) {
+      if (message.role !== "assistant" || !Array.isArray(message.tool_calls)) return fail("tool_calls must belong to an assistant message");
+      for (const call of message.tool_calls) {
+        if (!object(call) || call.type !== "function" || typeof call.id !== "string" || !call.id || !object(call.function) || typeof call.function.name !== "string") return fail("Invalid function tool call");
+        if (calls.has(call.id)) return fail("Tool call IDs must be unique within the supplied history");
+        if (call.function.arguments !== undefined && typeof call.function.arguments !== "string") return fail("Tool call arguments must be a JSON string");
+        let input;
+        try { input = JSON.parse(call.function.arguments || "{}"); } catch { return fail("Tool call arguments must be valid JSON"); }
+        calls.set(call.id, call.function.name);
+        content.push({ type: "tool-call", id: call.id, name: call.function.name, input });
+      }
+    }
+    if (message.role === "tool") {
+      const name = calls.get(message.tool_call_id);
+      if (!name) return fail("Tool results must reference an earlier assistant tool call");
+      return { role: "tool", content: [{ type: "tool-result", id: message.tool_call_id, name, result: { type: "text", value: content.map((part) => part.text).join("") } }] };
+    }
+    return { role: message.role, content, ...(message.provider_metadata ? { providerMetadata: message.provider_metadata } : {}) };
+  }).filter(Boolean);
+
+  if (body.tools !== undefined && !Array.isArray(body.tools)) return fail("tools must be an array");
+  const names = new Set();
+  const tools = (body.tools || []).map((tool) => {
+    if (!object(tool) || tool.type !== "function" || !object(tool.function)) return fail("Only function tools are supported");
+    const fn = tool.function;
+    if (typeof fn.name !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(fn.name) || names.has(fn.name)) return fail("Tool names must be valid and unique");
+    if (fn.strict === true) return fail("Strict tool schemas are not supported by the pinned native chat compiler");
+    if (!object(fn.parameters)) return fail("Function tools require a JSON schema object");
+    names.add(fn.name);
+    return { type: "function", name: fn.name, description: fn.description || "", inputSchema: fn.parameters };
+  });
+  let toolChoice;
+  if (body.tool_choice !== undefined) {
+    if (["auto", "none", "required"].includes(body.tool_choice)) toolChoice = { type: body.tool_choice };
+    else if (body.tool_choice?.type === "function" && names.has(body.tool_choice.function?.name)) toolChoice = { type: "tool", name: body.tool_choice.function.name };
+    else return fail("Unsupported tool_choice or unknown selected tool");
+  }
+  if (body.parallel_tool_calls !== undefined) {
+    if (typeof body.parallel_tool_calls !== "boolean") return fail("parallel_tool_calls must be boolean");
+    toolChoice = { ...(toolChoice || { type: "auto" }), disableParallelToolUse: !body.parallel_tool_calls };
+  }
+  const options = {};
+  const max = body.max_completion_tokens ?? body.max_tokens;
+  if (max !== undefined) {
+    if (!Number.isSafeInteger(max) || max < 1 || max > 262144) return fail("Invalid output token limit");
+    options.maxTokens = max;
+  }
+  for (const [key, target, min, max] of [["temperature", "temperature", 0, 2], ["top_p", "topP", 0, 1]]) {
+    if (body[key] === undefined) continue;
+    if (typeof body[key] !== "number" || !Number.isFinite(body[key]) || body[key] < min || body[key] > max) return fail(`Invalid ${key}`);
+    options[target] = body[key];
+  }
+  if (body.stop !== undefined) {
+    const stop = typeof body.stop === "string" ? [body.stop] : body.stop;
+    if (!Array.isArray(stop) || stop.some((value) => typeof value !== "string")) return fail("Invalid stop sequences");
+    options.stop = stop;
+  }
+  if (body.reasoning_effort !== undefined) {
+    if (!["none", "minimal", "low", "medium", "high", "xhigh"].includes(body.reasoning_effort)) return fail("Unsupported reasoning_effort");
+    options.reasoningEffort = body.reasoning_effort;
+  }
+  return { model: body.model, stream: body.stream === true, system, messages, tools, toolChoice, options };
+}
+
+export function safeNativeError(error) {
+  if (error instanceof BridgeInputError) return { status: error.status, error: { type: error.status === 400 ? "invalid_request_error" : "native_bridge_error", code: error.code, message: error.message } };
+  const reason = error?.reason || error?.cause?.reason || {};
+  const tag = reason._tag;
+  const upstreamStatus = reason.http?.status;
+  const status = Number.isInteger(upstreamStatus) && upstreamStatus >= 400 && upstreamStatus <= 599 ? upstreamStatus
+    : tag === "QuotaExceeded" || tag === "RateLimit" ? 429 : tag === "Authentication" ? 401 : tag === "InvalidRequest" ? 400 : 502;
+  const codes = new Set(["FreeUsageLimitError", "FreeTierError", "rate_limit_error", "invalid_request_error", "authentication_error"]);
+  let upstreamCode;
+  try {
+    const parsed = JSON.parse(reason.body || "{}");
+    const candidate = parsed?.error?.type || parsed?.error?.code || parsed?.code;
+    if (codes.has(candidate)) upstreamCode = candidate;
+  } catch { /* Never return raw provider bodies or credential-bearing messages. */ }
+  const retry = reason.retryAfterMs ?? reason.rateLimit?.retryAfterMs;
+  const requestId = reason.http?.headers?.["x-opencode-log-id"] || reason.http?.headers?.["x-request-id"];
+  const parameter = typeof reason.parameter === "string" && /^(messages|tools|model|max_tokens|stream|temperature|reasoning)[.\[\]a-zA-Z0-9_-]{0,100}$/.test(reason.parameter) ? reason.parameter : undefined;
+  return { status, error: {
+    type: status === 429 ? "rate_limit_error" : status === 400 ? "invalid_request_error" : "native_bridge_error",
+    code: upstreamCode || (tag ? `native_${tag.replace(/[^A-Za-z]/g, "").toLowerCase()}` : "native_worker_unavailable"),
+    message: `OpenCode native inference failed (${upstreamCode || tag || "worker unavailable"}); no raw provider body is exposed.`,
+    upstream_status: upstreamStatus,
+    ...(Number.isFinite(retry) && retry > 0 ? { retry_after_seconds: Math.ceil(retry / 1000), retry_at: new Date(Date.now() + retry).toISOString() } : {}),
+    ...(typeof requestId === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(requestId) ? { upstream_request_id: requestId } : {}),
+    ...(parameter ? { parameter } : {}),
+  } };
+}
+
+export function createChatEncoder({ model, id, created = Math.floor(Date.now() / 1000) }) {
+  const tools = new Map();
+  const blocks = new Map();
+  let content = "", reasoning = "", finished = false, finishReason = "stop", usage;
+  const chunk = (delta, finish = null, extra = {}) => ({ id, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta, finish_reason: finish }], ...extra });
+  return {
+    push(event) {
+      if (finished) return [];
+      if (event.type.startsWith("reasoning-") && event.providerMetadata && /"(?:signature|encrypted[^" ]*|reasoningId)"/i.test(JSON.stringify(event.providerMetadata))) throw new BridgeStreamError("Opaque reasoning replay is unsupported", "native_reasoning_metadata_unsupported");
+      if (["text-delta", "reasoning-delta", "text-end", "reasoning-end"].includes(event.type)) {
+        const isReasoning = event.type.startsWith("reasoning-");
+        const key = `${isReasoning ? "reasoning" : "text"}:${event.id || "default"}`;
+        const previous = blocks.get(key) || "";
+        let text = event.text || "";
+        if (event.type.endsWith("-end")) {
+          if (event.text === undefined) return [];
+          if (!text.startsWith(previous)) throw new BridgeStreamError("Native provider revised already streamed content", "native_stream_revision_unsupported");
+          text = text.slice(previous.length);
+        }
+        blocks.set(key, previous + text);
+        if (!text) return [];
+        if (isReasoning) reasoning += text; else content += text;
+        return [chunk(isReasoning ? { reasoning_content: text } : { content: text })];
+      }
+      if (event.type === "tool-call") {
+        if (event.providerExecuted) throw new BridgeStreamError("Provider-executed tools are unsupported", "provider_tools_unsupported");
+        const call = { id: event.id, type: "function", function: { name: event.name, arguments: JSON.stringify(event.input) } };
+        const index = tools.size;
+        tools.set(event.id, call);
+        return [chunk({ tool_calls: [{ index, ...call }] })];
+      }
+      if (event.type === "provider-error") throw new BridgeStreamError("Provider emitted an error event", "native_provider_error");
+      if (["tool-input-error", "tool-result", "tool-error", "media", "compaction"].includes(event.type)) throw new BridgeStreamError("Native stream contained unsupported or invalid output", "native_stream_invalid");
+      if (event.type !== "finish") return [];
+      const reason = event.reason?.normalized;
+      if (!["stop", "length", "tool-calls", "content-filter"].includes(reason)) throw new BridgeStreamError("Native stream did not finish successfully", "native_stream_incomplete");
+      finishReason = tools.size ? "tool_calls" : reason === "length" ? "length" : reason === "content-filter" ? "content_filter" : "stop";
+      if (!content && !reasoning && !tools.size && finishReason !== "content_filter") throw new BridgeStreamError("Native stream completed without semantic output", "native_stream_empty");
+      finished = true;
+      usage = event.usage && { prompt_tokens: event.usage.inputTokens || 0, completion_tokens: event.usage.outputTokens || 0, total_tokens: (event.usage.inputTokens || 0) + (event.usage.outputTokens || 0) };
+      return [chunk({}, finishReason, usage ? { usage } : {})];
+    },
+    end() { if (!finished) throw new BridgeStreamError("Native stream ended without a terminal event", "native_stream_incomplete"); },
+    completion() {
+      this.end();
+      return { id, object: "chat.completion", created, model, choices: [{ index: 0, finish_reason: finishReason, message: {
+        role: "assistant", content: content || null, ...(reasoning ? { reasoning_content: reasoning } : {}), ...(tools.size ? { tool_calls: [...tools.values()] } : {}),
+      } }], ...(usage ? { usage } : {}) };
+    },
+  };
+}

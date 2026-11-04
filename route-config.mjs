@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { openCodeChatAllowed } from "./opencode-free-models.mjs";
 import { parse, stringify } from "yaml";
 
-const VALID_ADAPTERS = new Set(["tokligence", "oauth-proxy", "middleware", "copilot-sdk", "openai-compatible", "cline-oauth", "opencode-zen", "chatgpt-responses"]);
+const VALID_ADAPTERS = new Set(["tokligence", "oauth-proxy", "middleware", "copilot-sdk", "openai-compatible", "opencode-zen", "opencode-native", "agy-native", "cline-oauth", "chatgpt-responses"]);
 
 function requireString(value, label) {
   if (typeof value !== "string" || !value.trim()) {
@@ -40,7 +40,7 @@ function normalizeClineOAuthProvider(provider, index) {
       : "https://api.workos.com",
     credentials_path: provider.credentials_path
       ? requireString(provider.credentials_path, `${label}.credentials_path`)
-      : "/data/cline-oauth/credentials.json",
+      : "/data/cliproxyapi/credentials.json",
     model_cache_ttl_ms: optionalBoundedInteger(
       provider.model_cache_ttl_ms,
       `${label}.model_cache_ttl_ms`,
@@ -126,6 +126,12 @@ export function parseRoutingConfig(source) {
     if (adapter === "chatgpt-responses" && provider.enabled_env !== "CHATGPT_RESPONSES_ENABLED") {
       throw new Error(`providers[${index}] chatgpt-responses must use the explicit enable gate`);
     }
+    if (adapter === "opencode-native" && provider.enabled_env !== "OPENCODE_NATIVE_ENABLED") {
+      throw new Error(`providers[${index}] opencode-native must use the explicit enable gate`);
+    }
+    if (adapter === "agy-native" && provider.enabled_env !== "AGY_NATIVE_ENABLED") {
+      throw new Error(`providers[${index}] agy-native must use the explicit enable gate`);
+    }
     if (provider.messages_translation != null && typeof provider.messages_translation !== "boolean") {
       throw new Error(`providers[${index}].messages_translation must be a boolean`);
     }
@@ -133,10 +139,10 @@ export function parseRoutingConfig(source) {
     if (!Array.isArray(betaAllowlist) || betaAllowlist.some((value) => typeof value !== "string" || !value.trim())) {
       throw new Error(`providers[${index}].anthropic_beta_allowlist must contain only non-empty strings`);
     }
-    if (betaAllowlist.length && ["oauth-proxy", "opencode-zen", "cline-oauth", "copilot-sdk", "tokligence"].includes(adapter)) {
+    if (betaAllowlist.length && ["oauth-proxy", "opencode-zen", "cliproxyapi", "copilot-sdk", "tokligence"].includes(adapter)) {
       throw new Error(`providers[${index}] cannot allow Anthropic betas on the ${adapter} adapter`);
     }
-    const normalizedProvider = adapter === "cline-oauth"
+    const normalizedProvider = adapter === "cliproxyapi"
       ? normalizeClineOAuthProvider(provider, index)
       : provider;
     const opencodePool = provider.opencode_pool;
@@ -326,6 +332,20 @@ export function parseRoutingConfig(source) {
     throw new Error("classRouting.enabled requires classRouting.cheapPolicyModel");
   }
   const classRouting = { enabled: rawClassRouting.enabled === true, cheapPolicyModel };
+  const agyNativeIds = new Set(providers.filter(({ adapter }) => adapter === "agy-native").map(({ id }) => id));
+  if (routes.some(({ provider, prefixes }) => prefixes.some((prefix) => prefix.toLowerCase().startsWith("agy-native/")
+    && (providerById({ providers }, provider)?.adapter !== "agy-native" || prefix.toLowerCase() !== "agy-native/")))) {
+    throw new Error("agy-native/ is reserved exclusively for the agy-native provider");
+  }
+  if (agyNativeIds.size && (
+    providers.some(({ id, adapter, default: isDefault }) => adapter === "agy-native" && (isDefault || id !== "agy-native"))
+    || routes.some(({ provider, prefixes }) => agyNativeIds.has(provider) && prefixes.some((prefix) => prefix.toLowerCase() !== "agy-native/"))
+    || profiles.some((profile) => profile.candidates.some(({ provider }) => agyNativeIds.has(provider)))
+    || roles.some((role) => role.candidates.some(({ provider }) => agyNativeIds.has(provider)) || role.fallback && profiles.find((profile) => profile.id.toLowerCase() === role.fallback.toLowerCase())?.candidates.some(({ provider }) => agyNativeIds.has(provider)))
+    || agyNativeIds.has(classRouting.cheapPolicyModel?.provider)
+    || Object.values(raw.model_catalog?.models || {}).some((entry) => entry.routes?.some(({ provider }) => agyNativeIds.has(provider)))
+    || aliases.some(({ provider, patterns, target, fallback }) => agyNativeIds.has(provider) || patterns.some((pattern) => /^agy-native\//i.test(pattern)) || /^agy-native\//i.test(target) || (fallback && /^agy-native\//i.test(fallback)))
+  )) throw new Error("agy-native providers require the reserved agy-native/ namespace and cannot be default, aliased, or join profiles, roles, or canonical models");
   for (const provider of providers.filter(({ adapter }) => adapter === "chatgpt-responses")) {
     const usedByRole = roles.some((role) => role.specialist && role.candidates.some((candidate) => candidate.provider === provider.id));
     if (!usedByRole || routes.some((route) => route.provider === provider.id)
@@ -343,6 +363,12 @@ export function loadRoutingConfig(path) {
 
 export function providerEnabled(provider, env = process.env) {
   if (!envEnabled(provider, env)) return false;
+  if (provider.adapter === "opencode-native") {
+    return env.OPENCODE_NATIVE_ENABLED === "true" && Boolean(env.OPENCODE_NATIVE_URL && env.OPENCODE_NATIVE_KEY);
+  }
+  if (provider.adapter === "agy-native") {
+    return env.AGY_NATIVE_ENABLED === "true" && Boolean(env.AGY_NATIVE_URL && env.AGY_NATIVE_KEY && env.AGY_NATIVE_MODELS);
+  }
   if (provider.adapter === "chatgpt-responses") {
     return env.CHATGPT_RESPONSES_ENABLED === "true"
       && Boolean(env.CHATGPT_SERVICE_URL && env.CHATGPT_SERVICE_TOKEN);
@@ -411,7 +437,7 @@ export function chatModelAvailable(provider, model, env = process.env) {
 }
 
 export function configuredModels(config, env = process.env) {
-  return enabledProviders(config, env).flatMap((provider) => provider.models.filter((model) => chatModelAvailable(provider, model.id, env)).map((model) => ({
+  return enabledProviders(config, env).filter((provider) => provider.adapter !== "agy-native").flatMap((provider) => provider.models.filter((model) => chatModelAvailable(provider, model.id, env)).map((model) => ({
     ...model,
     provider: provider.id,
   })));
@@ -420,6 +446,7 @@ export function configuredModels(config, env = process.env) {
 export function matchConfiguredProvider(config, model) {
   if (!model) return null;
   const lower = model.toLowerCase();
+  if (lower.startsWith("agy-native/")) return providerById(config, "agy-native")?.adapter === "agy-native" ? "agy-native" : null;
   for (const route of config.routes) {
     if (route.prefixes.some((prefix) => lower.startsWith(prefix.toLowerCase()))) return route.provider;
   }

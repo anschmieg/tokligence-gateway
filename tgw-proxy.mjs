@@ -51,7 +51,7 @@ import { anthropicMessageToSse, normalizeAnthropicMessage } from "./anthropic-pa
 import {
   ClineAdapterError,
   ClineOAuthAdapter,
-} from "./cline-oauth.mjs";
+} from "./cliproxyapi.mjs";
 import { createSystemOnePool, readBoundedBody, systemOneStickyKey } from "./systemone.mjs";
 import { createOpenCodeAccountPool } from "./opencode-account-pool.mjs";
 
@@ -110,7 +110,7 @@ function loadOAuthAdapterConfig() {
 
 const CODEX = loadOAuthAdapterConfig();
 
-const CLINE_OAUTH_PROVIDER = ROUTING.providers.find(({ adapter }) => adapter === "cline-oauth") || null;
+const CLINE_OAUTH_PROVIDER = ROUTING.providers.find(({ adapter }) => adapter === "cliproxyapi") || null;
 const CLINE_OAUTH = CLINE_OAUTH_PROVIDER && providerEnabled(CLINE_OAUTH_PROVIDER)
   ? new ClineOAuthAdapter({ provider: CLINE_OAUTH_PROVIDER, env: process.env })
   : null;
@@ -169,7 +169,7 @@ function catalogProtocols(model) {
   const provider = providerById(ROUTING, model.provider);
   if (["tokligence", "oauth-proxy", "copilot-sdk"].includes(provider?.adapter)) return ["chat_completions", "messages", "responses"];
   const protocols = [...(provider?.protocols || ["chat_completions"])];
-  if (["middleware", "openai-compatible", "cline-oauth"].includes(provider?.adapter)
+  if (["middleware", "openai-compatible", "cliproxyapi"].includes(provider?.adapter)
     && provider.messages_translation !== false && protocols.includes("chat_completions") && !protocols.includes("messages")) protocols.push("messages");
   return protocols;
 }
@@ -370,6 +370,31 @@ async function registerClineFreeModels() {
   return registered;
 }
 
+async function registerAntigravityModels() {
+  if (!CLINE_OAUTH) return new Set();
+  try {
+    const models = await CLINE_OAUTH.discoverAntigravityModels();
+    const registered = new Set();
+    for (const model of models) {
+      const fullId = publicModelId(model.id);
+      if (!fullId) continue;
+      registerModel(fullId, "antigravity", {
+        ...model,
+        id: fullId,
+        owned_by: "antigravity",
+        discovered: true,
+        discoveredBy: "antigravity",
+        supports_parallel_tool_calls: true,
+      });
+      registered.add(fullId.toLowerCase());
+    }
+    return registered;
+  } catch (error) {
+    console.warn(`Antigravity model discovery failed: ${error.message}`);
+    return new Set();
+  }
+}
+
 function pruneStaleDiscovered(provider, keepIds) {
   // Keep the provider's endpoint-derived model list current: drop discovered
   // entries that no longer appear upstream. Explicitly configured models
@@ -468,6 +493,10 @@ async function refreshModelRegistry() {
       refreshes.push({
         provider: CLINE_OAUTH_PROVIDER.id,
         promise: registerClineFreeModels(),
+      });
+      refreshes.push({
+        provider: "antigravity",
+        promise: registerAntigravityModels(),
       });
     }
 
@@ -607,10 +636,11 @@ function resolveModel(model) {
 function sendClineError(res, error) {
   const known = error instanceof ClineAdapterError;
   const status = known ? error.status : 502;
-  const code = known ? error.code : "cline_upstream_error";
-  const message = known ? error.message : "Cline upstream request failed";
+  const code = known ? error.code : "upstream_error";
+  const message = known ? error.message : "Upstream request failed";
+  const type = known && error.code.startsWith("antigravity_") ? "antigravity_error" : "oauth_error";
   res.writeHead(status, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ error: { code, message, type: "cline_oauth_error" } }));
+  res.end(JSON.stringify({ error: { code, message, type } }));
 }
 
 function handleProfileRequest(req, res, parsed, protocol) {
@@ -1358,11 +1388,11 @@ const server = http.createServer((req, res) => {
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/admin/cline/oauth/start") {
+    if (req.method === "POST" && url.pathname === "/admin/antigravity/oauth/start") {
       if (!CLINE_OAUTH) {
-        sendClineError(res, new ClineAdapterError("Cline OAuth is not configured", {
+        sendClineError(res, new ClineAdapterError("Antigravity OAuth is not configured", {
           status: 503,
-          code: "cline_not_configured",
+          code: "antigravity_not_configured",
         }));
         return;
       }
@@ -1376,11 +1406,11 @@ const server = http.createServer((req, res) => {
       return;
     }
 
-    if (req.method === "GET" && url.pathname === "/admin/cline/oauth/status") {
+    if (req.method === "GET" && url.pathname === "/admin/antigravity/oauth/status") {
       if (!CLINE_OAUTH) {
-        sendClineError(res, new ClineAdapterError("Cline OAuth is not configured", {
+        sendClineError(res, new ClineAdapterError("Antigravity OAuth is not configured", {
           status: 503,
-          code: "cline_not_configured",
+          code: "antigravity_not_configured",
         }));
         return;
       }
@@ -1393,11 +1423,11 @@ const server = http.createServer((req, res) => {
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/admin/cline/oauth/logout") {
+    if (req.method === "POST" && url.pathname === "/admin/antigravity/oauth/logout") {
       if (!CLINE_OAUTH) {
-        sendClineError(res, new ClineAdapterError("Cline OAuth is not configured", {
+        sendClineError(res, new ClineAdapterError("Antigravity OAuth is not configured", {
           status: 503,
-          code: "cline_not_configured",
+          code: "antigravity_not_configured",
         }));
         return;
       }
@@ -1407,6 +1437,25 @@ const server = http.createServer((req, res) => {
       } catch (error) {
         sendClineError(res, error);
       }
+      return;
+    }
+
+    // Backward compatibility
+    if (req.method === "POST" && url.pathname === "/admin/cline/oauth/start") {
+      res.writeHead(301, { "Location": "/admin/antigravity/oauth/start" });
+      res.end();
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/admin/cline/oauth/status") {
+      res.writeHead(301, { "Location": "/admin/antigravity/oauth/status" });
+      res.end();
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/admin/cline/oauth/logout") {
+      res.writeHead(301, { "Location": "/admin/antigravity/oauth/logout" });
+      res.end();
       return;
     }
 
@@ -2326,7 +2375,7 @@ server.on("upgrade", (req, socket, head) => {
   handleSpecialistUpgrade(req, socket, head, { config: ROUTING, env: process.env });
 });
 
-server.listen(PROXY_PORT, "0.0.0.0", () => {
+server.listen(PROXY_PORT, process.env.PROXY_HOST || "0.0.0.0", () => {
   const address = server.address();
   const listeningPort = typeof address === "object" && address ? address.port : PROXY_PORT;
   console.log(`tgw-proxy :${listeningPort} -> tgw ${TGW_HOST}:${TGW_PORT}`);

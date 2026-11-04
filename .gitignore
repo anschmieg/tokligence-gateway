@@ -14,3 +14,6 @@ gateway.preferences.yaml
 # Local Mistral console session credentials; never commit.
 .mistral-session.json
 .superpowers/sdd/
+
+# Pinned OpenCode source and dependencies are build inputs, never vendored.
+.cache/opencode-native*
