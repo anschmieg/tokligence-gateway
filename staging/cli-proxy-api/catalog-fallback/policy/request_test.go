@@ -48,6 +48,25 @@ func TestDraftExactReasoningAndStructuredOutput(t *testing.T) {
 		t.Fatal(r, err)
 	}
 }
+func TestDraftUnenumeratedReasoningLevelsAreUnknownNotUnsupported(t *testing.T) {
+	// Catalog rows derived from models.dev declare reasoning support through
+	// supported_parameters while publishing no thinking block, so the level list
+	// is empty. That means the levels were never enumerated, not that none exist.
+	r, err := RequirementsFromJSON([]byte(`{"output_config":{"effort":"high"},"max_tokens":20}`))
+	if err != nil || r.ReasoningEffort != "high" || !r.Reasoning {
+		t.Fatal(r, err)
+	}
+	undeclared := fixtureCaps()
+	undeclared.ReasoningLevels = nil
+	if !Compatible(undeclared, r) {
+		t.Fatal("model declaring reasoning support rejected for an unenumerated effort", r)
+	}
+	known := fixtureCaps()
+	known.ReasoningLevels = []string{"low"}
+	if Compatible(known, r) {
+		t.Fatal("known level list must still reject an unlisted effort", r)
+	}
+}
 func TestDraftInvalidBudgetsAndTrailingJSON(t *testing.T) {
 	for _, raw := range []string{`{"max_tokens":1e100}`, `{"max_tokens":-1}`, `{"max_tokens":1.5}`, `{} trailing`, `{} {}`, `[]`} {
 		if _, err := RequirementsFromJSON([]byte(raw)); err == nil {

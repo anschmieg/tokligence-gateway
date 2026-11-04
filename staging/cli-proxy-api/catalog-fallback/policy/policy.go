@@ -96,7 +96,11 @@ func Compatible(c Capabilities, r Requirements) bool {
 	if r.Reasoning && !c.Reasoning || r.DisableReasoning && !c.DisableReasoning {
 		return false
 	}
-	if r.ReasoningEffort != "" && !has(c.ReasoningLevels, r.ReasoningEffort) {
+	// An empty level list means the catalog never enumerated effort levels for a
+	// model that still declares reasoning support (models.dev entries publish
+	// "reasoning" in supported_parameters with no thinking block). Unknown is not
+	// "supports no level"; only a positively known level set may reject a request.
+	if r.ReasoningEffort != "" && len(c.ReasoningLevels) > 0 && !has(c.ReasoningLevels, r.ReasoningEffort) {
 		return false
 	}
 	if r.ReasoningBudget != nil {

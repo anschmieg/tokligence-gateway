@@ -86,6 +86,23 @@ func TestDraftNativeCatalogUsesFinalSourceNotDecoratedMetadataKey(t *testing.T) 
 		t.Fatal(r)
 	}
 }
+func TestDraftOutputConfigEffortDoesNotRejectDeclaredReasoningWithoutLevels(t *testing.T) {
+	// Catalog rows derived from models.dev declare reasoning support through
+	// supported_parameters while publishing no thinking block, so the level list
+	// stays empty. Profile route admission must not read that as "no levels".
+	r, err := canonicalRequestRequirements([]byte(`{"output_config":{"effort":"high"},"max_tokens":20}`))
+	if err != nil || !r.Reasoning || r.ReasoningEffort != "high" {
+		t.Fatal(r, err)
+	}
+	declared := &registry.ModelInfo{CanonicalFree: true, PluginCostTier: "free", ContextLength: 32768, MaxCompletionTokens: 4096, SupportedParameters: []string{"tools", "reasoning"}, SupportedInputModalities: []string{"text"}, SupportedOutputModalities: []string{"text"}}
+	if !canonicalCompatible(declared, r) {
+		t.Fatal("model declaring reasoning support rejected because no effort levels are enumerated", r)
+	}
+	lowOnly := &registry.ModelInfo{CanonicalFree: true, PluginCostTier: "free", ContextLength: 32768, MaxCompletionTokens: 4096, Thinking: &registry.ThinkingSupport{Levels: []string{"low"}}, SupportedParameters: []string{"tools", "reasoning"}, SupportedInputModalities: []string{"text"}, SupportedOutputModalities: []string{"text"}}
+	if canonicalCompatible(lowOnly, r) {
+		t.Fatal("enumerated level list must still reject an unlisted effort", r)
+	}
+}
 
 func TestDraftPluginCatalogDecodesOnlyKnownVendorTransportWrapper(t *testing.T) {
 	for _, tc := range []struct{ owner, source, want string }{
