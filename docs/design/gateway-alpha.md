@@ -628,3 +628,27 @@ insufficient. Existing account settings are preserved. Native-origin discovery
 and isolated real-host streaming passed, with no real-provider inference during
 this rollout. Automated public checks hit existing Cloudflare1010 on both old
 and new model URLs, so external client acceptance is not claimed from those checks.
+
+
+## Session billing and conversational alias (November 4)
+
+Native .16 is deployed. For a generic OpenAI-compatible client such as Rakazo,
+use `https://code.nothing.pink/v1` with model `chat` for the default conversational
+agent, or `coding` for development. These are explicit virtual profile aliases;
+ordinary model IDs remain binding on the normal endpoint. Profile URLs let each
+client keep its own concrete preferred model. Both aliases initially prefer
+`nemotron-3.5-lightning`; chat and coding use separate task policies.
+
+Billing defaults to SUB (verified free + included subscription allowances). PAID
+is explicit per session/profile; `:free` excludes subscriptions and paid routes.
+Authenticated session control and selected-account billing telemetry are live.
+See [the agent handoff](../gateway-client-setup.md) and
+[exact API/client contract](../../staging/cli-proxy-api/catalog-fallback/SESSION-BILLING.md).
+Client installation and accurate foreground/subagent request labels are still
+the configuring agent's responsibility; no universal Claude/Rakazo acceptance is
+claimed. Unknown or unclassified foreground status displays an en dash.
+
+The exact artifact passed isolated native-host tests with 12 fake-provider
+requests and nine streams. Deployed-origin controls/catalog checks passed, all
+old model IDs/accounts/settings/protected state were preserved, and zero real
+provider inference requests were made in this rollout.

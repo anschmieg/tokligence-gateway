@@ -1,0 +1,30 @@
+{
+  "phase": "deployed",
+  "source_commit": "c24a44b",
+  "native_sha256": "989f50db280424ce8ef41cdec406134f0f19d6a3cf78604ec5c14cd64993203e",
+  "provider_inference_requests": 0,
+  "models_before": 465,
+  "default_billing_policy": "SUB",
+  "profile_cost_policy": "session",
+  "deployment_uuid": "1ahwaumlmzd8q79ww8ivapmy",
+  "one_native_owner": true,
+  "model_count": 468,
+  "profile_model_count": 3,
+  "profile_ids": [
+    "nemotron-3-ultra-550b-a55b",
+    "nemotron-3.5-lightning",
+    "north-mini-code"
+  ],
+  "old_catalog_ids_retained": true,
+  "withdrawn_catalog_ids": [],
+  "unrelated_config_preserved": true,
+  "accounts_preserved": true,
+  "protected_state_preserved": true,
+  "aliases": [
+    "chat",
+    "coding"
+  ],
+  "session_control_default": "SUB",
+  "public_ingress_verified": false,
+  "live_provider_evaluation": false
+}
