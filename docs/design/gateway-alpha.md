@@ -652,3 +652,8 @@ The exact artifact passed isolated native-host tests with 12 fake-provider
 requests and nine streams. Deployed-origin controls/catalog checks passed, all
 old model IDs/accounts/settings/protected state were preserved, and zero real
 provider inference requests were made in this rollout.
+
+
+### November 4: refined profile defaults (.17)
+
+Deployed `chat` → `nemotron-3-ultra-550b-a55b` and `coding` → `glm-5.3-flash`. A viable configured default appears first in its profile catalog; concrete client preferences still override it. SUB remains the billing default. Focused race/vet checks and isolated native-host checks passed; this rollout made no real provider inference and does not establish subjective conversation quality. See [profile rationale](gateway-profile-quality-20261104.md) and [client setup](../gateway-client-setup.md).
