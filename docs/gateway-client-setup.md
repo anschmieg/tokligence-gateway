@@ -10,8 +10,9 @@ Never commit keys. Cloudflare login and the Management Key are for administratio
 - Development agents: **coding**.
 - Easiest OpenAI-compatible setup, including Rakazo: base URL
   `https://code.nothing.pink/v1`, model **`chat`** or **`coding`**. These virtual
-  aliases explicitly enable profile routing. Both initially prefer
-  `nemotron-3.5-lightning`; the gateway config can change that preference.
+  aliases explicitly enable profile routing. Chat prefers
+  `nemotron-3-ultra-550b-a55b`; coding prefers `glm-5.3-flash`. The gateway
+  config can change these preferences.
 - To keep a client's own model preference, use base
   `https://code.nothing.pink/chat/v1` or `/coding/v1` and its preferred canonical ID.
 - For Anthropic/Claude Code, omit the final `/v1` from the base; the resulting

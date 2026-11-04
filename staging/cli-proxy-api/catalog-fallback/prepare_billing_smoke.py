@@ -11,6 +11,7 @@ s=s.replace("req = urllib.request.Request('http://127.0.0.1:18080' + path,", "he
 s=s.replace('data=None if body is None else json.dumps(body).encode(), headers=headers)','data=None if body is None else json.dumps(body).encode(), headers=headers,method=method)')
 s=s.replace("api.profile_header=response.headers.get('X-Gateway-Profile')","api.profile_header=response.headers.get('X-Gateway-Profile');api.response_headers=dict(response.headers)")
 s=s.replace("'keys':[{'api-key':'fixture-paid'}],'disable-redirects':True,'models':[{'name':MODEL}]", "'keys':[{'api-key':'fixture-paid'}],'disable-redirects':True,'models':[{'name':MODEL,'max-context-length':8192,'input-modalities':['text'],'output-modalities':['text']}]")
+s=s.replace("        (WORK/'config.yaml').write_text(json.dumps(config))", "        if policy_mode:\n            config['models']['canonical-routing']['profiles']={'chat':{'task':'general','max-models':12,'cost-policy':'session','preferred-model':'glm-4.7-flash'},'coding':{'task':'coding','max-models':12,'cost-policy':'session','preferred-model':'nemotron-3.5-lightning'}}\n        (WORK/'config.yaml').write_text(json.dumps(config))",1)
 aidx=s.index("        if policy_mode:\n            stage='canonical_cost_policy'");bidx=s.index("        stage = 'management_console'",aidx)
 s=s[:aidx]+'''        if policy_mode:
             stage='session_billing_policy'
@@ -21,6 +22,8 @@ s=s[:aidx]+'''        if policy_mode:
                 if time.monotonic()>deadline:raise GateFailure('evidence_or_free_catalog_missing')
                 time.sleep(.1)
             gate('virtual_aliases_discovered',all(byid.get(x,{}).get('virtual') for x in ('chat','coding')))
+            chat_view=get_json('/chat/v1/models',CLIENT_KEY);coding_view=get_json('/coding/v1/models',CLIENT_KEY)
+            gate('configured_defaults_disclosed_and_first',chat_view['preferred_model']=='glm-4.7-flash' and chat_view['data'][0]['id']=='glm-4.7-flash' and chat_view['data'][0]['profile_preferred'] is True and coding_view['preferred_model']=='nemotron-3.5-lightning' and coding_view['data'][0]['id']=='nemotron-3.5-lightning')
             gate('original_rows_canonical',all(m.get('canonical') for m in rows if not m.get('virtual')))
             gate('routing_control_requires_auth',api('/v1/routing/session',None,extra_headers={'X-Gateway-Session':'s'})[0]==401)
             base={'stream':True,'max_tokens':8,'messages':[{'role':'user','content':'policy-override'}]}

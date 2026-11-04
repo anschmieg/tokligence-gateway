@@ -33,8 +33,8 @@ checked at physical dispatch; no allowances are fabricated during deployment.
   their respective profiles. `chat:free` and `coding:free` do likewise with FREE
   permission. They never shadow a registered real model. Standard OpenAI discovery
   advertises these aliases; protocol-specific curated lists retain native formats.
-- Alias defaults are configurable with `preferred-model`. The rollout sets
-  `nemotron-3.5-lightning` as the initial preference for both aliases. Clients
+- Alias defaults are configurable with `preferred-model`. The quality refinement sets
+  chat to `nemotron-3-ultra-550b-a55b` and coding to `glm-5.3-flash`. Clients
   selecting a profile URL can still specify their own different model preference.
   Chat uses general-task evidence, coding uses coding/agent evidence. Neither
   asserts a measured warmth/personality score; keep conversational style in the client.

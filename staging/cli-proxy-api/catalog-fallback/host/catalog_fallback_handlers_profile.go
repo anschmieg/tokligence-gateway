@@ -82,7 +82,7 @@ func (h *BaseAPIHandler) ProfileModels(name string) (map[string]any, int) {
 	}
 	profile := view.Profile
 	view.Billing = registry.BillingPaid // task curation is independent of session billing permission
-	routes := h.profileRouteSet(view, req)
+	routes := h.profileRouteSet(view, req, profile.PreferredModel)
 	priorities := map[string]int{}
 	exists := map[string]bool{}
 	for _, r := range routes {
@@ -96,6 +96,9 @@ func (h *BaseAPIHandler) ProfileModels(name string) (map[string]any, int) {
 		models = append(models, id)
 	}
 	sort.Slice(models, func(i, j int) bool {
+		if (models[i] == profile.PreferredModel) != (models[j] == profile.PreferredModel) {
+			return models[i] == profile.PreferredModel
+		}
 		if priorities[models[i]] != priorities[models[j]] {
 			return priorities[models[i]] > priorities[models[j]]
 		}
@@ -118,6 +121,10 @@ func (h *BaseAPIHandler) ProfileModels(name string) (map[string]any, int) {
 		row["default_billing_policy"] = "SUB"
 		row["task"] = string(profile.Task)
 		row["selection_reason"] = "verified task evidence and currently available route"
+		row["profile_preferred"] = id == profile.PreferredModel
+		if id == profile.PreferredModel {
+			row["selection_reason"] = "profile-preferred model; current route capabilities verified"
+		}
 		row["credential_priority"] = priorities[id]
 		row["routing_policy"] = "preferred-then-similar-session-billing"
 		delete(row, "free_only_id") // syntax is contractual, not another availability proof

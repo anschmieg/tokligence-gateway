@@ -66,7 +66,7 @@ func (h *BaseAPIHandler) filterProfileModelList(c *gin.Context, body []byte) ([]
 			continue
 		}
 		if key == "data" {
-			for _, field := range []string{"profile", "model_role", "task", "cost_policy", "routing_policy", "selection_reason", "credential_priority"} {
+			for _, field := range []string{"profile", "model_role", "task", "cost_policy", "routing_policy", "selection_reason", "credential_priority", "profile_preferred", "default_billing_policy"} {
 				row[field] = meta[field]
 			}
 			raw, _ = json.Marshal(row)
@@ -88,7 +88,7 @@ func (h *BaseAPIHandler) filterProfileModelList(c *gin.Context, body []byte) ([]
 		root["first_id"], _ = json.Marshal(first)
 		root["last_id"], _ = json.Marshal(last)
 	}
-	for _, field := range []string{"profile", "task", "cost_policy", "policy_version", "full_catalog", "model_role", "evidence_stale"} {
+	for _, field := range []string{"profile", "task", "cost_policy", "policy_version", "full_catalog", "model_role", "evidence_stale", "preferred_model", "default_billing_policy"} {
 		root[field], _ = json.Marshal(view[field])
 	}
 	output, err := json.Marshal(root)

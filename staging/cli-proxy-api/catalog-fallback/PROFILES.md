@@ -40,18 +40,20 @@ models:
       chat:
         task: general
         max-models: 12
-        preferred-model: nemotron-3.5-lightning
+        preferred-model: nemotron-3-ultra-550b-a55b
         cost-policy: session
       coding:
         task: coding
         max-models: 12
-        preferred-model: nemotron-3.5-lightning
+        preferred-model: glm-5.3-flash
         cost-policy: session
 ```
 
 `preferred-model` defines the virtual alias's initial preference. A concrete model
 supplied through a profile URL overrides that default. `max-models` limits picker
-size, not explicit model preferences. Alias defaults are operator choices, not
+size, not explicit model preferences. A viable configured preference is shown
+first and labelled `profile_preferred`, even if exact-source benchmark data is
+missing; it is labelled as operator preference, not benchmark proof. Alias defaults are operator choices, not
 live quality acceptance claims. A real registered model cannot be shadowed by an
 alias. Opaque/compact continuation requires an explicit model instead of an alias.
 
