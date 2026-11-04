@@ -720,23 +720,31 @@ export class ClineOAuthAdapter {
     const inventory = diagnosticRequestInventory(payload, Buffer.byteLength(JSON.stringify(payload)));
     trace?.emit("antigravity_request_features", inventory);
     try {
-      // Try with proxy first, fall back to direct connection if proxy fails
+      // Try with proxy first, fall back to direct connection ONLY on transport errors
+      // (not on upstream HTTP errors). Use an idempotency key so any accidental
+      // duplicate from a partially-sent retry can be reconciled server-side.
+      const idempotencyKey = randomUUID();
+      const headersWithIdempotency = { ...headers, "Idempotency-Key": idempotencyKey };
       let response;
       try {
         response = await nodePostJson(
           endpoint(this.#apiBaseUrl, "/api/v1/chat/completions"),
           payload,
-          headers,
+          headersWithIdempotency,
           signal,
           this.#proxy,
         );
       } catch (proxyError) {
-        console.warn(`Antigravity proxy failed, falling back to direct connection: ${proxyError.message}`);
-        trace?.emit("antigravity_proxy_fallback", { reason: proxyError.message });
+        const isTransportError = proxyError?.code && /^(ECONN|ETIMEDOUT|ENOTFOUND|ENETUNREACH|EHOSTUNREACH|EAI_AGAIN|socket hang up|socket ended)/i.test(proxyError.code);
+        if (!isTransportError) throw proxyError;
+        console.warn(`Antigravity proxy transport error, falling back to direct connection: ${proxyError.message}`);
+        trace?.emit("antigravity_proxy_fallback", { reason: proxyError.message, idempotency_key: idempotencyKey, transport_error: true });
+        // Retry with a fresh idempotency key so duplicate detection works even if first attempt was processed
+        const retryIdempotencyKey = randomUUID();
         response = await nodePostJson(
           endpoint(this.#apiBaseUrl, "/api/v1/chat/completions"),
           payload,
-          headers,
+          { ...headersWithIdempotency, "Idempotency-Key": retryIdempotencyKey },
           signal,
           null, // No proxy
         );
