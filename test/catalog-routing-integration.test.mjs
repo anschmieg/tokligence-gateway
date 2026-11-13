@@ -121,13 +121,29 @@ test("catalog aliases route free-first, exclude unauthorized paid fallback, and 
   }
   assert.equal(seen.length, beforeAddons, "add-ons are rejected before dispatch");
   const before = seen.length;
-  const free = await fetch(base + "/v1/chat/completions", { method: "POST", headers, body: JSON.stringify({ model: "openrouter/free", models: ["poolside/laguna-s-2.1"], route: "fallback", tools: [{ type: "function", function: { name: "lookup", parameters: { type: "object" } } }], messages: [{ role: "user", content: "hello" }] }) });
+  const free = await fetch(base + "/v1/chat/completions", { method: "POST", headers, body: JSON.stringify({ model: "openrouter/free", models: ["poolside/laguna-s-2.1"], route: "fallback", provider: { max_price: { prompt: 999, completion: 999 } }, plugins: [{ id: "web", enabled: false }], tools: [{ type: "function", function: { name: "lookup", parameters: { type: "object" } } }], messages: [{ role: "user", content: "hello" }] }) });
   assert.equal(free.status, 200);
   await free.text();
   assert.equal(seen[before].body.model, "openrouter/free");
   assert.equal(seen[before].body.models, undefined);
   assert.equal(seen[before].body.route, undefined);
   assert.equal(seen[before].body.tools[0].function.name, "lookup", "client-side function tools remain usable");
+
+  const assertFreeEnvelope = body => {
+    assert.deepEqual(body.provider.max_price, { prompt: 0, completion: 0, request: 0, image: 0 });
+    for (const id of ["web", "file-parser", "response-healing"]) assert(body.plugins.some(plugin => plugin.id === id && plugin.enabled === false));
+    assert(body.plugins.every(plugin => plugin.enabled === false));
+  };
+  assertFreeEnvelope(seen[before].body);
+  const translatedFree = await fetch(base + "/v1/messages", { method: "POST", headers, body: JSON.stringify({ model: "free-alias", max_tokens: 32, messages: [{ role: "user", content: "hello" }], provider: { max_price: { prompt: 999 } } }) });
+  assert.equal(translatedFree.status, 200);
+  await translatedFree.text();
+  assertFreeEnvelope(seen.at(-1).body);
+  const beforeFile = seen.length;
+  const pdf = await fetch(base + "/v1/chat/completions", { method: "POST", headers, body: JSON.stringify({ model: "openrouter/free", messages: [{ role: "user", content: [{ type: "file", file: { filename: "input.pdf", file_data: "data:application/pdf;base64,JVBERg==" } }] }] }) });
+  assert.equal(pdf.status, 400);
+  await pdf.text();
+  assert.equal(seen.length, beforeFile, "implicit paid file parsing must not reach the provider");
   seen.length = 0;
   const success = await complete("minimax-m3.1-flash-free");
   assert.equal(success.status, 200);

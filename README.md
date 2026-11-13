@@ -39,9 +39,18 @@ only to loopback and is never exposed directly to the internet.
 
 Provider catalog fetches have a 15-second total deadline and an 8 MiB response
 limit. Interrupted fetches release the refresh so the next discovery can retry.
-OpenRouter's free-only lane rejects plugins, server tools, and presets that can
-add charges; client-side function tools remain supported. Aliases are resolved
-before provider policy checks.
+OpenRouter's free-only lane injects zero `provider.max_price` limits for prompt,
+completion, request, and image costs, and explicitly disables known plugin
+defaults. Enabled plugins, server tools, presets, and file inputs that can trigger
+paid parsing are rejected; client-side function tools remain supported. Aliases
+are resolved before provider policy checks. OpenRouter organization settings
+that prevent plugin overrides must be disabled upstream; request-level price
+caps do not govern auxiliary plugin charges.
+
+Legacy HTTP inference and generic proxy calls share the configured upstream
+and response-start deadlines and cancel their upstream connection when the
+caller disconnects. Buffered forwarding removes incoming hop-by-hop framing
+headers before constructing the upstream request.
 
 Buffered chat and generic proxy requests are limited to 8 MiB; admin JSON
 requests are limited to 64 KiB. These bodies must arrive within 30 seconds.

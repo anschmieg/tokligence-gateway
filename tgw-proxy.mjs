@@ -7,6 +7,7 @@ import { discoverOpenCodeFreeModels, OPENCODE_DISCOVERY_INTERVAL_MS, OPENCODE_DI
 // For GLM-5/Modal models: calls Modal directly (non-streaming only)
 
 import http from "http";
+import { requestWithLifecycle, sendUpstreamError } from "./request-lifecycle.mjs";
 import { fetchProviderJson } from "./provider-json.mjs";
 import { readRequestBody, parseRequestObject, sendRequestError } from "./http-request.mjs";
 import { nativeConversationIdentity } from "./native-session-identity.mjs";
@@ -712,8 +713,7 @@ function handleProfileRequest(req, res, parsed, protocol) {
       res.destroy(error);
       return;
     }
-    res.writeHead(502, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "Profile routing failed" }));
+    sendUpstreamError(res, "Profile routing failed");
   });
   return true;
 }
@@ -1024,14 +1024,14 @@ function proxyToCodex(req, res, body) {
     if (req.headers[name] !== undefined) headers[name] = req.headers[name];
   }
 
-  const upstream = client.request({
+  const upstream = requestWithLifecycle(client, {
     protocol: target.protocol,
     hostname: target.hostname,
     port: target.port || undefined,
     path: `${target.pathname}${target.search}`,
     method: req.method,
     headers,
-  }, (upRes) => {
+  }, req, res, (upRes) => {
     res.writeHead(upRes.statusCode || 502, upRes.headers);
     pipeAndRecordUsage("codex-oauth", model, upRes, res, sessionKeyHash);
   });
@@ -1041,8 +1041,7 @@ function proxyToCodex(req, res, body) {
       res.destroy(err);
       return;
     }
-    res.writeHead(502, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "Codex backend unavailable" }));
+    sendUpstreamError(res, "Codex backend unavailable");
   });
   req.once("aborted", () => upstream.destroy());
   res.once("close", () => {
@@ -1108,7 +1107,7 @@ function providerSummary() {
   return { object: "list", data: config.providers };
 }
 
-function callModal(model, messages, maxTokens) {
+function callModal(model, messages, maxTokens, inputReq, inputRes) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
       model: "zai-org/GLM-5-FP8",
@@ -1129,7 +1128,7 @@ function callModal(model, messages, maxTokens) {
       }
     };
 
-    const req = https.request(options, (res) => {
+    const req = requestWithLifecycle(https, options, inputReq, inputRes, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(chunk));
       res.on("end", () => {
@@ -1148,7 +1147,7 @@ function callModal(model, messages, maxTokens) {
   });
 }
 
-function callOpenCodeGoOpenAI(model, messages, maxTokens) {
+function callOpenCodeGoOpenAI(model, messages, maxTokens, inputReq, inputRes) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
       model: resolveOpenCodeModel(model),
@@ -1169,7 +1168,7 @@ function callOpenCodeGoOpenAI(model, messages, maxTokens) {
       }
     };
 
-    const req = https.request(options, (res) => {
+    const req = requestWithLifecycle(https, options, inputReq, inputRes, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(chunk));
       res.on("end", () => {
@@ -1188,7 +1187,7 @@ function callOpenCodeGoOpenAI(model, messages, maxTokens) {
   });
 }
 
-function callOpenCodeMessages(model, messages, maxTokens) {
+function callOpenCodeMessages(model, messages, maxTokens, inputReq, inputRes) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
       model: resolveOpenCodeModel(model),
@@ -1210,7 +1209,7 @@ function callOpenCodeMessages(model, messages, maxTokens) {
       }
     };
 
-    const req = https.request(options, (res) => {
+    const req = requestWithLifecycle(https, options, inputReq, inputRes, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(chunk));
       res.on("end", () => {
@@ -1234,7 +1233,7 @@ function isMistralModel(model) {
   return matchConfiguredProvider(ROUTING, model) === "mistral";
 }
 
-function callMistralOpenAI(model, messages, maxTokens) {
+function callMistralOpenAI(model, messages, maxTokens, inputReq, inputRes) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
       model: resolveMistralModel(model),
@@ -1255,7 +1254,7 @@ function callMistralOpenAI(model, messages, maxTokens) {
       }
     };
 
-    const req = https.request(options, (res) => {
+    const req = requestWithLifecycle(https, options, inputReq, inputRes, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(chunk));
       res.on("end", () => {
@@ -1404,8 +1403,7 @@ const server = http.createServer((req, res) => {
           res.end(JSON.stringify({ object: "list", data }));
         })
         .catch((error) => {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: error.message }));
+          sendUpstreamError(res, error.message);
         });
       return;
     }
@@ -1706,7 +1704,7 @@ const server = http.createServer((req, res) => {
       if (handleCodexRoute(req, res, parsed, model)) return;
       
       if (isOpenCodeMiniMaxModel(model)) {
-        callOpenCodeMessages(model, parsed.messages || [], parsed.max_tokens || 4096)
+        callOpenCodeMessages(model, parsed.messages || [], parsed.max_tokens || 4096, req, res)
           .then((data) => {
             sendChatCompletionResult(
               res,
@@ -1717,19 +1715,17 @@ const server = http.createServer((req, res) => {
             recordModelObservedUsage(model, data);
           })
           .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
+            sendUpstreamError(res, err.message);
           });
       } else if (isOpenCodeModel(model)) {
         const messages = toOpenAIChatMessages(parsed.messages || []);
-        callOpenCodeGoOpenAI(model, messages, parsed.max_tokens || 4096)
+        callOpenCodeGoOpenAI(model, messages, parsed.max_tokens || 4096, req, res)
           .then((data) => {
             sendChatCompletionResult(res, data, model, parsed.stream === true);
             recordModelObservedUsage(model, data);
           })
           .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
+            sendUpstreamError(res, err.message);
           });
       } else if (isMistralModel(model)) {
         const rewritten = resolveMistralModel(model);
@@ -1749,14 +1745,13 @@ const server = http.createServer((req, res) => {
           headers: forwardHeaders
         };
 
-        const upstream = https.request(options, (upRes) => {
+        const upstream = requestWithLifecycle(https, options, req, res, (upRes) => {
           res.writeHead(upRes.statusCode, upRes.headers);
           pipeAndRecordUsage("mistral", model, upRes, res);
         });
 
         upstream.on("error", (err) => {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: err.message }));
+          sendUpstreamError(res, err.message);
         });
 
         upstream.end(proxyBody);
@@ -1768,8 +1763,8 @@ const server = http.createServer((req, res) => {
         headers["content-type"] = "application/json";
         headers["content-length"] = String(proxyBody.length);
 
-        const upstream = http.request(
-          { host: TGW_HOST, port: TGW_PORT, path: "/v1/chat/completions", method: "POST", headers },
+        const upstream = requestWithLifecycle(http,
+          { host: TGW_HOST, port: TGW_PORT, path: "/v1/chat/completions", method: "POST", headers }, req, res,
           (upRes) => {
             res.writeHead(upRes.statusCode, upRes.headers);
             pipeAndRecordUsage("opencode-go", model, upRes, res);
@@ -1777,8 +1772,7 @@ const server = http.createServer((req, res) => {
         );
 
         upstream.on("error", (err) => {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: err.message }));
+          sendUpstreamError(res, err.message);
         });
 
         upstream.end(proxyBody);
@@ -1789,16 +1783,15 @@ const server = http.createServer((req, res) => {
         headers["content-type"] = "application/json";
         headers["content-length"] = String(proxyBody.length);
 
-        const upstream = http.request(
-          { host: TGW_HOST, port: TGW_PORT, path: "/v1/chat/completions", method: "POST", headers },
+        const upstream = requestWithLifecycle(http,
+          { host: TGW_HOST, port: TGW_PORT, path: "/v1/chat/completions", method: "POST", headers }, req, res,
           (upRes) => {
             res.writeHead(upRes.statusCode, upRes.headers);
             pipeAndRecordUsage("opencode-go", model, upRes, res);
           }
         );
         upstream.on("error", (err) => {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: err.message }));
+          sendUpstreamError(res, err.message);
         });
         upstream.end(proxyBody);
       }
@@ -1846,7 +1839,7 @@ const server = http.createServer((req, res) => {
         callModal("zai-org/GLM-5-FP8", messages.map((m) => ({
           role: m.role,
           content: textFromContent(m.content)
-        })), parsed.max_tokens || 4096)
+        })), parsed.max_tokens || 4096, req, res)
           .then((data) => {
             const msg = data.choices?.[0]?.message;
             let text = msg?.content || msg?.reasoning_content || "";
@@ -1855,20 +1848,18 @@ const server = http.createServer((req, res) => {
             recordModelObservedUsage(model, data);
           })
           .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
+            sendUpstreamError(res, err.message);
           });
       } else if (isOpenCodeMiniMaxModel(model)) {
-        callOpenCodeMessages(model, messages, parsed.max_tokens || 4096)
+        callOpenCodeMessages(model, messages, parsed.max_tokens || 4096, req, res)
           .then((data) => {
             sendResponsesResult(res, model, responseTextFromAnthropic(data), parsed.stream === true);
           })
           .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
+            sendUpstreamError(res, err.message);
           });
       } else if (isOpenCodeModel(model)) {
-        callOpenCodeGoOpenAI(model, toOpenAIChatMessages(messages), parsed.max_tokens || 4096)
+        callOpenCodeGoOpenAI(model, toOpenAIChatMessages(messages), parsed.max_tokens || 4096, req, res)
           .then((data) => {
             const msg = data.choices?.[0]?.message;
             let text = msg?.content || "";
@@ -1877,11 +1868,10 @@ const server = http.createServer((req, res) => {
             recordModelObservedUsage(model, data);
           })
           .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
+            sendUpstreamError(res, err.message);
           });
       } else if (isMistralModel(model)) {
-        callMistralOpenAI(model, toOpenAIChatMessages(messages), parsed.max_tokens || 4096)
+        callMistralOpenAI(model, toOpenAIChatMessages(messages), parsed.max_tokens || 4096, req, res)
           .then((data) => {
             const msg = data.choices?.[0]?.message;
             let text = msg?.content || "";
@@ -1890,8 +1880,7 @@ const server = http.createServer((req, res) => {
             recordModelObservedUsage(model, data);
           })
           .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
+            sendUpstreamError(res, err.message);
           });
       } else if (MINIMAX_BARE_MODELS.test(model)) {
         // MiniMax: forward to gateway as Messages API
@@ -1908,8 +1897,8 @@ const server = http.createServer((req, res) => {
         headers["anthropic-version"] = "2023-06-01";
         headers["content-length"] = String(proxyBody.length);
 
-        const upstream = http.request(
-          { host: TGW_HOST, port: TGW_PORT, path: "/v1/messages", method: "POST", headers },
+        const upstream = requestWithLifecycle(http,
+          { host: TGW_HOST, port: TGW_PORT, path: "/v1/messages", method: "POST", headers }, req, res,
           (upRes) => {
             let data = '';
             upRes.on('data', c => data += c);
@@ -1927,8 +1916,7 @@ const server = http.createServer((req, res) => {
           }
         );
         upstream.on("error", (err) => {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: err.message }));
+          sendUpstreamError(res, err.message);
         });
         upstream.end(proxyBody);
       } else {
@@ -1945,8 +1933,8 @@ const server = http.createServer((req, res) => {
         headers["anthropic-version"] = "2023-06-01";
         headers["content-length"] = String(proxyBody.length);
 
-        const upstream = http.request(
-          { host: TGW_HOST, port: TGW_PORT, path: "/v1/messages", method: "POST", headers },
+        const upstream = requestWithLifecycle(http,
+          { host: TGW_HOST, port: TGW_PORT, path: "/v1/messages", method: "POST", headers }, req, res,
           (upRes) => {
             let data = '';
             upRes.on('data', c => data += c);
@@ -1965,8 +1953,7 @@ const server = http.createServer((req, res) => {
           }
         );
         upstream.on("error", (err) => {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: err.message }));
+          sendUpstreamError(res, err.message);
         });
         upstream.end(proxyBody);
       }
@@ -2023,7 +2010,7 @@ const server = http.createServer((req, res) => {
             : m.content
         }));
 
-        callModal("zai-org/GLM-5-FP8", messages, parsed.max_tokens || 4096)
+        callModal("zai-org/GLM-5-FP8", messages, parsed.max_tokens || 4096, req, res)
           .then((data) => {
             const msg = data.choices?.[0]?.message;
             let text = msg?.content;
@@ -2053,24 +2040,22 @@ const server = http.createServer((req, res) => {
             recordModelObservedUsage(model, data);
           })
           .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
+            sendUpstreamError(res, err.message);
           });
       } else if (isOpenCodeMiniMaxModel(model)) {
-        callOpenCodeMessages(model, parsed.messages || [], parsed.max_tokens || 4096)
+        callOpenCodeMessages(model, parsed.messages || [], parsed.max_tokens || 4096, req, res)
           .then((data) => {
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify(anthropicToMessage(data, model)));
             recordModelObservedUsage(model, data);
           })
           .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
+            sendUpstreamError(res, err.message);
           });
       } else if (isOpenCodeModel(model)) {
         const messages = toOpenAIChatMessages(parsed.messages || []);
 
-        callOpenCodeGoOpenAI(model, messages, parsed.max_tokens || 4096)
+        callOpenCodeGoOpenAI(model, messages, parsed.max_tokens || 4096, req, res)
           .then((data) => {
             const msg = data.choices?.[0]?.message;
             let text = msg?.content || "";
@@ -2093,13 +2078,12 @@ const server = http.createServer((req, res) => {
             recordModelObservedUsage(model, data);
           })
           .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
+            sendUpstreamError(res, err.message);
           });
       } else if (isMistralModel(model)) {
         const messages = toOpenAIChatMessages(parsed.messages || []);
 
-        callMistralOpenAI(model, messages, parsed.max_tokens || 4096)
+        callMistralOpenAI(model, messages, parsed.max_tokens || 4096, req, res)
           .then((data) => {
             // Mistral's OpenAI endpoint answers GLM with `content` holding an array
             // of parts (reasoning first, answer last) where the Anthropic schema
@@ -2125,8 +2109,7 @@ const server = http.createServer((req, res) => {
             recordModelObservedUsage(model, data);
           })
           .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
+            sendUpstreamError(res, err.message);
           });
       } else if (MINIMAX_BARE_MODELS.test(model)) {
         // MiniMax: forward to gateway
@@ -2135,8 +2118,8 @@ const server = http.createServer((req, res) => {
         const updatedBody = Buffer.from(JSON.stringify({ ...parsed, model: mappedModel }));
         headers["content-length"] = String(updatedBody.length);
 
-        const upstream = http.request(
-          { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers },
+        const upstream = requestWithLifecycle(http,
+          { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers }, req, res,
           (upRes) => {
             res.writeHead(upRes.statusCode, upRes.headers);
             pipeAndRecordUsage("opencode-go", model, upRes, res);
@@ -2144,8 +2127,7 @@ const server = http.createServer((req, res) => {
         );
 
         upstream.on("error", (err) => {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: err.message }));
+          sendUpstreamError(res, err.message);
         });
 
         upstream.end(updatedBody);
@@ -2155,8 +2137,8 @@ const server = http.createServer((req, res) => {
         headers["content-type"] = "application/json";
         headers["content-length"] = String(updatedBody.length);
 
-        const upstream = http.request(
-          { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers },
+        const upstream = requestWithLifecycle(http,
+          { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers }, req, res,
           (upRes) => {
             res.writeHead(upRes.statusCode, upRes.headers);
             pipeAndRecordUsage("opencode-go", model, upRes, res);
@@ -2164,8 +2146,7 @@ const server = http.createServer((req, res) => {
         );
 
         upstream.on("error", (err) => {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: err.message }));
+          sendUpstreamError(res, err.message);
         });
 
         upstream.end(updatedBody);
@@ -2176,8 +2157,8 @@ const server = http.createServer((req, res) => {
       const headers = { ...req.headers, host: `${TGW_HOST}:${TGW_PORT}` };
       headers["content-length"] = String(body.length);
 
-      const upstream = http.request(
-        { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers },
+      const upstream = requestWithLifecycle(http,
+        { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers }, req, res,
         (upRes) => {
           res.writeHead(upRes.statusCode, upRes.headers);
           upRes.pipe(res);
@@ -2185,8 +2166,7 @@ const server = http.createServer((req, res) => {
       );
 
       upstream.on("error", (err) => {
-        res.writeHead(502, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: err.message }));
+        sendUpstreamError(res, err.message);
       });
 
       upstream.end(body);
