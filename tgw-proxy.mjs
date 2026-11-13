@@ -208,6 +208,8 @@ function getAvailableModels() {
       protocols: catalogProtocols(model),
       pricing: model.pricing,
       upstream_aliases: model.upstream_aliases,
+      discovered: model.discovered === true,
+      freeVerifiedUntil: model.freeVerifiedUntil,
       upstream_capabilities: model.upstream_capabilities,
       source: model.source,
     }));
@@ -340,6 +342,7 @@ async function registerModelsFromEndpoint({ provider, hostname, port, path, head
       context_length: typeof candidate.context_length === "number" ? candidate.context_length : undefined,
       context_window: typeof candidate.max_context_length === "number" ? candidate.max_context_length : (typeof candidate.context_window === "number" ? candidate.context_window : (typeof candidate.context_length === "number" ? candidate.context_length : undefined)),
       pricing: candidate.pricing || undefined,
+      ...(provider === "openrouter" ? { freeVerifiedUntil: Date.now() + 5 * 60_000 } : {}),
       upstream_aliases: Array.isArray(candidate.aliases) ? candidate.aliases.filter((alias) => typeof alias === "string") : undefined,
       upstream_capabilities: candidate.capabilities || (Array.isArray(candidate.supported_parameters) ? {
         function_calling: candidate.supported_parameters.includes("tools"),
@@ -670,6 +673,7 @@ function handleProfileRequest(req, res, parsed, protocol) {
     }
   } else affinityKey = routingAffinityKey(req, parsed);
   const historyKey = routingModelHistoryKey(req, parsed);
+  PROFILE_RUNTIME_STATE.openRouterFreeModels = new Map([...MODEL_REGISTRY.values()].filter((entry) => entry.provider === "openrouter" && entry.discovered && modelAllowedByCatalog(providerById(ROUTING, "openrouter"), entry)).map((entry) => [resolveOpenRouterModel(entry.id).toLowerCase(), entry.freeVerifiedUntil]));
   const plan = buildRoutePlan(
     ROUTING,
     {
@@ -1397,7 +1401,7 @@ const server = http.createServer((req, res) => {
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/admin/antigravity/oauth/start") {
+    if (req.method === "POST" && ["/admin/cline/oauth/start", "/admin/antigravity/oauth/start"].includes(url.pathname)) {
       if (!CLINE_OAUTH) {
         sendClineError(res, new ClineAdapterError("Antigravity OAuth is not configured", {
           status: 503,
@@ -1415,7 +1419,7 @@ const server = http.createServer((req, res) => {
       return;
     }
 
-    if (req.method === "GET" && url.pathname === "/admin/antigravity/oauth/status") {
+    if (req.method === "GET" && ["/admin/cline/oauth/status", "/admin/antigravity/oauth/status"].includes(url.pathname)) {
       if (!CLINE_OAUTH) {
         sendClineError(res, new ClineAdapterError("Antigravity OAuth is not configured", {
           status: 503,
@@ -1432,7 +1436,7 @@ const server = http.createServer((req, res) => {
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/admin/antigravity/oauth/logout") {
+    if (req.method === "POST" && ["/admin/cline/oauth/logout", "/admin/antigravity/oauth/logout"].includes(url.pathname)) {
       if (!CLINE_OAUTH) {
         sendClineError(res, new ClineAdapterError("Antigravity OAuth is not configured", {
           status: 503,
@@ -1446,25 +1450,6 @@ const server = http.createServer((req, res) => {
       } catch (error) {
         sendClineError(res, error);
       }
-      return;
-    }
-
-    // Backward compatibility
-    if (req.method === "POST" && url.pathname === "/admin/cline/oauth/start") {
-      res.writeHead(301, { "Location": "/admin/antigravity/oauth/start" });
-      res.end();
-      return;
-    }
-
-    if (req.method === "GET" && url.pathname === "/admin/cline/oauth/status") {
-      res.writeHead(301, { "Location": "/admin/antigravity/oauth/status" });
-      res.end();
-      return;
-    }
-
-    if (req.method === "POST" && url.pathname === "/admin/cline/oauth/logout") {
-      res.writeHead(301, { "Location": "/admin/antigravity/oauth/logout" });
-      res.end();
       return;
     }
 

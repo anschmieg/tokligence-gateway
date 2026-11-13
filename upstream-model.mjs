@@ -17,6 +17,7 @@ const OPENROUTER_ALIASES = {
 
 export function resolveOpenRouterModel(model) {
   if (!model) return model;
+  if (/^(?:openrouter\/|or\/)?free$/i.test(model)) return "openrouter/free";
   if (model.toLowerCase().startsWith("openrouter/")) {
     return model.slice(11);
   }
@@ -69,4 +70,10 @@ const NAMESPACES = {
 export function normalizeUpstreamModel(providerId, model) {
   const normalizer = NAMESPACES[providerId];
   return normalizer ? normalizer(model) : model;
+}
+
+// Free status belongs to a recent discovery snapshot, not to a model suffix.
+export function isVerifiedFreeOpenRouterModel(model, snapshot, now = Date.now()) {
+  const id = resolveOpenRouterModel(model)?.toLowerCase();
+  return id === "openrouter/free" || Number(snapshot?.get(id)) > now;
 }

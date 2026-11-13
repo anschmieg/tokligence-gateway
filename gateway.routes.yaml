@@ -179,7 +179,7 @@ providers:
 
   - id: google-ai-studio
     adapter: middleware
-    billing_class: subscription
+    billing_class: free
     base_url: https://ai-studio.google.com/v1
     api_key_env: GOOGLE_AI_STUDIO_API_KEY
     base_url_env: GOOGLE_AI_STUDIO_API_BASE
@@ -192,9 +192,9 @@ providers:
       - id: gemini-2.5-pro-preview
         family: gemini
     metadata:
-      cost_class: subscription
+      cost_class: free
       capabilities: [text, vision, tool_calling]
-      quota_type: subscription
+      quota_type: free_tier
 
   # === KOSTENLOS (FREE TIER) ===
   - id: nvidia
@@ -307,23 +307,9 @@ providers:
     base_url_env: OPENROUTER_API_BASE
     protocols: [chat_completions]
     discover_models: true
-    models:
-      - id: deepseek/deepseek-v4-flash
-        family: deepseek
-      - id: deepseek/deepseek-v4-pro
-        family: deepseek
+    models: []
     catalog:
       zero_price_only: true
-      paid_allowlist:
-        - deepseek/deepseek-v4-flash-0731
-        - deepseek/deepseek-v4-flash
-        - deepseek/deepseek-v4-pro
-        - z-ai/glm-5.2
-        - z-ai/glm-5.3-flash
-        - qwen/qwen3-coder-480b
-        - qwen/qwen3-coder-30b
-        - z-ai/glm-5.3
-        - google/gemini-3.6-flash
     metadata:
       cost_class: payg
       capabilities: [coding, reasoning, tool_calling, vision]
@@ -471,8 +457,7 @@ routes:
     prefixes: ["*"]
 
 # Personal discovery policy. Exclusions remove rows, not request aliases.
-# Free OpenRouter models are discovered automatically; paid_allowlist above is
-# the only way to opt in to a paid OpenRouter route (also during fallback).
+# OpenRouter routes are restricted to verified free models.
 model_catalog:
   prefer_latest: true
   retired:
@@ -519,19 +504,15 @@ model_catalog:
       routes:
         - { provider: cline-oauth, model: cline/poolside/laguna-s-2.1-free }
         - { provider: openrouter, model: poolside/laguna-s-2.1:free }
-        - { provider: openrouter, model: poolside/laguna-s-2.1 }
     poolside/laguna-xs-2.1:
       routes:
         - { provider: openrouter, model: poolside/laguna-xs-2.1:free }
-        - { provider: openrouter, model: poolside/laguna-xs-2.1 }
     thinkingmachines/inkling:
       routes:
         - { provider: openrouter, model: thinkingmachines/inkling:free }
-        - { provider: openrouter, model: thinkingmachines/inkling }
     thinkingmachines/inkling-small:
       routes:
         - { provider: openrouter, model: thinkingmachines/inkling-small:free }
-        - { provider: openrouter, model: thinkingmachines/inkling-small }
 
 # Model picker visibility served on GET /v1/models. Hidden models stay callable;
 # policy.terms explains why they are not offered.
@@ -554,7 +535,7 @@ model_picker:
     cline-oauth: free
     ollama-cloud: subscription
     codex-oauth: subscription
-    openrouter: paid
+    openrouter: free
     mistral: paid
     modal: paid
     tokligence: routing
@@ -633,10 +614,8 @@ profiles:
       - provider: codex-oauth
         model: gpt-6-astra
       - provider: openrouter
-        model: deepseek/deepseek-v4-flash-0731
-      - provider: openrouter
         model: openrouter/free
-    max_attempts: 19
+    max_attempts: 18
 
   agentic-worker:
     context_window: 128000
@@ -674,10 +653,8 @@ profiles:
       - provider: codex-oauth
         model: gpt-6-astra
       - provider: openrouter
-        model: deepseek/deepseek-v4-flash-0731
-      - provider: openrouter
         model: openrouter/free
-    max_attempts: 18
+    max_attempts: 17
 
   free-pool:
     candidates:
@@ -841,8 +818,8 @@ aliases:
   # Vision Fallback Chain
   - id: a-vision-fallback
     patterns: [vision-fb-1]
-    provider: openrouter
-    target: google/gemini-3.6-flash
+    provider: mistral
+    target: pixtral-12b-latest
     fallback: a-vision-fallback-2
 
   - id: a-vision-fallback-2

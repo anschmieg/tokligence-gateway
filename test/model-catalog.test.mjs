@@ -21,11 +21,11 @@ test("OpenRouter catalog keeps zero-price models even without a free suffix", ()
   }), true);
 });
 
-test("OpenRouter catalog retains only configured paid exceptions", () => {
+test("OpenRouter catalog rejects paid models even if allowlisted", () => {
   assert.equal(modelAllowedByCatalog(openrouter, {
     id: "qwen/qwen3.7-flash",
     pricing: { prompt: "0.00000003", completion: "0.00000013" },
-  }), true);
+  }), false);
   assert.equal(modelAllowedByCatalog(openrouter, {
     id: "old/paid-model",
     pricing: { prompt: "0.1", completion: "0.2" },
@@ -54,13 +54,22 @@ test("unknown or missing prices never count as free", () => {
 
 const config = loadRoutingConfig("gateway.routes.yaml");
 
+test("Cline catalog excludes configured models absent from free discovery", () => {
+  const rows = buildModelCatalog([
+    { id: "cline/paid/model", provider: "cline-oauth" },
+    { id: "cline/free/model", provider: "cline-oauth", discovered: true },
+  ], config);
+  assert(!rows.some((row) => row.id === "cline/paid/model"));
+  assert(rows.some((row) => row.id === "cline/free/model"));
+});
+
 test("catalog merges verified aliases and explicit equivalent backends, not matching names", () => {
   setOpenCodeFreeModels(config.providers.find(p => p.id === "opencode-zen"), [{ id: "minimax-m3.1-flash-free" }, { id: "deepseek-v4.1-flash-free" }]);
   const rows = buildModelCatalog([
     { id: "codestral-latest", provider: "mistral", context_window: 128000 },
     { id: "mistral/codestral-latest", provider: "mistral", context_window: 128000 },
     { id: "mistral/codestral-2508", provider: "mistral", upstream_aliases: ["codestral-latest"], context_window: 128000 },
-    { id: "cline/cline-free/minimax-m3.1-flash", provider: "cline-oauth", context_window: 1000000 },
+    { id: "cline/cline-free/minimax-m3.1-flash", provider: "cline-oauth", discovered: true, context_window: 1000000 },
     { id: "minimax-m3.1-flash-free", provider: "opencode-zen", context_window: 200000 },
     { id: "openrouter/minimax/minimax-m3.1-flash:free", provider: "openrouter", context_window: 1000000, pricing: { prompt: "0", completion: "0" } },
     { id: "openrouter/deepseek/deepseek-v4-flash", provider: "openrouter" },
@@ -74,7 +83,7 @@ test("catalog merges verified aliases and explicit equivalent backends, not matc
   assert.equal(decorateModel(mini, config.model_picker).model_picker_enabled, true);
   assert.equal(mini.context_window, 200000);
   assert.equal(decorateModel(mini).capabilities.limits.max_context_window_tokens, 200000);
-  assert.equal(rows.filter((row) => row.id.includes("deepseek")).length, 2);
+  assert.equal(rows.filter((row) => row.id.includes("deepseek")).length, 1);
 });
 
 test("personal exclusions and explicit retirements have different semantics", () => {
@@ -143,16 +152,15 @@ test("selected picker families survive a crowded catalog while new models use sp
 
 test("canonical routes prefer free backends and reject incompatible fallback context", () => {
   const routing = structuredClone(config);
-  routing.providers.find((p) => p.id === "openrouter").catalog.paid_allowlist.push("poolside/laguna-s-2.1");
+  routing.providers.find((p) => p.id === "openrouter").catalog.paid_allowlist = ["poolside/laguna-s-2.1"];
   const rows = buildModelCatalog([
     { id: "openrouter/poolside/laguna-s-2.1", provider: "openrouter", pricing: { prompt: ".01", completion: ".02" }, context_window: 500 },
     { id: "openrouter/poolside/laguna-s-2.1:free", provider: "openrouter", pricing: { prompt: "0", completion: "0" }, context_window: 10 },
   ], routing);
-  const state = { catalogModels: new Map(rows.map((row) => [row.id, row])) };
+  const state = { catalogModels: new Map(rows.map((row) => [row.id, row])), openRouterFreeModels: new Map([["poolside/laguna-s-2.1:free", Date.now() + 60000]]) };
   const request = { model: "poolside/laguna-s-2.1", protocol: "chat_completions", body: { messages: [{ role: "user", content: "x".repeat(100) }] } };
   const plan = buildRoutePlan(routing, request, { OPENROUTER_API_KEY: "test" }, state);
-  assert.equal(plan.candidates.length, 1, "tiny-context free route cannot serve even this request");
-  assert.equal(plan.candidates[0].upstreamModel, "poolside/laguna-s-2.1");
+  assert.equal(plan.error.code, "no_compatible_model_route", "paid route cannot serve as fallback");
   const small = buildRoutePlan(routing, { ...request, body: {} }, { OPENROUTER_API_KEY: "test" }, state);
   assert.equal(small.candidates[0].upstreamModel, "poolside/laguna-s-2.1:free");
 });
@@ -171,7 +179,7 @@ test("catalog routes report retryable cooldown only when compatible routes are c
   ];
   const catalogModel = { routes, supported_endpoints: ["/v1/chat/completions"] };
   const cooldown = Date.now() + 30_000;
-  const runtimeState = { catalogModels: new Map([["canonical-test", catalogModel]]), cooldowns: new Map([
+  const runtimeState = { openRouterFreeModels: new Map([["poolside/laguna-s-2.1", Date.now() + 60000]]), catalogModels: new Map([["canonical-test", catalogModel]]), cooldowns: new Map([
     [`openrouter:poolside/laguna-s-2.1:chat_completions`, cooldown],
     [`mistral:mistral/codestral-latest:chat_completions`, cooldown],
   ]) };
@@ -206,11 +214,11 @@ test("catalog routes report retryable cooldown only when compatible routes are c
 
 test("canonical fallback respects per-model tool support and preserves the Cline Messages translator", () => {
   const rows = buildModelCatalog([
-    { id: "cline/cline-free/minimax-m3.1-flash", provider: "cline-oauth", context_window: 1000000, supports_parallel_tool_calls: true },
+    { id: "cline/cline-free/minimax-m3.1-flash", provider: "cline-oauth", discovered: true, context_window: 1000000, supports_parallel_tool_calls: true },
     { id: "openrouter/minimax/minimax-m3.1-flash:free", provider: "openrouter", context_window: 1000000, pricing: { prompt: "0", completion: "0" }, upstream_capabilities: { function_calling: false } },
   ], config);
   assert.equal(decorateModel(rows[0], config.model_picker).model_picker_enabled, true);
-  const state = { catalogModels: new Map(rows.map((row) => [row.id, row])) };
+  const state = { catalogModels: new Map(rows.map((row) => [row.id, row])), openRouterFreeModels: new Map([["poolside/laguna-s-2.1:free", Date.now() + 60000]]) };
   const request = { model: "minimax-m3.1-flash-free", protocol: "messages", body: { messages: [{ role: "user", content: "hello" }], parallel_tool_calls: true, tools: [{ name: "test", input_schema: { type: "object" } }] } };
   const plan = buildRoutePlan(config, request, { OPENROUTER_API_KEY: "test" }, state);
   assert.equal(plan.candidates.length, 1);

@@ -369,7 +369,6 @@ export class ClineOAuthAdapter {
   #oauthState = { status: "idle" };
   #oauthCompletion = null;
   #oauthGeneration = 0;
-  #configuredModels;
   #modelCache;
   #modelCacheExpiresAt = 0;
   #modelRefreshInFlight = null;
@@ -385,8 +384,7 @@ export class ClineOAuthAdapter {
     this.#fetch = fetchImpl;
     this.#now = now;
     this.#sleep = sleep;
-    this.#configuredModels = uniqueModels(provider.models || []);
-    this.#modelCache = this.#configuredModels;
+    this.#modelCache = [];
   }
 
   async #fetchWithTimeout(url, options = {}) {
@@ -647,8 +645,9 @@ export class ClineOAuthAdapter {
         this.#modelCache = uniqueModels(payload.free);
         this.#modelCacheExpiresAt = this.#now() + this.#modelCacheTtlMs;
       } catch {
-        // Keep only the last successfully fetched or explicitly configured free
-        // set. A transient feed failure must not introduce any other tier.
+        // Expired or unverified entries cannot authorize requests.
+        this.#modelCache = [];
+        this.#modelCacheExpiresAt = 0;
       }
       return this.#modelCache.map((model) => ({ ...model }));
     })().finally(() => {

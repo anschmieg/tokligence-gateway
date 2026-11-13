@@ -171,3 +171,16 @@ test("session family history evicts least-recently-used sessions at its bound", 
   assert.equal(runtimeState.modelHistory.has("session-0"), false);
   assert.equal(runtimeState.modelHistory.has("session-1000"), true);
 });
+
+test("OpenRouter authorization is rechecked at dispatch after planning", async () => {
+  const { req, res } = mockRequestResponse();
+  const plan = simplePlan();
+  plan.candidates = [{ provider: { id: "openrouter", adapter: "middleware" }, upstreamModel: "test-free", protocol: "chat_completions" }];
+  let calls = 0;
+  await executeRoutePlan({ plan, req, res, path: "/v1/chat/completions", body: {},
+    runtimeState: { openRouterFreeModels: new Map([["test-free", Date.now() - 1]]) },
+    startAttempt: () => { calls++; throw new Error("expired model dispatched"); },
+  });
+  assert.equal(calls, 0);
+  assert.equal(res.statusCode, 503);
+});
