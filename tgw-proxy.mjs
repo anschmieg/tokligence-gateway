@@ -7,6 +7,7 @@ import { discoverOpenCodeFreeModels, OPENCODE_DISCOVERY_INTERVAL_MS, OPENCODE_DI
 // For GLM-5/Modal models: calls Modal directly (non-streaming only)
 
 import http from "http";
+import { readRequestBody, parseRequestObject, sendRequestError } from "./http-request.mjs";
 import { nativeConversationIdentity } from "./native-session-identity.mjs";
 import https from "https";
 import path from "node:path";
@@ -986,43 +987,19 @@ async function validateAdminAuth(req) {
   if (secretsEqual(extractBearerToken(req.headers["authorization"]), ADMIN_AUTH_SECRET)) {
     return true;
   }
-  // 2) Cloudflare Access JWT (Cf-Access-Jwt header): if present, validate strictly.
-  //    A browser request that passed the Cloudflare Access policy at the edge may
-  //    not carry this header by the time it reaches us, but when it does we make
-  //    sure it is genuine so a direct-origin caller can't spoof it.
   if (cloudflareAccessConfigured()) {
-    const cfToken = req.headers["cf-access-jwt"];
-    if (typeof cfToken === "string" && cfToken) {
-      try {
-        return await isValidCloudflareAccessToken(cfToken);
-      } catch {
-        return false;
-      }
-    }
-    // 3) No JWT header present: trust Cloudflare Access at the edge. The dashboard
-    //    /admin routes are only publicly reachable through the Cloudflare-fronted
-    //    proxy, which enforces the Access policy before traffic reaches us, so a
-    //    request already allowed in is authentic. When Access is enabled we do not
-    //    force the origin to re-validate the token the browser flow doesn't send.
-    return true;
+    const cfToken = req.headers["cf-access-jwt-assertion"] || req.headers["cf-access-jwt"];
+    if (typeof cfToken !== "string" || !cfToken) return false;
+    try { return await isValidCloudflareAccessToken(cfToken); }
+    catch { return false; }
   }
   return false;
 }
 
-function readJsonBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => {
-      if (chunks.length === 0) return resolve({});
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString()));
-      } catch (error) {
-        reject(error);
-      }
-    });
-    req.on("error", reject);
-  });
+async function readJsonBody(req) {
+  const body = await readRequestBody(req, { limit: 64 * 1024 });
+  try { return body.length ? parseRequestObject(body) : {}; }
+  catch { throw Object.assign(new Error("Invalid JSON object"), { statusCode: 400 }); }
 }
 
 // Headers the Codex lane needs to do its own job. CLIProxyAPI derives its
@@ -1374,7 +1351,9 @@ function openAIToAnthropicMessage(data, requestedModel) {
 }
 
 const server = http.createServer((req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
+  let url;
+  try { url = new URL(req.url, `http://${req.headers.host}`); }
+  catch { sendRequestError(req, res, Object.assign(new Error("Invalid request URL"), { statusCode: 400 })); return; }
   if (req.method === "POST" && ["/v1/messages", "/v1/chat/completions", "/v1/responses", "/responses"].includes(url.pathname)) {
     req.requestTrace = createRequestTrace(req, res);
   }
@@ -1513,10 +1492,7 @@ const server = http.createServer((req, res) => {
         }
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(sanitizedPreferences(PREFERENCES)));
-      }).catch(() => {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "invalid JSON body" }));
-      });
+      }).catch((error) => sendRequestError(req, res, error));
       return;
     }
 
@@ -1531,10 +1507,7 @@ const server = http.createServer((req, res) => {
         PREFERENCES.clear(id);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(sanitizedPreferences(PREFERENCES)));
-      }).catch(() => {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "invalid JSON body" }));
-      });
+      }).catch((error) => sendRequestError(req, res, error));
       return;
     }
 
@@ -1660,14 +1633,14 @@ const server = http.createServer((req, res) => {
   const isChatCompletions = req.url.includes("/v1/chat/completions");
   // Handle Chat Completions API (OpenAI) - for Codex
   if (req.method === "POST" && isChatCompletions) {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => {
-      const body = Buffer.concat(chunks);
+    readRequestBody(req).then((body) => {
       let parsed;
       
       try {
-        parsed = JSON.parse(body.toString());
+        parsed = parseRequestObject(body);
+        if (typeof parsed.model !== "string" || !parsed.model.trim() || parsed.model.length > 256) throw new Error("Invalid model");
+        if (parsed.messages !== undefined && !Array.isArray(parsed.messages)) throw new Error("Invalid messages");
+        if (parsed.metadata !== undefined && (!parsed.metadata || typeof parsed.metadata !== "object" || Array.isArray(parsed.metadata))) throw new Error("Invalid metadata");
       } catch {
         res.writeHead(400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Invalid JSON" }));
@@ -1919,20 +1892,20 @@ const server = http.createServer((req, res) => {
         });
         upstream.end(proxyBody);
       }
-    });
+    }).catch((error) => sendRequestError(req, res, error));
     return;
   }
 
   // Handle Responses API - translate to Messages API
   if (req.method === "POST" && isResponses) {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => {
-      const body = Buffer.concat(chunks);
+    readRequestBody(req).then((body) => {
       let parsed;
       
       try {
-        parsed = JSON.parse(body.toString());
+        parsed = parseRequestObject(body);
+        if (typeof parsed.model !== "string" || !parsed.model.trim() || parsed.model.length > 256) throw new Error("Invalid model");
+        if (parsed.messages !== undefined && !Array.isArray(parsed.messages)) throw new Error("Invalid messages");
+        if (parsed.metadata !== undefined && (!parsed.metadata || typeof parsed.metadata !== "object" || Array.isArray(parsed.metadata))) throw new Error("Invalid metadata");
       } catch {
         res.writeHead(400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Invalid JSON" }));
@@ -2100,19 +2073,20 @@ const server = http.createServer((req, res) => {
         });
         upstream.end(proxyBody);
       }
-    });
+    }).catch((error) => sendRequestError(req, res, error));
     return;
   }
 
   if (req.method === "POST" && isAnthropic) {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => {
-      let body = Buffer.concat(chunks);
+    readRequestBody(req).then((receivedBody) => {
+      let body = receivedBody;
       let parsed;
       
       try {
-        parsed = JSON.parse(body.toString());
+        parsed = parseRequestObject(body);
+        if (typeof parsed.model !== "string" || !parsed.model.trim() || parsed.model.length > 256) throw new Error("Invalid model");
+        if (parsed.messages !== undefined && !Array.isArray(parsed.messages)) throw new Error("Invalid messages");
+        if (parsed.metadata !== undefined && (!parsed.metadata || typeof parsed.metadata !== "object" || Array.isArray(parsed.metadata))) throw new Error("Invalid metadata");
       } catch {
         res.writeHead(400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Invalid JSON" }));
@@ -2334,12 +2308,9 @@ const server = http.createServer((req, res) => {
 
         upstream.end(updatedBody);
       }
-    });
+    }).catch((error) => sendRequestError(req, res, error));
   } else {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => {
-      const body = Buffer.concat(chunks);
+    readRequestBody(req).then((body) => {
       const headers = { ...req.headers, host: `${TGW_HOST}:${TGW_PORT}` };
       headers["content-length"] = String(body.length);
 
@@ -2357,7 +2328,7 @@ const server = http.createServer((req, res) => {
       });
 
       upstream.end(body);
-    });
+    }).catch((error) => sendRequestError(req, res, error));
   }
 });
 

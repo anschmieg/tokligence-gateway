@@ -37,6 +37,10 @@ only to loopback and is never exposed directly to the internet.
 - `POST /v1/chat/completions` — OpenAI Chat Completions
 - `POST /v1/systemone` — native OpenCode Jev typed evaluations
 
+Buffered chat and generic proxy requests are limited to 8 MiB; admin JSON
+requests are limited to 64 KiB. These bodies must arrive within 30 seconds.
+Specialist audio/document endpoints retain their separate 32 MiB limit.
+
 All endpoints except `/health` require the existing gateway bearer token.
 `/admin/*` is protected by **either** a separate `TOKLIGENCE_ADMIN_SECRET`
 shared secret **or** a Cloudflare Access JWT. To use Cloudflare Access, deploy
@@ -49,9 +53,10 @@ liveness result that exposes no provider state.
 
 Instead of (or in addition to) `TOKLIGENCE_ADMIN_SECRET`, you can protect the
 dashboard with Cloudflare Access. Cloudflare sits in front of the gateway,
-validates the user's identity, and sends a signed JWT in the `Cf-Access-Jwt`
+validates the user's identity, and sends a signed JWT in the `Cf-Access-Jwt-Assertion`
 request header. The gateway verifies that JWT against Cloudflare's public
-JWKS.
+JWKS. Requests without a verified JWT require the admin bearer secret,
+including requests made directly to the origin.
 
 ```dotenv
 # Cloudflare Zero Trust team name (subdomain of your Access dashboard)

@@ -196,7 +196,7 @@ test("dashboard admin endpoints accept a valid Cloudflare Access JWT", async (t)
 
   // Valid Cloudflare Access JWT authenticates.
   const cfRes = await fetch(`${base2}/admin/status`, {
-    headers: { "Cf-Access-Jwt": jwt },
+    headers: { "Cf-Access-Jwt-Assertion": jwt },
   });
   assert.equal(cfRes.status, 200);
   const status2 = await cfRes.json();
@@ -210,9 +210,10 @@ test("dashboard admin endpoints accept a valid Cloudflare Access JWT", async (t)
   });
   assert.equal(badRes.status, 401);
 
-  // With Cloudflare Access configured, the dashboard/admin routes are protected
-  // at the edge. A request already admitted by the Access policy may not carry a
-  // Cf-Access-Jwt header by the time it reaches us, so the origin trusts it.
-  const noAuth = await fetch(`${base2}/admin/status`);
-  assert.equal(noAuth.status, 200);
+  for (const pathname of ["/admin/status", "/admin/preferences", "/dashboard"]) {
+    assert.equal((await fetch(`${base2}${pathname}`)).status, 401);
+    assert.equal((await fetch(`${base2}${pathname}`, { headers: { Authorization: "Bearer public-secret" } })).status, 401);
+  }
+  assert.equal((await fetch(`${base2}/admin/preferences/reset`, { method: "POST" })).status, 401);
+  assert.equal((await fetch(`${base2}/admin/status`, { headers: { Authorization: "Bearer admin-secret" } })).status, 200);
 });

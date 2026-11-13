@@ -15,3 +15,20 @@ test("Docker image includes every local module imported by the proxy", async () 
     assert.match(dockerfile, new RegExp(`COPY[^\\n]*\\b${file.replace(".", "\\.")}\\b`), `${file} must be copied into the image`);
   }
 });
+
+test("Docker image includes transitive local runtime dependencies", async () => {
+  const dockerfile = await readFile(path.join(projectRoot, "Dockerfile"), "utf8");
+  const copied = new Set([...dockerfile.matchAll(/^COPY (?!.*--from=)([^\n]+) \.\/$/gm)].flatMap((match) => match[1].split(/\s+/)));
+  const pending = ["tgw-proxy.mjs", "compile-config.mjs"];
+  const visited = new Set();
+  while (pending.length) {
+    const file = pending.pop();
+    if (visited.has(file)) continue;
+    visited.add(file);
+    assert(copied.has(file), `${file} must be copied into the image`);
+    const source = await readFile(path.join(projectRoot, file), "utf8");
+    for (const match of source.matchAll(/(?:from\s+|import\s*)["'](\.\/[^"']+\.mjs)["']/g)) {
+      pending.push(path.posix.normalize(path.posix.join(path.posix.dirname(file), match[1])));
+    }
+  }
+});
