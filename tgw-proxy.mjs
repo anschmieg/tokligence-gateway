@@ -7,12 +7,15 @@ import { discoverOpenCodeFreeModels, OPENCODE_DISCOVERY_INTERVAL_MS, OPENCODE_DI
 // For GLM-5/Modal models: calls Modal directly (non-streaming only)
 
 import http from "http";
+import { requestWithLifecycle, sendUpstreamError } from "./request-lifecycle.mjs";
+import { fetchProviderJson } from "./provider-json.mjs";
+import { readRequestBody, parseRequestObject, sendRequestError } from "./http-request.mjs";
 import { nativeConversationIdentity } from "./native-session-identity.mjs";
 import https from "https";
 import path from "node:path";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { sendChatCompletionResult } from "./openai-stream.mjs";
-import { resolveMistralModel, resolveOpenCodeModel, resolveOpenRouterModel } from "./upstream-model.mjs";
+import { resolveMistralModel, resolveOpenCodeModel, resolveOpenRouterModel, openRouterRequestError } from "./upstream-model.mjs";
 import { sanitizeHeaders } from "./sanitize-headers.mjs";
 import {
   CODEX_REASONING_LEVELS,
@@ -295,29 +298,7 @@ function registerRoutingProfiles() {
   }
 }
 
-function fetchJson(options) {
-  return new Promise((resolve, reject) => {
-    const client = options.protocol === "https:" || Number(options.port) === 443 ? https : http;
-    const req = client.request(options, (res) => {
-      const chunks = [];
-      res.on("data", (chunk) => chunks.push(chunk));
-      res.on("end", () => {
-        const text = Buffer.concat(chunks).toString();
-        if (res.statusCode < 200 || res.statusCode >= 300) {
-          reject(new Error(`HTTP ${res.statusCode}: ${text.slice(0, 200)}`));
-          return;
-        }
-        try {
-          resolve(JSON.parse(text));
-        } catch {
-          reject(new Error("Invalid JSON from model provider"));
-        }
-      });
-    });
-    req.on("error", reject);
-    req.end();
-  });
-}
+const fetchJson = fetchProviderJson;
 
 function prefixedModelId(id, prefix) {
   if (!prefix || id.toLowerCase().startsWith(prefix.toLowerCase())) return id;
@@ -655,6 +636,12 @@ function handleProfileRequest(req, res, parsed, protocol) {
     return true;
   }
   const provider = matchConfiguredProvider(ROUTING, parsed?.model);
+  const policyError = provider === "openrouter" && openRouterRequestError(parsed);
+  if (policyError) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: { code: "openrouter_paid_features_disabled", message: policyError } }));
+    return true;
+  }
   const surface = modelSurface({ id: parsed?.model || "", provider });
   if (surface.type !== "chat") {
     res.writeHead(400, { "Content-Type": "application/json" });
@@ -726,15 +713,11 @@ function handleProfileRequest(req, res, parsed, protocol) {
       res.destroy(error);
       return;
     }
-    res.writeHead(502, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "Profile routing failed" }));
+    sendUpstreamError(res, "Profile routing failed");
   });
   return true;
 }
 
-function isOpenRouterModel(model) {
-  return matchConfiguredProvider(ROUTING, model) === "openrouter";
-}
 
 function isOpenCodeModel(model) {
   const provider = matchConfiguredProvider(ROUTING, model);
@@ -986,43 +969,19 @@ async function validateAdminAuth(req) {
   if (secretsEqual(extractBearerToken(req.headers["authorization"]), ADMIN_AUTH_SECRET)) {
     return true;
   }
-  // 2) Cloudflare Access JWT (Cf-Access-Jwt header): if present, validate strictly.
-  //    A browser request that passed the Cloudflare Access policy at the edge may
-  //    not carry this header by the time it reaches us, but when it does we make
-  //    sure it is genuine so a direct-origin caller can't spoof it.
   if (cloudflareAccessConfigured()) {
-    const cfToken = req.headers["cf-access-jwt"];
-    if (typeof cfToken === "string" && cfToken) {
-      try {
-        return await isValidCloudflareAccessToken(cfToken);
-      } catch {
-        return false;
-      }
-    }
-    // 3) No JWT header present: trust Cloudflare Access at the edge. The dashboard
-    //    /admin routes are only publicly reachable through the Cloudflare-fronted
-    //    proxy, which enforces the Access policy before traffic reaches us, so a
-    //    request already allowed in is authentic. When Access is enabled we do not
-    //    force the origin to re-validate the token the browser flow doesn't send.
-    return true;
+    const cfToken = req.headers["cf-access-jwt-assertion"] || req.headers["cf-access-jwt"];
+    if (typeof cfToken !== "string" || !cfToken) return false;
+    try { return await isValidCloudflareAccessToken(cfToken); }
+    catch { return false; }
   }
   return false;
 }
 
-function readJsonBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => {
-      if (chunks.length === 0) return resolve({});
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString()));
-      } catch (error) {
-        reject(error);
-      }
-    });
-    req.on("error", reject);
-  });
+async function readJsonBody(req) {
+  const body = await readRequestBody(req, { limit: 64 * 1024 });
+  try { return body.length ? parseRequestObject(body) : {}; }
+  catch { throw Object.assign(new Error("Invalid JSON object"), { statusCode: 400 }); }
 }
 
 // Headers the Codex lane needs to do its own job. CLIProxyAPI derives its
@@ -1065,14 +1024,14 @@ function proxyToCodex(req, res, body) {
     if (req.headers[name] !== undefined) headers[name] = req.headers[name];
   }
 
-  const upstream = client.request({
+  const upstream = requestWithLifecycle(client, {
     protocol: target.protocol,
     hostname: target.hostname,
     port: target.port || undefined,
     path: `${target.pathname}${target.search}`,
     method: req.method,
     headers,
-  }, (upRes) => {
+  }, req, res, (upRes) => {
     res.writeHead(upRes.statusCode || 502, upRes.headers);
     pipeAndRecordUsage("codex-oauth", model, upRes, res, sessionKeyHash);
   });
@@ -1082,8 +1041,7 @@ function proxyToCodex(req, res, body) {
       res.destroy(err);
       return;
     }
-    res.writeHead(502, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "Codex backend unavailable" }));
+    sendUpstreamError(res, "Codex backend unavailable");
   });
   req.once("aborted", () => upstream.destroy());
   res.once("close", () => {
@@ -1149,7 +1107,7 @@ function providerSummary() {
   return { object: "list", data: config.providers };
 }
 
-function callModal(model, messages, maxTokens) {
+function callModal(model, messages, maxTokens, inputReq, inputRes) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
       model: "zai-org/GLM-5-FP8",
@@ -1170,7 +1128,7 @@ function callModal(model, messages, maxTokens) {
       }
     };
 
-    const req = https.request(options, (res) => {
+    const req = requestWithLifecycle(https, options, inputReq, inputRes, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(chunk));
       res.on("end", () => {
@@ -1189,7 +1147,7 @@ function callModal(model, messages, maxTokens) {
   });
 }
 
-function callOpenCodeGoOpenAI(model, messages, maxTokens) {
+function callOpenCodeGoOpenAI(model, messages, maxTokens, inputReq, inputRes) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
       model: resolveOpenCodeModel(model),
@@ -1210,7 +1168,7 @@ function callOpenCodeGoOpenAI(model, messages, maxTokens) {
       }
     };
 
-    const req = https.request(options, (res) => {
+    const req = requestWithLifecycle(https, options, inputReq, inputRes, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(chunk));
       res.on("end", () => {
@@ -1229,7 +1187,7 @@ function callOpenCodeGoOpenAI(model, messages, maxTokens) {
   });
 }
 
-function callOpenCodeMessages(model, messages, maxTokens) {
+function callOpenCodeMessages(model, messages, maxTokens, inputReq, inputRes) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
       model: resolveOpenCodeModel(model),
@@ -1251,7 +1209,7 @@ function callOpenCodeMessages(model, messages, maxTokens) {
       }
     };
 
-    const req = https.request(options, (res) => {
+    const req = requestWithLifecycle(https, options, inputReq, inputRes, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(chunk));
       res.on("end", () => {
@@ -1270,53 +1228,12 @@ function callOpenCodeMessages(model, messages, maxTokens) {
   });
 }
 
-function callOpenRouterOpenAI(model, messages, maxTokens) {
-  return new Promise((resolve, reject) => {
-    const body = JSON.stringify({
-      model: resolveOpenRouterModel(model),
-      messages,
-      stream: false,
-      max_tokens: maxTokens
-    });
-
-    const options = {
-      hostname: OPENROUTER_URL.hostname,
-      port: OPENROUTER_URL.port || 443,
-      path: `${OPENROUTER_URL.pathname.replace(/\/$/, "")}/chat/completions`,
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${OPENROUTER_KEY}`,
-        "Content-Length": Buffer.byteLength(body),
-        "HTTP-Referer": "https://github.com/tokligence/gateway",
-        "X-Title": "Tokligence Gateway"
-      }
-    };
-
-    const req = https.request(options, (res) => {
-      const chunks = [];
-      res.on("data", (chunk) => chunks.push(chunk));
-      res.on("end", () => {
-        try {
-          const data = JSON.parse(Buffer.concat(chunks).toString());
-          resolve(data);
-        } catch {
-          reject(new Error("Invalid JSON from OpenRouter"));
-        }
-      });
-    });
-
-    req.on("error", reject);
-    req.write(body);
-    req.end();
-  });
-}
 
 function isMistralModel(model) {
   return matchConfiguredProvider(ROUTING, model) === "mistral";
 }
 
-function callMistralOpenAI(model, messages, maxTokens) {
+function callMistralOpenAI(model, messages, maxTokens, inputReq, inputRes) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
       model: resolveMistralModel(model),
@@ -1337,7 +1254,7 @@ function callMistralOpenAI(model, messages, maxTokens) {
       }
     };
 
-    const req = https.request(options, (res) => {
+    const req = requestWithLifecycle(https, options, inputReq, inputRes, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(chunk));
       res.on("end", () => {
@@ -1374,7 +1291,9 @@ function openAIToAnthropicMessage(data, requestedModel) {
 }
 
 const server = http.createServer((req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
+  let url;
+  try { url = new URL(req.url, `http://${req.headers.host}`); }
+  catch { sendRequestError(req, res, Object.assign(new Error("Invalid request URL"), { statusCode: 400 })); return; }
   if (req.method === "POST" && ["/v1/messages", "/v1/chat/completions", "/v1/responses", "/responses"].includes(url.pathname)) {
     req.requestTrace = createRequestTrace(req, res);
   }
@@ -1484,8 +1403,7 @@ const server = http.createServer((req, res) => {
           res.end(JSON.stringify({ object: "list", data }));
         })
         .catch((error) => {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: error.message }));
+          sendUpstreamError(res, error.message);
         });
       return;
     }
@@ -1513,10 +1431,7 @@ const server = http.createServer((req, res) => {
         }
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(sanitizedPreferences(PREFERENCES)));
-      }).catch(() => {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "invalid JSON body" }));
-      });
+      }).catch((error) => sendRequestError(req, res, error));
       return;
     }
 
@@ -1531,10 +1446,7 @@ const server = http.createServer((req, res) => {
         PREFERENCES.clear(id);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(sanitizedPreferences(PREFERENCES)));
-      }).catch(() => {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "invalid JSON body" }));
-      });
+      }).catch((error) => sendRequestError(req, res, error));
       return;
     }
 
@@ -1561,7 +1473,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Not found" }));
     return;
-    });
+    }).catch((error) => sendRequestError(req, res, error));
     return;
   }
 
@@ -1660,14 +1572,14 @@ const server = http.createServer((req, res) => {
   const isChatCompletions = req.url.includes("/v1/chat/completions");
   // Handle Chat Completions API (OpenAI) - for Codex
   if (req.method === "POST" && isChatCompletions) {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => {
-      const body = Buffer.concat(chunks);
+    readRequestBody(req).then((body) => {
       let parsed;
       
       try {
-        parsed = JSON.parse(body.toString());
+        parsed = parseRequestObject(body);
+        if (typeof parsed.model !== "string" || !parsed.model.trim() || parsed.model.length > 256) throw new Error("Invalid model");
+        if (parsed.messages !== undefined && !Array.isArray(parsed.messages)) throw new Error("Invalid messages");
+        if (parsed.metadata !== undefined && (!parsed.metadata || typeof parsed.metadata !== "object" || Array.isArray(parsed.metadata))) throw new Error("Invalid metadata");
       } catch {
         res.writeHead(400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Invalid JSON" }));
@@ -1682,7 +1594,7 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ error: { message: "Jev requires the native /v1/systemone endpoint", type: "invalid_request_error" } }));
         return;
       }
-      if (handleProfileRequest(req, res, parsed, "chat_completions")) return;
+      if (handleProfileRequest(req, res, { ...parsed, model }, "chat_completions")) return;
 
       if (model === COPILOT_AUTO_MODEL) {
         if (!COPILOT_AUTO) {
@@ -1792,7 +1704,7 @@ const server = http.createServer((req, res) => {
       if (handleCodexRoute(req, res, parsed, model)) return;
       
       if (isOpenCodeMiniMaxModel(model)) {
-        callOpenCodeMessages(model, parsed.messages || [], parsed.max_tokens || 4096)
+        callOpenCodeMessages(model, parsed.messages || [], parsed.max_tokens || 4096, req, res)
           .then((data) => {
             sendChatCompletionResult(
               res,
@@ -1803,51 +1715,18 @@ const server = http.createServer((req, res) => {
             recordModelObservedUsage(model, data);
           })
           .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
+            sendUpstreamError(res, err.message);
           });
       } else if (isOpenCodeModel(model)) {
         const messages = toOpenAIChatMessages(parsed.messages || []);
-        callOpenCodeGoOpenAI(model, messages, parsed.max_tokens || 4096)
+        callOpenCodeGoOpenAI(model, messages, parsed.max_tokens || 4096, req, res)
           .then((data) => {
             sendChatCompletionResult(res, data, model, parsed.stream === true);
             recordModelObservedUsage(model, data);
           })
           .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
+            sendUpstreamError(res, err.message);
           });
-      } else if (isOpenRouterModel(model)) {
-        const rewritten = resolveOpenRouterModel(model);
-        const proxyBody = Buffer.from(JSON.stringify({ ...parsed, model: rewritten }));
-        
-        const forwardHeaders = {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${OPENROUTER_KEY}`,
-          "Content-Length": String(proxyBody.length),
-          "HTTP-Referer": "https://github.com/tokligence/gateway",
-          "X-Title": "Tokligence Gateway"
-        };
-
-        const options = {
-          hostname: OPENROUTER_URL.hostname,
-          port: OPENROUTER_URL.port || 443,
-          path: `${OPENROUTER_URL.pathname.replace(/\/$/, "")}/chat/completions`,
-          method: "POST",
-          headers: forwardHeaders
-        };
-
-        const upstream = https.request(options, (upRes) => {
-          res.writeHead(upRes.statusCode, upRes.headers);
-          pipeAndRecordUsage("opencode-go", model, upRes, res);
-        });
-
-        upstream.on("error", (err) => {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: err.message }));
-        });
-
-        upstream.end(proxyBody);
       } else if (isMistralModel(model)) {
         const rewritten = resolveMistralModel(model);
         const proxyBody = Buffer.from(JSON.stringify({ ...parsed, model: rewritten }));
@@ -1866,14 +1745,13 @@ const server = http.createServer((req, res) => {
           headers: forwardHeaders
         };
 
-        const upstream = https.request(options, (upRes) => {
+        const upstream = requestWithLifecycle(https, options, req, res, (upRes) => {
           res.writeHead(upRes.statusCode, upRes.headers);
           pipeAndRecordUsage("mistral", model, upRes, res);
         });
 
         upstream.on("error", (err) => {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: err.message }));
+          sendUpstreamError(res, err.message);
         });
 
         upstream.end(proxyBody);
@@ -1885,8 +1763,8 @@ const server = http.createServer((req, res) => {
         headers["content-type"] = "application/json";
         headers["content-length"] = String(proxyBody.length);
 
-        const upstream = http.request(
-          { host: TGW_HOST, port: TGW_PORT, path: "/v1/chat/completions", method: "POST", headers },
+        const upstream = requestWithLifecycle(http,
+          { host: TGW_HOST, port: TGW_PORT, path: "/v1/chat/completions", method: "POST", headers }, req, res,
           (upRes) => {
             res.writeHead(upRes.statusCode, upRes.headers);
             pipeAndRecordUsage("opencode-go", model, upRes, res);
@@ -1894,8 +1772,7 @@ const server = http.createServer((req, res) => {
         );
 
         upstream.on("error", (err) => {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: err.message }));
+          sendUpstreamError(res, err.message);
         });
 
         upstream.end(proxyBody);
@@ -1906,33 +1783,32 @@ const server = http.createServer((req, res) => {
         headers["content-type"] = "application/json";
         headers["content-length"] = String(proxyBody.length);
 
-        const upstream = http.request(
-          { host: TGW_HOST, port: TGW_PORT, path: "/v1/chat/completions", method: "POST", headers },
+        const upstream = requestWithLifecycle(http,
+          { host: TGW_HOST, port: TGW_PORT, path: "/v1/chat/completions", method: "POST", headers }, req, res,
           (upRes) => {
             res.writeHead(upRes.statusCode, upRes.headers);
             pipeAndRecordUsage("opencode-go", model, upRes, res);
           }
         );
         upstream.on("error", (err) => {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: err.message }));
+          sendUpstreamError(res, err.message);
         });
         upstream.end(proxyBody);
       }
-    });
+    }).catch((error) => sendRequestError(req, res, error));
     return;
   }
 
   // Handle Responses API - translate to Messages API
   if (req.method === "POST" && isResponses) {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => {
-      const body = Buffer.concat(chunks);
+    readRequestBody(req).then((body) => {
       let parsed;
       
       try {
-        parsed = JSON.parse(body.toString());
+        parsed = parseRequestObject(body);
+        if (typeof parsed.model !== "string" || !parsed.model.trim() || parsed.model.length > 256) throw new Error("Invalid model");
+        if (parsed.messages !== undefined && !Array.isArray(parsed.messages)) throw new Error("Invalid messages");
+        if (parsed.metadata !== undefined && (!parsed.metadata || typeof parsed.metadata !== "object" || Array.isArray(parsed.metadata))) throw new Error("Invalid metadata");
       } catch {
         res.writeHead(400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Invalid JSON" }));
@@ -1951,7 +1827,7 @@ const server = http.createServer((req, res) => {
       synthesizeMetadataUserId(parsed, req);
       const messages = responsesPayloadToMessages(parsed);
 
-      if (handleProfileRequest(req, res, parsed, "responses")) return;
+      if (handleProfileRequest(req, res, { ...parsed, model }, "responses")) return;
 
       if (handleCodexRoute(req, res, parsed, model)) return;
       if (DEBUG) {
@@ -1963,7 +1839,7 @@ const server = http.createServer((req, res) => {
         callModal("zai-org/GLM-5-FP8", messages.map((m) => ({
           role: m.role,
           content: textFromContent(m.content)
-        })), parsed.max_tokens || 4096)
+        })), parsed.max_tokens || 4096, req, res)
           .then((data) => {
             const msg = data.choices?.[0]?.message;
             let text = msg?.content || msg?.reasoning_content || "";
@@ -1972,20 +1848,18 @@ const server = http.createServer((req, res) => {
             recordModelObservedUsage(model, data);
           })
           .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
+            sendUpstreamError(res, err.message);
           });
       } else if (isOpenCodeMiniMaxModel(model)) {
-        callOpenCodeMessages(model, messages, parsed.max_tokens || 4096)
+        callOpenCodeMessages(model, messages, parsed.max_tokens || 4096, req, res)
           .then((data) => {
             sendResponsesResult(res, model, responseTextFromAnthropic(data), parsed.stream === true);
           })
           .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
+            sendUpstreamError(res, err.message);
           });
       } else if (isOpenCodeModel(model)) {
-        callOpenCodeGoOpenAI(model, toOpenAIChatMessages(messages), parsed.max_tokens || 4096)
+        callOpenCodeGoOpenAI(model, toOpenAIChatMessages(messages), parsed.max_tokens || 4096, req, res)
           .then((data) => {
             const msg = data.choices?.[0]?.message;
             let text = msg?.content || "";
@@ -1994,24 +1868,10 @@ const server = http.createServer((req, res) => {
             recordModelObservedUsage(model, data);
           })
           .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
-          });
-      } else if (isOpenRouterModel(model)) {
-        callOpenRouterOpenAI(model, toOpenAIChatMessages(messages), parsed.max_tokens || 4096)
-          .then((data) => {
-            const msg = data.choices?.[0]?.message;
-            let text = msg?.content || "";
-            
-            sendResponsesResult(res, model, text, parsed.stream === true);
-            recordModelObservedUsage(model, data);
-          })
-          .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
+            sendUpstreamError(res, err.message);
           });
       } else if (isMistralModel(model)) {
-        callMistralOpenAI(model, toOpenAIChatMessages(messages), parsed.max_tokens || 4096)
+        callMistralOpenAI(model, toOpenAIChatMessages(messages), parsed.max_tokens || 4096, req, res)
           .then((data) => {
             const msg = data.choices?.[0]?.message;
             let text = msg?.content || "";
@@ -2020,8 +1880,7 @@ const server = http.createServer((req, res) => {
             recordModelObservedUsage(model, data);
           })
           .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
+            sendUpstreamError(res, err.message);
           });
       } else if (MINIMAX_BARE_MODELS.test(model)) {
         // MiniMax: forward to gateway as Messages API
@@ -2038,8 +1897,8 @@ const server = http.createServer((req, res) => {
         headers["anthropic-version"] = "2023-06-01";
         headers["content-length"] = String(proxyBody.length);
 
-        const upstream = http.request(
-          { host: TGW_HOST, port: TGW_PORT, path: "/v1/messages", method: "POST", headers },
+        const upstream = requestWithLifecycle(http,
+          { host: TGW_HOST, port: TGW_PORT, path: "/v1/messages", method: "POST", headers }, req, res,
           (upRes) => {
             let data = '';
             upRes.on('data', c => data += c);
@@ -2057,8 +1916,7 @@ const server = http.createServer((req, res) => {
           }
         );
         upstream.on("error", (err) => {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: err.message }));
+          sendUpstreamError(res, err.message);
         });
         upstream.end(proxyBody);
       } else {
@@ -2075,8 +1933,8 @@ const server = http.createServer((req, res) => {
         headers["anthropic-version"] = "2023-06-01";
         headers["content-length"] = String(proxyBody.length);
 
-        const upstream = http.request(
-          { host: TGW_HOST, port: TGW_PORT, path: "/v1/messages", method: "POST", headers },
+        const upstream = requestWithLifecycle(http,
+          { host: TGW_HOST, port: TGW_PORT, path: "/v1/messages", method: "POST", headers }, req, res,
           (upRes) => {
             let data = '';
             upRes.on('data', c => data += c);
@@ -2095,24 +1953,24 @@ const server = http.createServer((req, res) => {
           }
         );
         upstream.on("error", (err) => {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: err.message }));
+          sendUpstreamError(res, err.message);
         });
         upstream.end(proxyBody);
       }
-    });
+    }).catch((error) => sendRequestError(req, res, error));
     return;
   }
 
   if (req.method === "POST" && isAnthropic) {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => {
-      let body = Buffer.concat(chunks);
+    readRequestBody(req).then((receivedBody) => {
+      let body = receivedBody;
       let parsed;
       
       try {
-        parsed = JSON.parse(body.toString());
+        parsed = parseRequestObject(body);
+        if (typeof parsed.model !== "string" || !parsed.model.trim() || parsed.model.length > 256) throw new Error("Invalid model");
+        if (parsed.messages !== undefined && !Array.isArray(parsed.messages)) throw new Error("Invalid messages");
+        if (parsed.metadata !== undefined && (!parsed.metadata || typeof parsed.metadata !== "object" || Array.isArray(parsed.metadata))) throw new Error("Invalid metadata");
       } catch {
         res.writeHead(400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Invalid JSON" }));
@@ -2128,7 +1986,7 @@ const server = http.createServer((req, res) => {
         return;
       }
 
-      if (handleProfileRequest(req, res, parsed, "messages")) return;
+      if (handleProfileRequest(req, res, { ...parsed, model }, "messages")) return;
 
       if (handleCodexRoute(req, res, parsed, model)) return;
 
@@ -2152,7 +2010,7 @@ const server = http.createServer((req, res) => {
             : m.content
         }));
 
-        callModal("zai-org/GLM-5-FP8", messages, parsed.max_tokens || 4096)
+        callModal("zai-org/GLM-5-FP8", messages, parsed.max_tokens || 4096, req, res)
           .then((data) => {
             const msg = data.choices?.[0]?.message;
             let text = msg?.content;
@@ -2182,24 +2040,22 @@ const server = http.createServer((req, res) => {
             recordModelObservedUsage(model, data);
           })
           .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
+            sendUpstreamError(res, err.message);
           });
       } else if (isOpenCodeMiniMaxModel(model)) {
-        callOpenCodeMessages(model, parsed.messages || [], parsed.max_tokens || 4096)
+        callOpenCodeMessages(model, parsed.messages || [], parsed.max_tokens || 4096, req, res)
           .then((data) => {
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify(anthropicToMessage(data, model)));
             recordModelObservedUsage(model, data);
           })
           .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
+            sendUpstreamError(res, err.message);
           });
       } else if (isOpenCodeModel(model)) {
         const messages = toOpenAIChatMessages(parsed.messages || []);
 
-        callOpenCodeGoOpenAI(model, messages, parsed.max_tokens || 4096)
+        callOpenCodeGoOpenAI(model, messages, parsed.max_tokens || 4096, req, res)
           .then((data) => {
             const msg = data.choices?.[0]?.message;
             let text = msg?.content || "";
@@ -2222,48 +2078,12 @@ const server = http.createServer((req, res) => {
             recordModelObservedUsage(model, data);
           })
           .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
+            sendUpstreamError(res, err.message);
           });
-      } else if (isOpenRouterModel(model)) {
-        const rewritten = resolveOpenRouterModel(model);
-        parsed.model = rewritten;
-        const proxyBody = Buffer.from(JSON.stringify(parsed));
-
-        const forwardHeaders = {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${OPENROUTER_KEY}`,
-          "HTTP-Referer": "https://github.com/tokligence/gateway",
-          "X-Title": "Tokligence Gateway"
-        };
-        
-        if (req.headers["anthropic-version"]) {
-          forwardHeaders["anthropic-version"] = req.headers["anthropic-version"];
-        }
-
-        const options = {
-          hostname: OPENROUTER_URL.hostname,
-          port: OPENROUTER_URL.port || 443,
-          path: `${OPENROUTER_URL.pathname.replace(/\/$/, "")}/messages`,
-          method: "POST",
-          headers: forwardHeaders
-        };
-
-        const upstream = https.request(options, (upRes) => {
-          res.writeHead(upRes.statusCode, upRes.headers);
-          pipeAndRecordUsage("opencode-go", model, upRes, res);
-        });
-
-        upstream.on("error", (err) => {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: err.message }));
-        });
-
-        upstream.end(proxyBody);
       } else if (isMistralModel(model)) {
         const messages = toOpenAIChatMessages(parsed.messages || []);
 
-        callMistralOpenAI(model, messages, parsed.max_tokens || 4096)
+        callMistralOpenAI(model, messages, parsed.max_tokens || 4096, req, res)
           .then((data) => {
             // Mistral's OpenAI endpoint answers GLM with `content` holding an array
             // of parts (reasoning first, answer last) where the Anthropic schema
@@ -2289,8 +2109,7 @@ const server = http.createServer((req, res) => {
             recordModelObservedUsage(model, data);
           })
           .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
+            sendUpstreamError(res, err.message);
           });
       } else if (MINIMAX_BARE_MODELS.test(model)) {
         // MiniMax: forward to gateway
@@ -2299,8 +2118,8 @@ const server = http.createServer((req, res) => {
         const updatedBody = Buffer.from(JSON.stringify({ ...parsed, model: mappedModel }));
         headers["content-length"] = String(updatedBody.length);
 
-        const upstream = http.request(
-          { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers },
+        const upstream = requestWithLifecycle(http,
+          { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers }, req, res,
           (upRes) => {
             res.writeHead(upRes.statusCode, upRes.headers);
             pipeAndRecordUsage("opencode-go", model, upRes, res);
@@ -2308,8 +2127,7 @@ const server = http.createServer((req, res) => {
         );
 
         upstream.on("error", (err) => {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: err.message }));
+          sendUpstreamError(res, err.message);
         });
 
         upstream.end(updatedBody);
@@ -2319,8 +2137,8 @@ const server = http.createServer((req, res) => {
         headers["content-type"] = "application/json";
         headers["content-length"] = String(updatedBody.length);
 
-        const upstream = http.request(
-          { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers },
+        const upstream = requestWithLifecycle(http,
+          { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers }, req, res,
           (upRes) => {
             res.writeHead(upRes.statusCode, upRes.headers);
             pipeAndRecordUsage("opencode-go", model, upRes, res);
@@ -2328,23 +2146,19 @@ const server = http.createServer((req, res) => {
         );
 
         upstream.on("error", (err) => {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: err.message }));
+          sendUpstreamError(res, err.message);
         });
 
         upstream.end(updatedBody);
       }
-    });
+    }).catch((error) => sendRequestError(req, res, error));
   } else {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => {
-      const body = Buffer.concat(chunks);
+    readRequestBody(req).then((body) => {
       const headers = { ...req.headers, host: `${TGW_HOST}:${TGW_PORT}` };
       headers["content-length"] = String(body.length);
 
-      const upstream = http.request(
-        { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers },
+      const upstream = requestWithLifecycle(http,
+        { host: TGW_HOST, port: TGW_PORT, path: req.url, method: req.method, headers }, req, res,
         (upRes) => {
           res.writeHead(upRes.statusCode, upRes.headers);
           upRes.pipe(res);
@@ -2352,12 +2166,11 @@ const server = http.createServer((req, res) => {
       );
 
       upstream.on("error", (err) => {
-        res.writeHead(502, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: err.message }));
+        sendUpstreamError(res, err.message);
       });
 
       upstream.end(body);
-    });
+    }).catch((error) => sendRequestError(req, res, error));
   }
 });
 

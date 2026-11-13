@@ -184,3 +184,17 @@ test("OpenRouter authorization is rechecked at dispatch after planning", async (
   assert.equal(calls, 0);
   assert.equal(res.statusCode, 503);
 });
+
+test("OpenRouter add-ons cannot bypass the executor or adapter policy", async () => {
+  const candidate = { provider: { id: "openrouter", adapter: "middleware" }, upstreamModel: "openrouter/free", protocol: "chat_completions" };
+  for (const body of [{ plugins: [{ id: "web" }] }, { tools: [{ type: "openrouter:web_search" }] }, { preset: "paid" }]) {
+    const { req, res } = mockRequestResponse();
+    let calls = 0;
+    await executeRoutePlan({ plan: { ...simplePlan(), candidates: [candidate] }, req, res, path: "/v1/chat/completions", body,
+      startAttempt: () => { calls++; throw new Error("add-on dispatched"); },
+    });
+    assert.equal(calls, 0);
+    assert.equal(res.statusCode, 400);
+    await assert.rejects(startAttempt({ candidate, body: Buffer.from(JSON.stringify(body)) }), { statusCode: 400 });
+  }
+});

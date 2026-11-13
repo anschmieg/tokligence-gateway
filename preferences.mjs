@@ -24,6 +24,8 @@
 //   }
 
 import fs from "node:fs";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { parse, parseDocument, stringify } from "yaml";
 
 import { providerById, providerEnabled, resolveConfiguredAlias } from "./route-config.mjs";
@@ -91,8 +93,7 @@ export class RoutingPreferences {
   set(id, override) {
     if (!this._aliasExists(id)) return [`unknown alias: ${id}`];
     if (!override) {
-      this.overrides.delete(id);
-      this._persist();
+      this._change(() => this.overrides.delete(id));
       return [];
     }
     const errors = [];
@@ -106,25 +107,28 @@ export class RoutingPreferences {
       errors.push("fallback must be a string or null");
     }
     if (errors.length) return errors;
-    this.overrides.set(id, {
+    this._change(() => this.overrides.set(id, {
       provider: override.provider || null,
       target: override.target.trim(),
       fallback: override.fallback || null,
-    });
-    this._persist();
+    }));
     return [];
   }
 
   clear(id) {
     if (!this._aliasExists(id)) return [`unknown alias: ${id}`];
-    this.overrides.delete(id);
-    this._persist();
+    this._change(() => this.overrides.delete(id));
     return [];
   }
 
   reset() {
-    this.overrides.clear();
-    this._persist();
+    this._change(() => this.overrides.clear());
+  }
+
+  _change(mutate) {
+    const previous = new Map(this.overrides);
+    try { mutate(); this._persist(); }
+    catch (error) { this.overrides = previous; throw error; }
   }
 
   _persist() {
@@ -140,8 +144,14 @@ export class RoutingPreferences {
         }]),
       ),
     };
-    fs.mkdirSync(this.file.split("/").slice(0, -1).filter(Boolean).join("/") || ".", { recursive: true });
-    fs.writeFileSync(this.file, stringify(payload), { mode: 0o600 });
+    fs.mkdirSync(path.dirname(this.file), { recursive: true });
+    const temporary = `${this.file}.${randomUUID()}.tmp`;
+    try {
+      fs.writeFileSync(temporary, stringify(payload), { mode: 0o600, flag: "wx" });
+      fs.renameSync(temporary, this.file);
+    } finally {
+      try { fs.unlinkSync(temporary); } catch {}
+    }
   }
 
   /**
@@ -178,8 +188,7 @@ export class RoutingPreferences {
     }
     fs.writeFileSync(this.routesPath, doc.toString(), { mode: 0o600 });
     // Config now carries the baked values; drop the now-redundant live overrides.
-    this.overrides.clear();
-    this._persist();
+    this._change(() => this.overrides.clear());
     return { written, file: this.routesPath, aliases: this.config.aliases };
   }
 

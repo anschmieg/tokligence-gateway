@@ -225,3 +225,7 @@ test("canonical fallback respects per-model tool support and preserves the Cline
   assert.equal(plan.candidates[0].provider.id, "cline-oauth");
   assert.equal(plan.candidates[0].translate, "anthropic-from-openai");
 });
+
+test("OpenRouter excludes additional nonzero or unknown price components", () => {
+  for (const price of ["0.01", null, "unknown"]) assert.equal(modelAllowedByCatalog(openrouter, { id: "free-text-paid-addon", pricing: { prompt: "0", completion: "0", image: price } }), false);
+});

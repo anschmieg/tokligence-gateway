@@ -98,7 +98,7 @@ export function buildModelCatalog(models, config) {
 
 function hasZeroPrice(model) {
   const pricing = model.pricing || {};
-  return isZero(pricing.prompt) && isZero(pricing.completion);
+  return isZero(pricing.prompt) && isZero(pricing.completion) && Object.values(pricing).every(isZero);
 }
 
 /**

@@ -1,7 +1,7 @@
 // cloudflare-access.mjs — validate Cloudflare Access JWT tokens.
 //
 // Cloudflare Access sits in front of the gateway and injects a signed JWT
-// into the `Cf-Access-Jwt` request header. This module validates that token
+// into the `Cf-Access-Jwt-Assertion` request header. This module validates that token
 // against Cloudflare's public JWKS so the dashboard can be protected by
 // Cloudflare Access instead of (or in addition to) the TOKLIGENCE_ADMIN_SECRET
 // shared secret.
