@@ -1,0 +1,142 @@
+{
+  "caller_posts": 5,
+  "initial_model_diagnostic": {
+    "model": "gemini-2.5-flash-lite",
+    "cases": [
+      {
+        "case": "gemini-key-check-1",
+        "model": "gemini-2.5-flash-lite",
+        "phase": "failed",
+        "caller_posts": 1,
+        "automatic_retries": 0,
+        "forced_credential": false,
+        "started_utc": "2026-11-03T08:28:36Z",
+        "http_status": 404,
+        "selected_credential": "gemini-key-2",
+        "retry_after": null,
+        "done": false,
+        "nonempty_text": false,
+        "finish_reasons": [],
+        "embedded_error": false,
+        "error_code": "404",
+        "elapsed_seconds": 0.17
+      }
+    ],
+    "caller_posts": 1,
+    "distinct_selected_credentials": [
+      "gemini-key-2"
+    ],
+    "all_three_keys_passed": false,
+    "shared_model_count": 8,
+    "protected_state_unchanged": true,
+    "scope": "Representative model per naturally selected credential; not all-model or billing-tier verification."
+  },
+  "capacity_diagnostic": {
+    "model": "gemini-3.8-flash",
+    "cases": [
+      {
+        "case": "gemini-key-check-1",
+        "model": "gemini-3.8-flash",
+        "phase": "failed",
+        "caller_posts": 1,
+        "automatic_retries": 0,
+        "forced_credential": false,
+        "started_utc": "2026-11-03T08:30:19Z",
+        "http_status": 503,
+        "selected_credential": "gemini-key-2",
+        "retry_after": null,
+        "done": false,
+        "nonempty_text": false,
+        "finish_reasons": [],
+        "embedded_error": false,
+        "error_code": "503",
+        "elapsed_seconds": 6.48
+      }
+    ],
+    "caller_posts": 1,
+    "distinct_selected_credentials": [
+      "gemini-key-2"
+    ],
+    "all_three_keys_passed": false,
+    "shared_model_count": 7,
+    "protected_state_unchanged": true,
+    "scope": "Representative model per naturally selected credential; not all-model or billing-tier verification."
+  },
+  "representative_acceptance": {
+    "model": "gemini-diagnostic-20261103/flash-lite",
+    "cases": [
+      {
+        "case": "gemini-key-check-1",
+        "model": "gemini-diagnostic-20261103/flash-lite",
+        "phase": "pass",
+        "caller_posts": 1,
+        "automatic_retries": 0,
+        "forced_credential": false,
+        "started_utc": "2026-11-03T08:31:38Z",
+        "http_status": 200,
+        "selected_credential": "gemini-key-2",
+        "retry_after": null,
+        "done": true,
+        "nonempty_text": true,
+        "finish_reasons": [
+          "stop"
+        ],
+        "embedded_error": false,
+        "elapsed_seconds": 0.63
+      },
+      {
+        "case": "gemini-key-check-2",
+        "model": "gemini-diagnostic-20261103/flash-lite",
+        "phase": "pass",
+        "caller_posts": 1,
+        "automatic_retries": 0,
+        "forced_credential": false,
+        "started_utc": "2026-11-03T08:31:38Z",
+        "http_status": 200,
+        "selected_credential": "gemini-key-3",
+        "retry_after": null,
+        "done": true,
+        "nonempty_text": true,
+        "finish_reasons": [
+          "stop"
+        ],
+        "embedded_error": false,
+        "elapsed_seconds": 0.91
+      },
+      {
+        "case": "gemini-key-check-3",
+        "model": "gemini-diagnostic-20261103/flash-lite",
+        "phase": "pass",
+        "caller_posts": 1,
+        "automatic_retries": 0,
+        "forced_credential": false,
+        "started_utc": "2026-11-03T08:31:39Z",
+        "http_status": 200,
+        "selected_credential": "gemini-key-1",
+        "retry_after": null,
+        "done": true,
+        "nonempty_text": true,
+        "finish_reasons": [
+          "stop"
+        ],
+        "embedded_error": false,
+        "elapsed_seconds": 0.71
+      }
+    ],
+    "caller_posts": 3,
+    "distinct_selected_credentials": [
+      "gemini-key-1",
+      "gemini-key-2",
+      "gemini-key-3"
+    ],
+    "all_three_keys_passed": true,
+    "shared_model_count": 8,
+    "protected_state_unchanged": true,
+    "scope": "Representative model per naturally selected credential; not all-model or billing-tier verification."
+  },
+  "actual_upstream_model": "gemini-3.5-flash-lite",
+  "temporary_alias_removed": true,
+  "unavailable_25_flash_lite_removed": true,
+  "all_credentials_live_pass": true,
+  "scope": "Three distinct keys validated through native gateway round robin on one representative model. Does not validate every model or prove billing tier or independent project quotas."
+}

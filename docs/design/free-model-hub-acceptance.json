@@ -1,0 +1,50 @@
+{
+  "status": "deployed",
+  "source_commit": "0898748",
+  "upstream_commit": "4d025efe8046af70327d80f75c5bd5ac6b4505af",
+  "backend_version": "8.0.49-tokligence.5",
+  "backend_sha256": "fd20618ee87f376bd45de142aa2ce52d98202e9dedef2e2acc2b69fb8caac1ff",
+  "plugin_version": "0.1.1-tokligence",
+  "plugin_sha256": "b8ea4e20e1e4f43dbc8678f64e9d87bdff7879d2074a2f13f8557dae9d71013e",
+  "coolify_deployment": "ctvr56qzepr1enqzb7hxsw98",
+  "console_url": "https://code.nothing.pink/admin/v0/management/plugins/free-model-hub/console",
+  "registered_vendor_variants": 27,
+  "kilo_published_models": 17,
+  "isolated_smoke": {
+    "path": "/tmp/freehub-native-host-smoke-g",
+    "verdict": "pass",
+    "physical_mock_inference_posts": 2,
+    "redirect_target_requests": 0,
+    "real_network_access": false
+  },
+  "live": {
+    "provider": "kilo",
+    "model": "kilo-kilo/nvidia/nemotron-3.5-lightning:free",
+    "first": {
+      "id": "cliproxy-kilo-live-20261102-v1",
+      "result": "length_without_text",
+      "max_tokens": 64
+    },
+    "diagnostic": {
+      "id": "cliproxy-kilo-live-20261102-v1-diagnostic",
+      "result": "pass",
+      "max_tokens": 1024,
+      "utc": "2026-11-02T13:13:39Z"
+    },
+    "total_caller_posts": 2,
+    "automatic_retries": 0,
+    "redirects": false,
+    "fallback": false
+  },
+  "preserved": {
+    "native_accounts_settings": true,
+    "opencode_config_quarantine": true,
+    "prior_live_reports_and_cooldown": true,
+    "dashboard_and_client_key": true
+  },
+  "limitations": [
+    "Other admitted vendors have not been live-tested.",
+    "Added console has not yet been confirmed in the user browser.",
+    "OpenCode remains quarantined through its existing durable cooldown; no new inference."
+  ]
+}

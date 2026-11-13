@@ -1,0 +1,77 @@
+package catalogfallback
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+func reviewScores(s *Snapshot, id string, a, b int) {
+	m := s.models[id]
+	m.Benchmarks[0].Score = json.RawMessage([]byte(jsonNumber(a)))
+	m.Benchmarks[1].Score = json.RawMessage([]byte(jsonNumber(b)))
+	s.models[id] = m
+}
+func jsonNumber(n int) string { b, _ := json.Marshal(n); return string(b) }
+func TestAdversarialLogicCatastrophicTaskRegressionNotCompensated(t *testing.T) {
+	s := fixtureCatalog(t)
+	reviewScores(s, "lab/glm-5.3-flash", 80, 20)
+	reviewScores(s, "lab/glm-4.7-flash", 0, 100)
+	reviewScores(s, "other/minimax-3.1", 79, 19)
+	p := Rank("glm-5.3-flash", fixtureReq(), fixtureRoutes(), s, Policy{AllowUnknown: true})
+	t.Logf("rank=%+v", p.Candidates)
+	if len(p.Candidates) != 2 || p.Candidates[0].ModelID != "minimax-3.1" {
+		t.Fatal("80-point catastrophic regression ranks above 1-point-balanced degradation")
+	}
+}
+func TestAdversarialLogicNewUnmappedRouteCannotEraseKnownModelEvidence(t *testing.T) {
+	s := fixtureCatalog(t)
+	reviewScores(s, "lab/glm-4.7-flash", 10, 10)
+	reviewScores(s, "other/minimax-3.1", 60, 55)
+	routes := fixtureRoutes()
+	before := Rank("glm-5.3-flash", fixtureReq(), routes, s, Policy{AllowUnknown: true})
+	extra := routes[1]
+	extra.ID = "new-transport"
+	extra.Provider = "unmapped-transport"
+	extra.SourceID = "unmapped-source"
+	routes = append(routes, extra)
+	after := Rank("glm-5.3-flash", fixtureReq(), routes, s, Policy{AllowUnknown: true})
+	t.Logf("before=%+v after=%+v", before.Candidates, after.Candidates)
+	if before.Candidates[0].ModelID != after.Candidates[0].ModelID {
+		t.Fatal("adding an unmapped route promoted the known-worse model by erasing its quality evidence")
+	}
+}
+func TestAdversarialLogicBenchmarkAliasesCannotInflateSupport(t *testing.T) {
+	s := fixtureCatalog(t)
+	for _, id := range []string{"lab/glm-5.3-flash", "other/minimax-3.1"} {
+		m := s.models[id]
+		m.Benchmarks = m.Benchmarks[:1]
+		m.Benchmarks[0].Name = "BFCL"
+		s.models[id] = m
+	}
+	before := compare(s, "lab/glm-5.3-flash", "other/minimax-3.1", Agent)
+	for _, id := range []string{"lab/glm-5.3-flash", "other/minimax-3.1"} {
+		m := s.models[id]
+		alias := m.Benchmarks[0]
+		alias.Name = "Berkeley Function Calling Leaderboard"
+		m.Benchmarks = append(m.Benchmarks, alias)
+		s.models[id] = m
+	}
+	after := compare(s, "lab/glm-5.3-flash", "other/minimax-3.1", Agent)
+	t.Logf("before=%+v after=%+v", before, after)
+	if after.Matched != before.Matched || after.Confidence != before.Confidence {
+		t.Fatal("two names for the same benchmark counted as independent support")
+	}
+}
+func TestAdversarialLogicGeminiForcedToolChoiceRequiresCapability(t *testing.T) {
+	raw := []byte(`{"contents":[{"role":"user","parts":[{"text":"call x"}]}],"tools":[{"functionDeclarations":[{"name":"x","parameters":{"type":"object"}}]}],"toolConfig":{"functionCallingConfig":{"mode":"ANY","allowedFunctionNames":["x"]}}}`)
+	r, err := RequirementsFromJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := fixtureCaps()
+	c.ToolChoice = false
+	t.Logf("requirements=%+v compatible=%v", r, Compatible(c, r))
+	if Compatible(c, r) {
+		t.Fatal("forced tool-call request admitted to a model without tool-choice support")
+	}
+}

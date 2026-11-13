@@ -1,0 +1,12 @@
+{
+  "source": "https://api.github.com/repos/anomalyco/models.dev/commits/dev",
+  "origin_validated": true,
+  "validated_at": "2026-11-03T17:58:30.172242766Z",
+  "source_commit": "3e30be78b1c0c5cca8444e9ea3d5497bdaed87f1",
+  "archive_sha256": "4b9efaa83848b12a9cb483e27ba9ce6cd3dea647b33dede9cae47e5b389109b7",
+  "models": 849,
+  "providers": 220,
+  "etag_present": true,
+  "disk_mode": "0600",
+  "provider_inference_requests": 0
+}

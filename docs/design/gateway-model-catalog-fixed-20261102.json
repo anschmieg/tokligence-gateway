@@ -1,0 +1,4737 @@
+{
+  "observed_utc": "2026-11-02T20:54:49.778759+00:00",
+  "provider_inference_requests": 0,
+  "scope": "Deployed native origin via SSH; no new external ingress or inference acceptance test.",
+  "model_count": 209,
+  "unique_ids": 209,
+  "empty_owners": 0,
+  "missing_capability_objects": 0,
+  "gemini_tool_call_methods": 0,
+  "foreign_codex_entries": 195,
+  "foreign_codex_ultra_claims": 0,
+  "unknown_contexts_omitted": 170,
+  "canonical": {
+    "capabilities": {
+      "parallel_tool_calls": null,
+      "reasoning": null,
+      "tools": null
+    },
+    "created": 1793652854,
+    "display_name": "Nemotron 3.5 Lightning",
+    "id": "nemotron-3.5-lightning",
+    "object": "model",
+    "owned_by": "kilo,openrouter",
+    "providers": [
+      "freehub",
+      "openai-compatible-openrouter"
+    ],
+    "type": "openai-compatibility"
+  },
+  "lyria": {
+    "capabilities": {
+      "parallel_tool_calls": null,
+      "reasoning": null,
+      "tools": false
+    },
+    "context_length": 1048576,
+    "description": "Kilo (free pool, no key) model google/lyria-3-clip-preview",
+    "display_name": "kilo-kilo/google/lyria-3-clip-preview",
+    "id": "kilo-kilo/google/lyria-3-clip-preview",
+    "input_modalities": [
+      "text",
+      "image"
+    ],
+    "max_completion_tokens": 65536,
+    "object": "model",
+    "output_modalities": [
+      "text",
+      "audio"
+    ],
+    "owned_by": "kilo",
+    "providers": [
+      "freehub"
+    ],
+    "supported_parameters": [
+      "max_tokens",
+      "response_format",
+      "seed",
+      "temperature",
+      "top_p"
+    ],
+    "type": "model"
+  },
+  "deployment": {
+    "phase": "deployed",
+    "source_commit": "1d94a85019e6f9ff6205a2bcb8106d997bf9c2b6",
+    "backend_sha256": "2b36c0918fdec5a44548d457678b149035a899da513be64caa869f3f63251d2b",
+    "plugin_sha256": "88093bd493a7a62e6e0ed56110fd10ecddd1a477c69d5faa78bfcf87d43c2a7a",
+    "provider_inference_requests": 0,
+    "login_requests": 0,
+    "deployment_uuid": "azsyfaj4mlcanqoukqtq25pe",
+    "model_count": 209,
+    "all_original_ids_preserved": true,
+    "canonical_id": "nemotron-3.5-lightning",
+    "canonical_providers": [
+      "freehub",
+      "openai-compatible-openrouter"
+    ],
+    "all_owners_disclosed": true,
+    "gemini_generation_methods_correct": true,
+    "protected_state_unchanged": true,
+    "existing_accounts_preserved": true
+  },
+  "models": [
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 262144,
+      "description": "Kilo (free pool, no key) model recursive/flint-v1.0:free",
+      "display_name": "kilo-kilo/recursive/flint-v1.0:free",
+      "id": "kilo-kilo/recursive/flint-v1.0:free",
+      "input_modalities": [
+        "text"
+      ],
+      "max_completion_tokens": 235929,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "kilo",
+      "providers": [
+        "freehub"
+      ],
+      "supported_parameters": [
+        "include_reasoning",
+        "logprobs",
+        "max_tokens",
+        "reasoning",
+        "response_format",
+        "seed",
+        "stop",
+        "temperature",
+        "tools",
+        "top_logprobs",
+        "top_p"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/llama-3.1-nemoguard-8b-content-safety",
+      "display_name": "nvidia-nvidia/nvidia/llama-3.1-nemoguard-8b-content-safety",
+      "id": "nvidia-nvidia/nvidia/llama-3.1-nemoguard-8b-content-safety",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "context_length": 131072,
+      "description": "SambaNova model DeepSeek-V3.1",
+      "display_name": "sambanova-sambanova/DeepSeek-V3.1",
+      "id": "sambanova-sambanova/DeepSeek-V3.1",
+      "input_modalities": [
+        "text"
+      ],
+      "max_completion_tokens": 7168,
+      "object": "model",
+      "owned_by": "sambanova",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model gemini-4-argon",
+      "display_name": "llm7-llm7/gemini-4-argon",
+      "id": "llm7-llm7/gemini-4-argon",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model gpt-5.6-luna",
+      "display_name": "llm7-llm7/gpt-5.6-luna",
+      "id": "llm7-llm7/gpt-5.6-luna",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model jev-latest",
+      "display_name": "llm7-llm7/jev-latest",
+      "id": "llm7-llm7/jev-latest",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": null
+      },
+      "description": "Gemini 3.1 Flash Image",
+      "display_name": "Gemini 3.1 Flash Image",
+      "id": "gemini-3.1-flash-image",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "object": "model",
+      "output_modalities": [
+        "text",
+        "image"
+      ],
+      "owned_by": "antigravity",
+      "providers": [
+        "antigravity"
+      ],
+      "thinking": {
+        "min": 128,
+        "max": 32768,
+        "dynamic_allowed": true,
+        "levels": [
+          "minimal",
+          "high"
+        ]
+      },
+      "type": "antigravity"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 272000,
+      "created": 1790035200,
+      "description": "GPT-6 Luna Codex model.",
+      "display_name": "GPT 6.0 Luna",
+      "id": "gpt-6-luna",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "max_completion_tokens": 128000,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "openai",
+      "providers": [
+        "codex"
+      ],
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "type": "openai",
+      "version": "gpt-6.0"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/nemotron-parse-2.0",
+      "display_name": "nvidia-nvidia/nvidia/nemotron-parse-2.0",
+      "id": "nvidia-nvidia/nvidia/nemotron-parse-2.0",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/riva-translate-4b-instruct-v2",
+      "display_name": "nvidia-nvidia/nvidia/riva-translate-4b-instruct-v2",
+      "id": "nvidia-nvidia/nvidia/riva-translate-4b-instruct-v2",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model claude-haiku-4-5",
+      "display_name": "llm7-llm7/claude-haiku-4-5",
+      "id": "llm7-llm7/claude-haiku-4-5",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model claude-haiku-5-5",
+      "display_name": "llm7-llm7/claude-haiku-5-5",
+      "id": "llm7-llm7/claude-haiku-5-5",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model kimi-k2.6",
+      "display_name": "llm7-llm7/kimi-k2.6",
+      "id": "llm7-llm7/kimi-k2.6",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model seedance-2.0",
+      "display_name": "llm7-llm7/seedance-2.0",
+      "id": "llm7-llm7/seedance-2.0",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "Z.ai model glm-4.6v-flash",
+      "display_name": "zai-zai/glm-4.6v-flash",
+      "id": "zai-zai/glm-4.6v-flash",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "zai",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 1000000,
+      "description": "Kilo (free pool, no key) model nvidia/nemotron-3.5-lightning:free",
+      "display_name": "NVIDIA: Nemotron 3.5 Lightning (free) (Kilo (free pool, no key))",
+      "id": "kilo-kilo/nvidia/nemotron-3.5-lightning:free",
+      "input_modalities": [
+        "text"
+      ],
+      "max_completion_tokens": 65536,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "kilo",
+      "providers": [
+        "freehub"
+      ],
+      "supported_parameters": [
+        "include_reasoning",
+        "max_tokens",
+        "reasoning",
+        "seed",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_p"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model deepseek-ai/deepseek-v4.1-flash",
+      "display_name": "nvidia-nvidia/deepseek-ai/deepseek-v4.1-flash",
+      "id": "nvidia-nvidia/deepseek-ai/deepseek-v4.1-flash",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model google/diffusiongemma-26b-a4b-it",
+      "display_name": "nvidia-nvidia/google/diffusiongemma-26b-a4b-it",
+      "id": "nvidia-nvidia/google/diffusiongemma-26b-a4b-it",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model google/gemma-3-12b-it",
+      "display_name": "nvidia-nvidia/google/gemma-3-12b-it",
+      "id": "nvidia-nvidia/google/gemma-3-12b-it",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "display_name": "nvidia-nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "id": "nvidia-nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model writer/palmyra-med-70b-32k",
+      "display_name": "nvidia-nvidia/writer/palmyra-med-70b-32k",
+      "id": "nvidia-nvidia/writer/palmyra-med-70b-32k",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "context_length": 131072,
+      "description": "SambaNova model gpt-oss-120b",
+      "display_name": "sambanova-sambanova/gpt-oss-120b",
+      "id": "sambanova-sambanova/gpt-oss-120b",
+      "input_modalities": [
+        "text"
+      ],
+      "max_completion_tokens": 131072,
+      "object": "model",
+      "owned_by": "sambanova",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model Voxtral-Small-24B-2507",
+      "display_name": "llm7-llm7/Voxtral-Small-24B-2507",
+      "id": "llm7-llm7/Voxtral-Small-24B-2507",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": false
+      },
+      "context_length": 1048576,
+      "description": "Kilo (free pool, no key) model google/lyria-3-clip-preview",
+      "display_name": "kilo-kilo/google/lyria-3-clip-preview",
+      "id": "kilo-kilo/google/lyria-3-clip-preview",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "max_completion_tokens": 65536,
+      "object": "model",
+      "output_modalities": [
+        "text",
+        "audio"
+      ],
+      "owned_by": "kilo",
+      "providers": [
+        "freehub"
+      ],
+      "supported_parameters": [
+        "max_tokens",
+        "response_format",
+        "seed",
+        "temperature",
+        "top_p"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 256000,
+      "description": "Kilo (free pool, no key) model nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+      "display_name": "kilo-kilo/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+      "id": "kilo-kilo/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+      "input_modalities": [
+        "text",
+        "audio",
+        "image",
+        "video"
+      ],
+      "max_completion_tokens": 65536,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "kilo",
+      "providers": [
+        "freehub"
+      ],
+      "supported_parameters": [
+        "include_reasoning",
+        "max_tokens",
+        "reasoning",
+        "seed",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_p"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nv-mistralai/mistral-nemo-12b-instruct",
+      "display_name": "nvidia-nvidia/nv-mistralai/mistral-nemo-12b-instruct",
+      "id": "nvidia-nvidia/nv-mistralai/mistral-nemo-12b-instruct",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/llama-3.1-nemotron-51b-instruct",
+      "display_name": "nvidia-nvidia/nvidia/llama-3.1-nemotron-51b-instruct",
+      "id": "nvidia-nvidia/nvidia/llama-3.1-nemotron-51b-instruct",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/llama-3.2-nemoretriever-1b-vlm-embed-v1",
+      "display_name": "nvidia-nvidia/nvidia/llama-3.2-nemoretriever-1b-vlm-embed-v1",
+      "id": "nvidia-nvidia/nvidia/llama-3.2-nemoretriever-1b-vlm-embed-v1",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model gemini-3-flash",
+      "display_name": "llm7-llm7/gemini-3-flash",
+      "id": "llm7-llm7/gemini-3-flash",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model gemini-3.0-pro-image",
+      "display_name": "llm7-llm7/gemini-3.0-pro-image",
+      "id": "llm7-llm7/gemini-3.0-pro-image",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "Z.ai model glm-4.5-flash",
+      "display_name": "zai-zai/glm-4.5-flash",
+      "id": "zai-zai/glm-4.5-flash",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "zai",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/embed-qa-4",
+      "display_name": "nvidia-nvidia/nvidia/embed-qa-4",
+      "id": "nvidia-nvidia/nvidia/embed-qa-4",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/nemotron-4-340b-reward",
+      "display_name": "nvidia-nvidia/nvidia/nemotron-4-340b-reward",
+      "id": "nvidia-nvidia/nvidia/nemotron-4-340b-reward",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": null
+      },
+      "context_length": 200000,
+      "description": "Claude Opus 4.6 (Thinking)",
+      "display_name": "Claude Opus 4.6 (Thinking)",
+      "id": "claude-opus-4-6-thinking",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "max_completion_tokens": 64000,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "antigravity",
+      "providers": [
+        "antigravity"
+      ],
+      "thinking": {
+        "min": 1024,
+        "max": 64000,
+        "zero_allowed": true,
+        "dynamic_allowed": true
+      },
+      "type": "antigravity"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 921000,
+      "created": 1783616400,
+      "description": "Balanced agentic coding model for everyday work.",
+      "display_name": "GPT 5.6 Terra",
+      "id": "gpt-5.6-terra",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "max_completion_tokens": 128000,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "openai",
+      "providers": [
+        "codex"
+      ],
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "type": "openai",
+      "version": "gpt-5.6"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 921000,
+      "created": 1783616400,
+      "description": "Fast and affordable agentic coding model.",
+      "display_name": "GPT 5.6 Luna",
+      "id": "gpt-5.6-luna",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "max_completion_tokens": 128000,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "openai",
+      "providers": [
+        "codex"
+      ],
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "type": "openai",
+      "version": "gpt-5.6"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "created": 1704067200,
+      "display_name": "GPT Image 1.5",
+      "id": "gpt-image-1.5",
+      "object": "model",
+      "owned_by": "openai",
+      "providers": [
+        "codex"
+      ],
+      "type": "openai",
+      "version": "gpt-image-1.5"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "created": 1704067200,
+      "display_name": "GPT Image 2",
+      "id": "gpt-image-2",
+      "object": "model",
+      "owned_by": "openai",
+      "providers": [
+        "codex"
+      ],
+      "type": "openai",
+      "version": "gpt-image-2"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model google/codegemma-7b",
+      "display_name": "nvidia-nvidia/google/codegemma-7b",
+      "id": "nvidia-nvidia/google/codegemma-7b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "context_length": 32768,
+      "description": "SambaNova model DeepSeek-V3.2",
+      "display_name": "sambanova-sambanova/DeepSeek-V3.2",
+      "id": "sambanova-sambanova/DeepSeek-V3.2",
+      "input_modalities": [
+        "text"
+      ],
+      "max_completion_tokens": 7168,
+      "object": "model",
+      "owned_by": "sambanova",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model DeepSeek-V4-Flash-0731",
+      "display_name": "llm7-llm7/DeepSeek-V4-Flash-0731",
+      "id": "llm7-llm7/DeepSeek-V4-Flash-0731",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model gemini-3.8-flash-high",
+      "display_name": "llm7-llm7/gemini-3.8-flash-high",
+      "id": "llm7-llm7/gemini-3.8-flash-high",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model gemini-nano-banana-2.1",
+      "display_name": "llm7-llm7/gemini-nano-banana-2.1",
+      "id": "llm7-llm7/gemini-nano-banana-2.1",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model grok-4.7",
+      "display_name": "llm7-llm7/grok-4.7",
+      "id": "llm7-llm7/grok-4.7",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 272000,
+      "created": 1790035200,
+      "description": "GPT-6 Sol Codex model.",
+      "display_name": "GPT 6.0 Sol",
+      "id": "gpt-6-sol",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "max_completion_tokens": 128000,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "openai",
+      "providers": [
+        "codex"
+      ],
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "type": "openai",
+      "version": "gpt-6.0"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": true
+      },
+      "description": "[Free] NVIDIA\u2019s latest model with 120B and fast output",
+      "display_name": "cline-cline-free/nemotron-3.5-super-vl",
+      "id": "cline-cline-free/nemotron-3.5-super-vl",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "cline",
+      "providers": [
+        "freehub"
+      ],
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "stream",
+        "tools",
+        "tool_choice"
+      ],
+      "type": "chat"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model 01-ai/yi-large",
+      "display_name": "nvidia-nvidia/01-ai/yi-large",
+      "id": "nvidia-nvidia/01-ai/yi-large",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model minimaxai/minimax-m3.1-flash",
+      "display_name": "nvidia-nvidia/minimaxai/minimax-m3.1-flash",
+      "id": "nvidia-nvidia/minimaxai/minimax-m3.1-flash",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model mistralai/mistral-large-4-1t-a52b",
+      "display_name": "nvidia-nvidia/mistralai/mistral-large-4-1t-a52b",
+      "id": "nvidia-nvidia/mistralai/mistral-large-4-1t-a52b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/ising-calibration-1.5-31b",
+      "display_name": "nvidia-nvidia/nvidia/ising-calibration-1.5-31b",
+      "id": "nvidia-nvidia/nvidia/ising-calibration-1.5-31b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model claude-fable-5",
+      "display_name": "llm7-llm7/claude-fable-5",
+      "id": "llm7-llm7/claude-fable-5",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model gpt-6-astra",
+      "display_name": "llm7-llm7/gpt-6-astra",
+      "id": "llm7-llm7/gpt-6-astra",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model minimax-m3",
+      "display_name": "llm7-llm7/minimax-m3",
+      "id": "llm7-llm7/minimax-m3",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model ibm/granite-3.0-8b-instruct",
+      "display_name": "nvidia-nvidia/ibm/granite-3.0-8b-instruct",
+      "id": "nvidia-nvidia/ibm/granite-3.0-8b-instruct",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/nemotron-parse",
+      "display_name": "nvidia-nvidia/nvidia/nemotron-parse",
+      "id": "nvidia-nvidia/nvidia/nemotron-parse",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model claude-fable-5-1",
+      "display_name": "llm7-llm7/claude-fable-5-1",
+      "id": "llm7-llm7/claude-fable-5-1",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model gemma4:31b",
+      "display_name": "llm7-llm7/gemma4:31b",
+      "id": "llm7-llm7/gemma4:31b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model glm-5.3",
+      "display_name": "llm7-llm7/glm-5.3",
+      "id": "llm7-llm7/glm-5.3",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model whisper-large-v3",
+      "display_name": "llm7-llm7/whisper-large-v3",
+      "id": "llm7-llm7/whisper-large-v3",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": null
+      },
+      "context_length": 1048576,
+      "description": "Gemini 3.8 Flash (High)",
+      "display_name": "Gemini 3.8 Flash",
+      "id": "gemini-3.8-flash-high",
+      "input_modalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "max_completion_tokens": 65536,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "antigravity",
+      "providers": [
+        "antigravity"
+      ],
+      "thinking": {
+        "min": 1,
+        "max": 65535,
+        "dynamic_allowed": true,
+        "levels": [
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "type": "antigravity"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 272000,
+      "created": 1790640000,
+      "description": "Latest workhorse model for coding and everyday work.",
+      "display_name": "GPT 6.1 Sol",
+      "id": "gpt-6.1-sol",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "max_completion_tokens": 128000,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "openai",
+      "providers": [
+        "codex"
+      ],
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "type": "openai",
+      "version": "gpt-6.0"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": true
+      },
+      "description": "[Free] Compact 35-billion parameter mixture-of-experts",
+      "display_name": "cline-cline-free/solar-mini4",
+      "id": "cline-cline-free/solar-mini4",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "cline",
+      "providers": [
+        "freehub"
+      ],
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "stream",
+        "tools",
+        "tool_choice"
+      ],
+      "type": "chat"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model mistralai/mistral-large",
+      "display_name": "nvidia-nvidia/mistralai/mistral-large",
+      "id": "nvidia-nvidia/mistralai/mistral-large",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/llama-nemotron-embed-vl-1b-v2",
+      "display_name": "nvidia-nvidia/nvidia/llama-nemotron-embed-vl-1b-v2",
+      "id": "nvidia-nvidia/nvidia/llama-nemotron-embed-vl-1b-v2",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/neva-22b",
+      "display_name": "nvidia-nvidia/nvidia/neva-22b",
+      "id": "nvidia-nvidia/nvidia/neva-22b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model poolside/laguna-xs-2.1",
+      "display_name": "nvidia-nvidia/poolside/laguna-xs-2.1",
+      "id": "nvidia-nvidia/poolside/laguna-xs-2.1",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "context_length": 1048576,
+      "description": "SambaNova model MiniMax-M3.1-Flash",
+      "display_name": "sambanova-sambanova/MiniMax-M3.1-Flash",
+      "id": "sambanova-sambanova/MiniMax-M3.1-Flash",
+      "input_modalities": [
+        "text"
+      ],
+      "max_completion_tokens": 1048576,
+      "object": "model",
+      "owned_by": "sambanova",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model kling-v3.0-turbo",
+      "display_name": "llm7-llm7/kling-v3.0-turbo",
+      "id": "llm7-llm7/kling-v3.0-turbo",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 500000,
+      "created": 1792972800,
+      "description": "A fast, efficient model for visual reasoning, precise computer use, and clear, natural writing.",
+      "display_name": "GPT 6.1 Terra",
+      "id": "gpt-6.1-terra",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "max_completion_tokens": 128000,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "openai",
+      "providers": [
+        "codex"
+      ],
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "type": "openai",
+      "version": "gpt-6.0"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model ai21labs/jamba-1.5-large-instruct",
+      "display_name": "nvidia-nvidia/ai21labs/jamba-1.5-large-instruct",
+      "id": "nvidia-nvidia/ai21labs/jamba-1.5-large-instruct",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model GLM-5.3-Flash",
+      "display_name": "llm7-llm7/GLM-5.3-Flash",
+      "id": "llm7-llm7/GLM-5.3-Flash",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model gemini-omni-flash",
+      "display_name": "llm7-llm7/gemini-omni-flash",
+      "id": "llm7-llm7/gemini-omni-flash",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model gpt-image-2",
+      "display_name": "llm7-llm7/gpt-image-2",
+      "id": "llm7-llm7/gpt-image-2",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model llama-4-maverick",
+      "display_name": "llm7-llm7/llama-4-maverick",
+      "id": "llm7-llm7/llama-4-maverick",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model mistral-large-3:675b",
+      "display_name": "llm7-llm7/mistral-large-3:675b",
+      "id": "llm7-llm7/mistral-large-3:675b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model ibm/granite-34b-code-instruct",
+      "display_name": "nvidia-nvidia/ibm/granite-34b-code-instruct",
+      "id": "nvidia-nvidia/ibm/granite-34b-code-instruct",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model mistralai/mistral-7b-instruct-v0.3",
+      "display_name": "nvidia-nvidia/mistralai/mistral-7b-instruct-v0.3",
+      "id": "nvidia-nvidia/mistralai/mistral-7b-instruct-v0.3",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/llama-3.2-nv-embedqa-1b-v1",
+      "display_name": "nvidia-nvidia/nvidia/llama-3.2-nv-embedqa-1b-v1",
+      "id": "nvidia-nvidia/nvidia/llama-3.2-nv-embedqa-1b-v1",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/nemotron-3.5-bolt-e4b",
+      "display_name": "nvidia-nvidia/nvidia/nemotron-3.5-bolt-e4b",
+      "id": "nvidia-nvidia/nvidia/nemotron-3.5-bolt-e4b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/nemotron-3.5-embed-1b",
+      "display_name": "nvidia-nvidia/nvidia/nemotron-3.5-embed-1b",
+      "id": "nvidia-nvidia/nvidia/nemotron-3.5-embed-1b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "context_length": 131072,
+      "description": "SambaNova model gemma-4-31B-it",
+      "display_name": "sambanova-sambanova/gemma-4-31B-it",
+      "id": "sambanova-sambanova/gemma-4-31B-it",
+      "input_modalities": [
+        "text"
+      ],
+      "max_completion_tokens": 131072,
+      "object": "model",
+      "owned_by": "sambanova",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model deepseek-v4-pro",
+      "display_name": "llm7-llm7/deepseek-v4-pro",
+      "id": "llm7-llm7/deepseek-v4-pro",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/nv-embedqa-mistral-7b-v2",
+      "display_name": "nvidia-nvidia/nvidia/nv-embedqa-mistral-7b-v2",
+      "id": "nvidia-nvidia/nvidia/nv-embedqa-mistral-7b-v2",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model anthropic/claude-opus-4-7",
+      "display_name": "llm7-llm7/anthropic/claude-opus-4-7",
+      "id": "llm7-llm7/anthropic/claude-opus-4-7",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model anthropic/claude-sonnet-4-6",
+      "display_name": "llm7-llm7/anthropic/claude-sonnet-4-6",
+      "id": "llm7-llm7/anthropic/claude-sonnet-4-6",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model google/gemma-4-31b-it",
+      "display_name": "nvidia-nvidia/google/gemma-4-31b-it",
+      "id": "nvidia-nvidia/google/gemma-4-31b-it",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model mistralai/mistral-large-2-instruct",
+      "display_name": "nvidia-nvidia/mistralai/mistral-large-2-instruct",
+      "id": "nvidia-nvidia/mistralai/mistral-large-2-instruct",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/nemotron-nano-3-30b-a3b",
+      "display_name": "nvidia-nvidia/nvidia/nemotron-nano-3-30b-a3b",
+      "id": "nvidia-nvidia/nvidia/nemotron-nano-3-30b-a3b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/vila",
+      "display_name": "nvidia-nvidia/nvidia/vila",
+      "id": "nvidia-nvidia/nvidia/vila",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model writer/palmyra-fin-70b-32k",
+      "display_name": "nvidia-nvidia/writer/palmyra-fin-70b-32k",
+      "id": "nvidia-nvidia/writer/palmyra-fin-70b-32k",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 921000,
+      "created": 1783616400,
+      "description": "Our most capable model yet. GPT-5.6 Sol can tackle complex code changes, dig into research, produce polished documents, and take on your most ambitious work. Sol is highly capable at lower reasoning efforts\u2014try starting lower, then turn it up for harder jobs.",
+      "display_name": "GPT 5.6 Sol",
+      "id": "gpt-5.6-sol",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "max_completion_tokens": 128000,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "openai",
+      "providers": [
+        "codex"
+      ],
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "type": "openai",
+      "version": "gpt-5.6"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 272000,
+      "created": 1776902400,
+      "description": "Automatic approval review model for Codex.",
+      "display_name": "Codex Auto Review",
+      "id": "codex-auto-review",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "max_completion_tokens": 128000,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "openai",
+      "providers": [
+        "codex"
+      ],
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "type": "openai",
+      "version": "Codex Auto Review"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model google/codegemma-1.1-7b",
+      "display_name": "nvidia-nvidia/google/codegemma-1.1-7b",
+      "id": "nvidia-nvidia/google/codegemma-1.1-7b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model microsoft/kosmos-2",
+      "display_name": "nvidia-nvidia/microsoft/kosmos-2",
+      "id": "nvidia-nvidia/microsoft/kosmos-2",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model claude-opus-5-5",
+      "display_name": "llm7-llm7/claude-opus-5-5",
+      "id": "llm7-llm7/claude-opus-5-5",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model gpt-6-luna",
+      "display_name": "llm7-llm7/gpt-6-luna",
+      "id": "llm7-llm7/gpt-6-luna",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": false
+      },
+      "context_length": 128000,
+      "description": "Kilo (free pool, no key) model nvidia/nemotron-3.5-content-safety:free",
+      "display_name": "kilo-kilo/nvidia/nemotron-3.5-content-safety:free",
+      "id": "kilo-kilo/nvidia/nemotron-3.5-content-safety:free",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "max_completion_tokens": 8192,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "kilo",
+      "providers": [
+        "freehub"
+      ],
+      "supported_parameters": [
+        "include_reasoning",
+        "max_tokens",
+        "reasoning",
+        "seed",
+        "temperature",
+        "top_p"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model databricks/dbrx-instruct",
+      "display_name": "nvidia-nvidia/databricks/dbrx-instruct",
+      "id": "nvidia-nvidia/databricks/dbrx-instruct",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model ibm/granite-8b-code-instruct",
+      "display_name": "nvidia-nvidia/ibm/granite-8b-code-instruct",
+      "id": "nvidia-nvidia/ibm/granite-8b-code-instruct",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model microsoft/phi-3.5-moe-instruct",
+      "display_name": "nvidia-nvidia/microsoft/phi-3.5-moe-instruct",
+      "id": "nvidia-nvidia/microsoft/phi-3.5-moe-instruct",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model mistralai/codestral-22b-instruct-v0.1",
+      "display_name": "nvidia-nvidia/mistralai/codestral-22b-instruct-v0.1",
+      "id": "nvidia-nvidia/mistralai/codestral-22b-instruct-v0.1",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/nemotron-3-super-120b-a12b",
+      "display_name": "nvidia-nvidia/nvidia/nemotron-3-super-120b-a12b",
+      "id": "nvidia-nvidia/nvidia/nemotron-3-super-120b-a12b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model stepfun-ai/step-5-preview",
+      "display_name": "nvidia-nvidia/stepfun-ai/step-5-preview",
+      "id": "nvidia-nvidia/stepfun-ai/step-5-preview",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model claude-sonnet-4-6",
+      "display_name": "llm7-llm7/claude-sonnet-4-6",
+      "id": "llm7-llm7/claude-sonnet-4-6",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 1048576,
+      "description": "Kilo (free pool, no key) model reflection/beam-free",
+      "display_name": "kilo-kilo/reflection/beam-free",
+      "id": "kilo-kilo/reflection/beam-free",
+      "input_modalities": [
+        "text"
+      ],
+      "max_completion_tokens": 131072,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "kilo",
+      "providers": [
+        "freehub"
+      ],
+      "supported_parameters": [
+        "max_tokens",
+        "temperature",
+        "tools",
+        "reasoning",
+        "include_reasoning"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/mistral-nemo-minitron-8b-8k-instruct",
+      "display_name": "nvidia-nvidia/nvidia/mistral-nemo-minitron-8b-8k-instruct",
+      "id": "nvidia-nvidia/nvidia/mistral-nemo-minitron-8b-8k-instruct",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/nemotron-4-340b-instruct",
+      "display_name": "nvidia-nvidia/nvidia/nemotron-4-340b-instruct",
+      "id": "nvidia-nvidia/nvidia/nemotron-4-340b-instruct",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model gemini-3.6-flash-high",
+      "display_name": "llm7-llm7/gemini-3.6-flash-high",
+      "id": "llm7-llm7/gemini-3.6-flash-high",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model gpt-6.1-sol",
+      "display_name": "llm7-llm7/gpt-6.1-sol",
+      "id": "llm7-llm7/gpt-6.1-sol",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model muse-spark-1.3",
+      "display_name": "llm7-llm7/muse-spark-1.3",
+      "id": "llm7-llm7/muse-spark-1.3",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model nemotron-3-nano:30b",
+      "display_name": "llm7-llm7/nemotron-3-nano:30b",
+      "id": "llm7-llm7/nemotron-3-nano:30b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": null
+      },
+      "context_length": 1048576,
+      "description": "Gemini 3 Flash",
+      "display_name": "Gemini 3 Flash",
+      "id": "gemini-3-flash",
+      "input_modalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "max_completion_tokens": 65536,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "antigravity",
+      "providers": [
+        "antigravity"
+      ],
+      "thinking": {
+        "min": 128,
+        "max": 32768,
+        "dynamic_allowed": true,
+        "levels": [
+          "minimal",
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "type": "antigravity"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": false
+      },
+      "context_length": 1048576,
+      "description": "Kilo (free pool, no key) model google/lyria-3-pro-preview",
+      "display_name": "kilo-kilo/google/lyria-3-pro-preview",
+      "id": "kilo-kilo/google/lyria-3-pro-preview",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "max_completion_tokens": 65536,
+      "object": "model",
+      "output_modalities": [
+        "text",
+        "audio"
+      ],
+      "owned_by": "kilo",
+      "providers": [
+        "freehub"
+      ],
+      "supported_parameters": [
+        "max_tokens",
+        "response_format",
+        "seed",
+        "temperature",
+        "top_p"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model openai/gpt-oss-20b",
+      "display_name": "nvidia-nvidia/openai/gpt-oss-20b",
+      "id": "nvidia-nvidia/openai/gpt-oss-20b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model deepseek-v4.1-flash",
+      "display_name": "llm7-llm7/deepseek-v4.1-flash",
+      "id": "llm7-llm7/deepseek-v4.1-flash",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model kling-v3.0-pro",
+      "display_name": "llm7-llm7/kling-v3.0-pro",
+      "id": "llm7-llm7/kling-v3.0-pro",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": null
+      },
+      "context_length": 1048576,
+      "description": "Gemini 3.5 Flash Lite",
+      "display_name": "Gemini 3.5 Flash Lite",
+      "id": "gemini-3.5-flash-lite",
+      "input_modalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "max_completion_tokens": 65535,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "antigravity",
+      "providers": [
+        "antigravity"
+      ],
+      "thinking": {
+        "min": 1,
+        "max": 65535,
+        "dynamic_allowed": true,
+        "levels": [
+          "minimal",
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "type": "antigravity"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "created": 1704067200,
+      "display_name": "GPT Image 2.5",
+      "id": "gpt-image-2.5",
+      "object": "model",
+      "owned_by": "openai",
+      "providers": [
+        "codex"
+      ],
+      "type": "openai",
+      "version": "gpt-image-2.5"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model meta/llama2-70b",
+      "display_name": "nvidia-nvidia/meta/llama2-70b",
+      "id": "nvidia-nvidia/meta/llama2-70b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/llama3-chatqa-1.5-70b",
+      "display_name": "nvidia-nvidia/nvidia/llama3-chatqa-1.5-70b",
+      "id": "nvidia-nvidia/nvidia/llama3-chatqa-1.5-70b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model claude-sonnet-5",
+      "display_name": "llm7-llm7/claude-sonnet-5",
+      "id": "llm7-llm7/claude-sonnet-5",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model codestral-latest",
+      "display_name": "llm7-llm7/codestral-latest",
+      "id": "llm7-llm7/codestral-latest",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "created": 1704067200,
+      "display_name": "GPT Image 2.5 Sunburst",
+      "id": "gpt-image-2.5-sunburst",
+      "object": "model",
+      "owned_by": "openai",
+      "providers": [
+        "codex"
+      ],
+      "type": "openai",
+      "version": "gpt-image-2.5-sunburst"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/cosmos-reason2-8b",
+      "display_name": "nvidia-nvidia/nvidia/cosmos-reason2-8b",
+      "id": "nvidia-nvidia/nvidia/cosmos-reason2-8b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/nemotron-3-embed-1b",
+      "display_name": "nvidia-nvidia/nvidia/nemotron-3-embed-1b",
+      "id": "nvidia-nvidia/nvidia/nemotron-3-embed-1b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/nemotron-3.5-lightning-30b-a3b",
+      "display_name": "nvidia-nvidia/nvidia/nemotron-3.5-lightning-30b-a3b",
+      "id": "nvidia-nvidia/nvidia/nemotron-3.5-lightning-30b-a3b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/riva-translate-4b-instruct",
+      "display_name": "nvidia-nvidia/nvidia/riva-translate-4b-instruct",
+      "id": "nvidia-nvidia/nvidia/riva-translate-4b-instruct",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model claude-opus-4-8",
+      "display_name": "llm7-llm7/claude-opus-4-8",
+      "id": "llm7-llm7/claude-opus-4-8",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model L3-8B-Lunaris-v1-Turbo",
+      "display_name": "llm7-llm7/L3-8B-Lunaris-v1-Turbo",
+      "id": "llm7-llm7/L3-8B-Lunaris-v1-Turbo",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model gemini-3.1-pro",
+      "display_name": "llm7-llm7/gemini-3.1-pro",
+      "id": "llm7-llm7/gemini-3.1-pro",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model mistral-Nemo-Instruct-2407",
+      "display_name": "llm7-llm7/mistral-Nemo-Instruct-2407",
+      "id": "llm7-llm7/mistral-Nemo-Instruct-2407",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model seed-2.0-mini",
+      "display_name": "llm7-llm7/seed-2.0-mini",
+      "id": "llm7-llm7/seed-2.0-mini",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model seedance-2.0-fast",
+      "display_name": "llm7-llm7/seedance-2.0-fast",
+      "id": "llm7-llm7/seedance-2.0-fast",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model whisper-large-v3-turbo",
+      "display_name": "llm7-llm7/whisper-large-v3-turbo",
+      "id": "llm7-llm7/whisper-large-v3-turbo",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model microsoft/phi-3-vision-128k-instruct",
+      "display_name": "nvidia-nvidia/microsoft/phi-3-vision-128k-instruct",
+      "id": "nvidia-nvidia/microsoft/phi-3-vision-128k-instruct",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model moonshotai/kimi-k2.6",
+      "display_name": "nvidia-nvidia/moonshotai/kimi-k2.6",
+      "id": "nvidia-nvidia/moonshotai/kimi-k2.6",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model writer/palmyra-med-70b",
+      "display_name": "nvidia-nvidia/writer/palmyra-med-70b",
+      "id": "nvidia-nvidia/writer/palmyra-med-70b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model glm-5.2",
+      "display_name": "llm7-llm7/glm-5.2",
+      "id": "llm7-llm7/glm-5.2",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model mistral-Small-24B-Instruct-2501",
+      "display_name": "llm7-llm7/mistral-Small-24B-Instruct-2501",
+      "id": "llm7-llm7/mistral-Small-24B-Instruct-2501",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 1000000,
+      "description": "Kilo (free pool, no key) model nvidia/nemotron-3.5-super-vl:free",
+      "display_name": "kilo-kilo/nvidia/nemotron-3.5-super-vl:free",
+      "id": "kilo-kilo/nvidia/nemotron-3.5-super-vl:free",
+      "input_modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "max_completion_tokens": 131072,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "kilo",
+      "providers": [
+        "freehub"
+      ],
+      "supported_parameters": [
+        "include_reasoning",
+        "max_tokens",
+        "reasoning",
+        "response_format",
+        "seed",
+        "structured_outputs",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_p"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 256000,
+      "description": "Kilo (free pool, no key) model stealth/glyph-cluster",
+      "display_name": "kilo-kilo/stealth/glyph-cluster",
+      "id": "kilo-kilo/stealth/glyph-cluster",
+      "input_modalities": [
+        "text"
+      ],
+      "max_completion_tokens": 256000,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "kilo",
+      "providers": [
+        "freehub"
+      ],
+      "supported_parameters": [
+        "max_tokens",
+        "temperature",
+        "tools",
+        "reasoning",
+        "include_reasoning"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model meta/llama-3.2-11b-vision-instruct",
+      "display_name": "nvidia-nvidia/meta/llama-3.2-11b-vision-instruct",
+      "id": "nvidia-nvidia/meta/llama-3.2-11b-vision-instruct",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model meta/llama-guard-4-12b",
+      "display_name": "nvidia-nvidia/meta/llama-guard-4-12b",
+      "id": "nvidia-nvidia/meta/llama-guard-4-12b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model z-ai/glm-5.3-flash",
+      "display_name": "nvidia-nvidia/z-ai/glm-5.3-flash",
+      "id": "nvidia-nvidia/z-ai/glm-5.3-flash",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model Inkling-Small",
+      "display_name": "llm7-llm7/Inkling-Small",
+      "id": "llm7-llm7/Inkling-Small",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": true
+      },
+      "description": "[Free] ",
+      "display_name": "cline-nvidia/nemotron-3.5-lightning-free",
+      "id": "cline-nvidia/nemotron-3.5-lightning-free",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "cline",
+      "providers": [
+        "freehub"
+      ],
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "stream",
+        "tools",
+        "tool_choice"
+      ],
+      "type": "chat"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model google/gemma-2b",
+      "display_name": "nvidia-nvidia/google/gemma-2b",
+      "id": "nvidia-nvidia/google/gemma-2b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/llama-3.1-nemotron-safety-guard-8b-v3",
+      "display_name": "nvidia-nvidia/nvidia/llama-3.1-nemotron-safety-guard-8b-v3",
+      "id": "nvidia-nvidia/nvidia/llama-3.1-nemotron-safety-guard-8b-v3",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/llama-3.1-nemotron-ultra-253b-v1",
+      "display_name": "nvidia-nvidia/nvidia/llama-3.1-nemotron-ultra-253b-v1",
+      "id": "nvidia-nvidia/nvidia/llama-3.1-nemotron-ultra-253b-v1",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/nemotron-3.5-content-safety",
+      "display_name": "nvidia-nvidia/nvidia/nemotron-3.5-content-safety",
+      "id": "nvidia-nvidia/nvidia/nemotron-3.5-content-safety",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 65536,
+      "description": "Kilo (free pool, no key) model liquid/lfm-2.5-2.6b:free",
+      "display_name": "kilo-kilo/liquid/lfm-2.5-2.6b:free",
+      "id": "kilo-kilo/liquid/lfm-2.5-2.6b:free",
+      "input_modalities": [
+        "text"
+      ],
+      "max_completion_tokens": 8192,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "kilo",
+      "providers": [
+        "freehub"
+      ],
+      "supported_parameters": [
+        "frequency_penalty",
+        "include_reasoning",
+        "logprobs",
+        "max_completion_tokens",
+        "max_tokens",
+        "min_p",
+        "presence_penalty",
+        "reasoning",
+        "repetition_penalty",
+        "response_format",
+        "seed",
+        "stop",
+        "structured_outputs",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_k",
+        "top_logprobs"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model adept/fuyu-8b",
+      "display_name": "nvidia-nvidia/adept/fuyu-8b",
+      "id": "nvidia-nvidia/adept/fuyu-8b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model mistralai/mixtral-8x22b-v0.1",
+      "display_name": "nvidia-nvidia/mistralai/mixtral-8x22b-v0.1",
+      "id": "nvidia-nvidia/mistralai/mixtral-8x22b-v0.1",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/nvclip",
+      "display_name": "nvidia-nvidia/nvidia/nvclip",
+      "id": "nvidia-nvidia/nvidia/nvclip",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model dark-beast-krea2",
+      "display_name": "llm7-llm7/dark-beast-krea2",
+      "id": "llm7-llm7/dark-beast-krea2",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model gpt-oss:20b",
+      "display_name": "llm7-llm7/gpt-oss:20b",
+      "id": "llm7-llm7/gpt-oss:20b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "context_length": 114000,
+      "description": "GPT-OSS 120B (Medium)",
+      "display_name": "GPT-OSS 120B (Medium)",
+      "id": "gpt-oss-120b-medium",
+      "input_modalities": [
+        "text"
+      ],
+      "max_completion_tokens": 32768,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "antigravity",
+      "providers": [
+        "antigravity"
+      ],
+      "type": "antigravity"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": null
+      },
+      "created": 1793652854,
+      "display_name": "openrouter/nemotron-3.5-lightning-free",
+      "id": "openrouter/nemotron-3.5-lightning-free",
+      "object": "model",
+      "owned_by": "openrouter",
+      "providers": [
+        "openai-compatible-openrouter"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "type": "openai-compatibility"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model meta/codellama-70b",
+      "display_name": "nvidia-nvidia/meta/codellama-70b",
+      "id": "nvidia-nvidia/meta/codellama-70b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model anthropic/claude-opus-4-6",
+      "display_name": "llm7-llm7/anthropic/claude-opus-4-6",
+      "id": "llm7-llm7/anthropic/claude-opus-4-6",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model claude-opus-5",
+      "display_name": "llm7-llm7/claude-opus-5",
+      "id": "llm7-llm7/claude-opus-5",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "Z.ai model glm-4.7-flash",
+      "display_name": "zai-zai/glm-4.7-flash",
+      "id": "zai-zai/glm-4.7-flash",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "zai",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 1000000,
+      "description": "Kilo (free pool, no key) model nvidia/nemotron-3-ultra-550b-a55b:free",
+      "display_name": "kilo-kilo/nvidia/nemotron-3-ultra-550b-a55b:free",
+      "id": "kilo-kilo/nvidia/nemotron-3-ultra-550b-a55b:free",
+      "input_modalities": [
+        "text"
+      ],
+      "max_completion_tokens": 65536,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "kilo",
+      "providers": [
+        "freehub"
+      ],
+      "supported_parameters": [
+        "include_reasoning",
+        "max_tokens",
+        "reasoning",
+        "reasoning_effort",
+        "seed",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_p"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model google/deplot",
+      "display_name": "nvidia-nvidia/google/deplot",
+      "id": "nvidia-nvidia/google/deplot",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model google/gemma-3-4b-it",
+      "display_name": "nvidia-nvidia/google/gemma-3-4b-it",
+      "id": "nvidia-nvidia/google/gemma-3-4b-it",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model google/recurrentgemma-2b",
+      "display_name": "nvidia-nvidia/google/recurrentgemma-2b",
+      "id": "nvidia-nvidia/google/recurrentgemma-2b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model ibm/granite-3.0-3b-a800m-instruct",
+      "display_name": "nvidia-nvidia/ibm/granite-3.0-3b-a800m-instruct",
+      "id": "nvidia-nvidia/ibm/granite-3.0-3b-a800m-instruct",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/ai-synthetic-video-detector",
+      "display_name": "nvidia-nvidia/nvidia/ai-synthetic-video-detector",
+      "id": "nvidia-nvidia/nvidia/ai-synthetic-video-detector",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "context_length": 131072,
+      "description": "SambaNova model Meta-Llama-3.3-70B-Instruct",
+      "display_name": "sambanova-sambanova/Meta-Llama-3.3-70B-Instruct",
+      "id": "sambanova-sambanova/Meta-Llama-3.3-70B-Instruct",
+      "input_modalities": [
+        "text"
+      ],
+      "max_completion_tokens": 3072,
+      "object": "model",
+      "owned_by": "sambanova",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model anthropic/claude-sonnet-5-5",
+      "display_name": "llm7-llm7/anthropic/claude-sonnet-5-5",
+      "id": "llm7-llm7/anthropic/claude-sonnet-5-5",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": true
+      },
+      "description": "[Free] ",
+      "display_name": "cline-reflection/beam-free",
+      "id": "cline-reflection/beam-free",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "cline",
+      "providers": [
+        "freehub"
+      ],
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "stream",
+        "tools",
+        "tool_choice"
+      ],
+      "type": "chat"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "created": 1793652854,
+      "display_name": "Nemotron 3.5 Lightning",
+      "id": "nemotron-3.5-lightning",
+      "object": "model",
+      "owned_by": "kilo,openrouter",
+      "providers": [
+        "freehub",
+        "openai-compatible-openrouter"
+      ],
+      "type": "openai-compatibility"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model meta/llama-3.2-90b-vision-instruct",
+      "display_name": "nvidia-nvidia/meta/llama-3.2-90b-vision-instruct",
+      "id": "nvidia-nvidia/meta/llama-3.2-90b-vision-instruct",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/llama-3.1-nemotron-70b-instruct",
+      "display_name": "nvidia-nvidia/nvidia/llama-3.1-nemotron-70b-instruct",
+      "id": "nvidia-nvidia/nvidia/llama-3.1-nemotron-70b-instruct",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model snowflake/arctic-embed-l",
+      "display_name": "nvidia-nvidia/snowflake/arctic-embed-l",
+      "id": "nvidia-nvidia/snowflake/arctic-embed-l",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model anthropic/claude-sonnet-5",
+      "display_name": "llm7-llm7/anthropic/claude-sonnet-5",
+      "id": "llm7-llm7/anthropic/claude-sonnet-5",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model deepseek-v4-flash:0731",
+      "display_name": "llm7-llm7/deepseek-v4-flash:0731",
+      "id": "llm7-llm7/deepseek-v4-flash:0731",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model gemini-3.1-flash-image",
+      "display_name": "llm7-llm7/gemini-3.1-flash-image",
+      "id": "llm7-llm7/gemini-3.1-flash-image",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 512000,
+      "description": "Kilo (free pool, no key) model dots-studio/dots-3-note-preview:free",
+      "display_name": "kilo-kilo/dots-studio/dots-3-note-preview:free",
+      "id": "kilo-kilo/dots-studio/dots-3-note-preview:free",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "max_completion_tokens": 460800,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "kilo",
+      "providers": [
+        "freehub"
+      ],
+      "supported_parameters": [
+        "include_reasoning",
+        "max_tokens",
+        "reasoning",
+        "response_format",
+        "structured_outputs",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_p"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 256000,
+      "description": "Kilo (free pool, no key) model kilo-auto/free",
+      "display_name": "kilo-kilo/kilo-auto/free",
+      "id": "kilo-kilo/kilo-auto/free",
+      "input_modalities": [
+        "text"
+      ],
+      "max_completion_tokens": 32768,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "kilo",
+      "providers": [
+        "freehub"
+      ],
+      "supported_parameters": [
+        "max_tokens",
+        "temperature",
+        "tools",
+        "reasoning",
+        "include_reasoning"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model aisingapore/sea-lion-7b-instruct",
+      "display_name": "nvidia-nvidia/aisingapore/sea-lion-7b-instruct",
+      "id": "nvidia-nvidia/aisingapore/sea-lion-7b-instruct",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+      "display_name": "nvidia-nvidia/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+      "id": "nvidia-nvidia/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model Voxtral-Mini-3B-2507",
+      "display_name": "llm7-llm7/Voxtral-Mini-3B-2507",
+      "id": "llm7-llm7/Voxtral-Mini-3B-2507",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model gpt-5.6-sol",
+      "display_name": "llm7-llm7/gpt-5.6-sol",
+      "id": "llm7-llm7/gpt-5.6-sol",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model gpt-6-sol",
+      "display_name": "llm7-llm7/gpt-6-sol",
+      "id": "llm7-llm7/gpt-6-sol",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "created": 1704067200,
+      "display_name": "GPT Image 2.5 Flare",
+      "id": "gpt-image-2.5-flare",
+      "object": "model",
+      "owned_by": "openai",
+      "providers": [
+        "codex"
+      ],
+      "type": "openai",
+      "version": "gpt-image-2.5-flare"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 256000,
+      "description": "Kilo (free pool, no key) model cohere/north-mini-code:free",
+      "display_name": "kilo-kilo/cohere/north-mini-code:free",
+      "id": "kilo-kilo/cohere/north-mini-code:free",
+      "input_modalities": [
+        "text"
+      ],
+      "max_completion_tokens": 64000,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "kilo",
+      "providers": [
+        "freehub"
+      ],
+      "supported_parameters": [
+        "frequency_penalty",
+        "include_reasoning",
+        "max_tokens",
+        "presence_penalty",
+        "reasoning",
+        "seed",
+        "stop",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_k",
+        "top_p"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model meta/muse-glimmer-30b",
+      "display_name": "nvidia-nvidia/meta/muse-glimmer-30b",
+      "id": "nvidia-nvidia/meta/muse-glimmer-30b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model chroma-v.46-flash",
+      "display_name": "llm7-llm7/chroma-v.46-flash",
+      "id": "llm7-llm7/chroma-v.46-flash",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model gpt-5.6-terra",
+      "display_name": "llm7-llm7/gpt-5.6-terra",
+      "id": "llm7-llm7/gpt-5.6-terra",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model kimi-k2.7-code",
+      "display_name": "llm7-llm7/kimi-k2.7-code",
+      "id": "llm7-llm7/kimi-k2.7-code",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model kimi-k3",
+      "display_name": "llm7-llm7/kimi-k3",
+      "id": "llm7-llm7/kimi-k3",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": null
+      },
+      "context_length": 200000,
+      "description": "Claude Sonnet 4.6 (Thinking)",
+      "display_name": "Claude Sonnet 4.6 (Thinking)",
+      "id": "claude-sonnet-4-6",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "max_completion_tokens": 64000,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "antigravity",
+      "providers": [
+        "antigravity"
+      ],
+      "thinking": {
+        "min": 1024,
+        "max": 64000,
+        "zero_allowed": true,
+        "dynamic_allowed": true
+      },
+      "type": "antigravity"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": null
+      },
+      "context_length": 1048576,
+      "description": "Gemini 3.1 Flash Lite",
+      "display_name": "Gemini 3.1 Flash Lite",
+      "id": "gemini-3.1-flash-lite",
+      "input_modalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "max_completion_tokens": 65535,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "antigravity",
+      "providers": [
+        "antigravity"
+      ],
+      "thinking": {
+        "min": 1,
+        "max": 65535,
+        "zero_allowed": true,
+        "dynamic_allowed": true,
+        "levels": [
+          "minimal",
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "type": "antigravity"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 200000,
+      "description": "Kilo (free pool, no key) model openrouter/free",
+      "display_name": "kilo-kilo/openrouter/free",
+      "id": "kilo-kilo/openrouter/free",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "kilo",
+      "providers": [
+        "freehub"
+      ],
+      "supported_parameters": [
+        "frequency_penalty",
+        "include_reasoning",
+        "logprobs",
+        "max_completion_tokens",
+        "max_tokens",
+        "min_p",
+        "presence_penalty",
+        "reasoning",
+        "reasoning_effort",
+        "repetition_penalty",
+        "response_format",
+        "seed",
+        "stop",
+        "structured_outputs",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_k",
+        "top_logprobs",
+        "top_p"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 262144,
+      "description": "Kilo (free pool, no key) model xingchen-agi/xing4.0-29b-a4b:free",
+      "display_name": "kilo-kilo/xingchen-agi/xing4.0-29b-a4b:free",
+      "id": "kilo-kilo/xingchen-agi/xing4.0-29b-a4b:free",
+      "input_modalities": [
+        "text"
+      ],
+      "max_completion_tokens": 235929,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "kilo",
+      "providers": [
+        "freehub"
+      ],
+      "supported_parameters": [
+        "frequency_penalty",
+        "include_reasoning",
+        "max_tokens",
+        "min_p",
+        "presence_penalty",
+        "reasoning",
+        "repetition_penalty",
+        "response_format",
+        "seed",
+        "stop",
+        "structured_outputs",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_k",
+        "top_p"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model bigcode/starcoder2-15b",
+      "display_name": "nvidia-nvidia/bigcode/starcoder2-15b",
+      "id": "nvidia-nvidia/bigcode/starcoder2-15b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model deepseek-ai/deepseek-coder-6.7b-instruct",
+      "display_name": "nvidia-nvidia/deepseek-ai/deepseek-coder-6.7b-instruct",
+      "id": "nvidia-nvidia/deepseek-ai/deepseek-coder-6.7b-instruct",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model writer/palmyra-creative-122b",
+      "display_name": "nvidia-nvidia/writer/palmyra-creative-122b",
+      "id": "nvidia-nvidia/writer/palmyra-creative-122b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model zyphra/zamba2-7b-instruct",
+      "display_name": "nvidia-nvidia/zyphra/zamba2-7b-instruct",
+      "id": "nvidia-nvidia/zyphra/zamba2-7b-instruct",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model anthropic/claude-opus-4-8",
+      "display_name": "llm7-llm7/anthropic/claude-opus-4-8",
+      "id": "llm7-llm7/anthropic/claude-opus-4-8",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model gpt-image-2.5",
+      "display_name": "llm7-llm7/gpt-image-2.5",
+      "id": "llm7-llm7/gpt-image-2.5",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 1000000,
+      "description": "Kilo (free pool, no key) model inclusionai/ling-3.1-flash-1019-free",
+      "display_name": "kilo-kilo/inclusionai/ling-3.1-flash-1019-free",
+      "id": "kilo-kilo/inclusionai/ling-3.1-flash-1019-free",
+      "input_modalities": [
+        "text"
+      ],
+      "max_completion_tokens": 262144,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "kilo",
+      "providers": [
+        "freehub"
+      ],
+      "supported_parameters": [
+        "max_tokens",
+        "temperature",
+        "tools",
+        "reasoning",
+        "include_reasoning"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/llama-3.1-nemoguard-8b-topic-control",
+      "display_name": "nvidia-nvidia/nvidia/llama-3.1-nemoguard-8b-topic-control",
+      "id": "nvidia-nvidia/nvidia/llama-3.1-nemoguard-8b-topic-control",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/nemotron-3-ultra-550b-a55b",
+      "display_name": "nvidia-nvidia/nvidia/nemotron-3-ultra-550b-a55b",
+      "id": "nvidia-nvidia/nvidia/nemotron-3-ultra-550b-a55b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "NVIDIA NIM model nvidia/nemotron-3.5-embed-8b",
+      "display_name": "nvidia-nvidia/nvidia/nemotron-3.5-embed-8b",
+      "id": "nvidia-nvidia/nvidia/nemotron-3.5-embed-8b",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "nvidia",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model minimax-m2.7",
+      "display_name": "llm7-llm7/minimax-m2.7",
+      "id": "llm7-llm7/minimax-m2.7",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model seedance-2.0-mini",
+      "display_name": "llm7-llm7/seedance-2.0-mini",
+      "id": "llm7-llm7/seedance-2.0-mini",
+      "input_modalities": [
+        "text"
+      ],
+      "object": "model",
+      "owned_by": "llm7",
+      "providers": [
+        "freehub"
+      ],
+      "type": "model"
+    },
+    {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": true,
+        "tools": true
+      },
+      "context_length": 272000,
+      "created": 1783616400,
+      "description": "GPT-6 Astra is our most intelligent model yet, with state-of-the-art performance in computer use, browsing, software engineering, science, and professional work.",
+      "display_name": "GPT 6.0 Astra",
+      "id": "gpt-6-astra",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "max_completion_tokens": 128000,
+      "object": "model",
+      "output_modalities": [
+        "text"
+      ],
+      "owned_by": "openai",
+      "providers": [
+        "codex"
+      ],
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "type": "openai",
+      "version": "gpt-6.0"
+    }
+  ],
+  "isolated_host_evidence": {
+    "counts": {
+      "blocked_native_metadata": 1,
+      "catalog_get": 1,
+      "denied_connect": 0,
+      "inference_posts": 3,
+      "quota_origin": 0,
+      "redirect_origin": 0,
+      "redirect_target": 0,
+      "stream_origin": 3,
+      "unexpected_http": 0
+    },
+    "failures": [],
+    "gates": {
+      "both_plugins_registered": true,
+      "canonical_and_qualified_published": true,
+      "canonical_dispatch_1": true,
+      "canonical_dispatch_2": true,
+      "canonical_provider_pool": true,
+      "console_without_key_401": true,
+      "disabled_opencode_unpublished": true,
+      "final_auth_ownership": true,
+      "login_providers_visible": true,
+      "management_without_key_401": true,
+      "native_cross_provider_routing": true,
+      "network_namespace_isolated": true,
+      "no_startup_inference": true,
+      "no_unexpected_provider_requests": true,
+      "only_kilo_auth_and_preserved_opencode": true,
+      "protected_keyless_console": true,
+      "published_kilo_selection": true,
+      "qualified_override_preserved": true,
+      "stopped_host_auth_ownership": true,
+      "stopped_host_exact_counts": true,
+      "unknown_shared_limits_not_invented": true,
+      "vendor_admission": true
+    },
+    "input_sha256": {
+      "binary": "2b36c0918fdec5a44548d457678b149035a899da513be64caa869f3f63251d2b",
+      "free_model_hub": "88093bd493a7a62e6e0ed56110fd10ecddd1a477c69d5faa78bfcf87d43c2a7a",
+      "opencode": "19ee4302f7f96418ba0c59d443c4682ba1972de67d7cf1d687ea4e9004df354b"
+    },
+    "namespace": {
+      "inner": "net:[4026533516]",
+      "outer": "net:[4026535122]"
+    },
+    "provider_sequence": [
+      "kilo",
+      "openrouter",
+      "kilo"
+    ],
+    "supervision": {
+      "deadline_seconds": 52,
+      "environment_cleared": true,
+      "exact_plugins_read_only": true,
+      "process_group_killed": true,
+      "unshare_net_required": true
+    },
+    "verdict": "pass"
+  }
+}

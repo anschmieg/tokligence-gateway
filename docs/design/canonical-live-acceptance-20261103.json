@@ -1,0 +1,100 @@
+{
+  "cases": [
+    {
+      "case": "canonical-lightning",
+      "model": "nemotron-3.5-lightning",
+      "phase": "pass",
+      "caller_posts": 1,
+      "automatic_retries": 0,
+      "forced_credential": false,
+      "started_utc": "2026-11-03T10:19:53Z",
+      "http_status": 200,
+      "selected_credential": "requesty-key-4",
+      "retry_after": null,
+      "done": true,
+      "nonempty_text": true,
+      "finish_reasons": [
+        "stop"
+      ],
+      "embedded_error": false,
+      "response_models": [
+        "nvidia/nemotron-3.5-lightning-30b-a3b"
+      ],
+      "elapsed_seconds": 2.36
+    },
+    {
+      "case": "canonical-glm",
+      "model": "glm-5.3-flash",
+      "phase": "failed",
+      "caller_posts": 1,
+      "automatic_retries": 0,
+      "forced_credential": false,
+      "started_utc": "2026-11-03T10:19:55Z",
+      "http_status": 503,
+      "selected_credential": "llm7-credential",
+      "retry_after": null,
+      "done": false,
+      "nonempty_text": false,
+      "finish_reasons": [],
+      "embedded_error": false,
+      "response_models": [],
+      "error_code": "internal_server_error",
+      "elapsed_seconds": 0.57
+    },
+    {
+      "case": "zai-free",
+      "model": "zai-zai/glm-4.7-flash",
+      "phase": "pass",
+      "caller_posts": 1,
+      "automatic_retries": 0,
+      "forced_credential": false,
+      "started_utc": "2026-11-03T10:19:56Z",
+      "http_status": 200,
+      "selected_credential": "zai-credential",
+      "retry_after": null,
+      "done": true,
+      "nonempty_text": true,
+      "finish_reasons": [
+        "stop"
+      ],
+      "embedded_error": false,
+      "response_models": [
+        "glm-4.7-flash"
+      ],
+      "elapsed_seconds": 25.99
+    },
+    {
+      "case": "canonical-glm-diagnostic",
+      "model": "glm-5.3-flash",
+      "phase": "pass",
+      "caller_posts": 1,
+      "automatic_retries": 0,
+      "forced_credential": false,
+      "started_utc": "2026-11-03T10:21:05Z",
+      "http_status": 200,
+      "selected_credential": "orcarouter-key-1",
+      "retry_after": null,
+      "done": true,
+      "nonempty_text": true,
+      "finish_reasons": [
+        "stop"
+      ],
+      "embedded_error": false,
+      "response_models": [
+        "zai-org/glm-5.3-flash"
+      ],
+      "elapsed_seconds": 17.98
+    }
+  ],
+  "caller_posts": 4,
+  "protected_state_unchanged": true,
+  "scope": "Actual native gateway /v1/chat/completions through one naturally selected credential per canonical model and one direct Z.ai free model. Not all providers/keys/models.",
+  "diagnostic_routing": "Separate user-authorized canonical request; native selection, no forced credential, no config change or cooldown reset.",
+  "first_glm_error": "LLM7: model_temporarily_unavailable, HTTP 503",
+  "live_pass_models": [
+    "nemotron-3.5-lightning",
+    "glm-5.3-flash",
+    "zai-zai/glm-4.7-flash"
+  ],
+  "coverage_boundary": "Gateway native origin via SSH to real upstream providers; public Cloudflare ingress and other keys/models not retested."
+}

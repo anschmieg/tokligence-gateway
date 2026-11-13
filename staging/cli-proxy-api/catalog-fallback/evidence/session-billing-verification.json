@@ -1,0 +1,58 @@
+{
+  "native_version": "8.0.49-tokligence.16",
+  "native_sha256": "989f50db280424ce8ef41cdec406134f0f19d6a3cf78604ec5c14cd64993203e",
+  "focused_race_packages": [
+    "internal/registry",
+    "sdk/api/handlers",
+    "sdk/cliproxy/auth",
+    "sdk/cliproxy",
+    "internal/api"
+  ],
+  "focused_race": "pass",
+  "vet": "pass",
+  "client_helper_tests": "2 pass",
+  "isolated_host": "pass",
+  "mock_inference_posts": 12,
+  "mock_streams": 9,
+  "real_provider_inference_requests": 0,
+  "deployment": "deployed",
+  "client_interactive_acceptance": "not run; configuration assets supplied",
+  "foreground_classification": "requires truthful per-request client labels; unspecified remains unknown",
+  "semantics": [
+    "default SUB",
+    "FREE excludes included subscriptions",
+    "PAID explicit per-session/profile",
+    "normal model IDs binding",
+    "chat/coding explicit aliases select profiles",
+    "original-model similarity anchor",
+    "per-request policy snapshot",
+    "current selected-account entitlement at physical dispatch",
+    "no post-output rerouting"
+  ],
+  "source_commit": "c24a44b",
+  "deployed_native_origin": {
+    "unauthenticated_control": 401,
+    "chat_models": {
+      "status": 200,
+      "task": "general",
+      "count": 7
+    },
+    "coding_models": {
+      "status": 200,
+      "task": "coding",
+      "count": 3
+    },
+    "both_aliases_published": true,
+    "default_billing_policy": "SUB",
+    "explicit_policy_sets_verified": [
+      "FREE",
+      "SUB",
+      "PAID",
+      "SUB"
+    ],
+    "acceptance_session_final_policy": "SUB",
+    "other_profile_remained": "SUB",
+    "provider_inference_requests": 0
+  },
+  "public_client_acceptance": "not claimed; existing automated public traffic encounters Cloudflare1010"
+}

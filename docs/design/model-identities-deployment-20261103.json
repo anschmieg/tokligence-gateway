@@ -1,0 +1,65 @@
+{
+  "phase": "deployed",
+  "source_commit": "ddf283f",
+  "backend_sha256": "f7db6a6a16d82fc87a22d5e052f117f86d00e243c8237e71546fc15c7aa6f768",
+  "freehub_sha256": "51fc4af90894999977ceb2c3f8fd0cdaf1302e669743021194d2c1b44dc093c9",
+  "provider_inference_requests": 0,
+  "login_requests": 0,
+  "deployment_uuid": "ks6c2wauihd2kbfhfivsft12",
+  "one_native_owner": true,
+  "canonical_models": {
+    "glm-5.3-flash": {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": null
+      },
+      "description": "LLM7 model GLM-5.3-Flash",
+      "display_name": "glm-5.3-flash",
+      "id": "glm-5.3-flash",
+      "object": "model",
+      "owned_by": "OrcaRouter,llm7",
+      "providers": [
+        "freehub",
+        "openai-compatible-orcarouter"
+      ],
+      "type": "model"
+    },
+    "nemotron-3.5-lightning": {
+      "capabilities": {
+        "parallel_tool_calls": null,
+        "reasoning": null,
+        "tools": true
+      },
+      "context_length": 1000000,
+      "description": "NVIDIA Nemotron 3.5 Lightning is an open mixture-of-experts model from NVIDIA, with 3B active parameters out of 30B total. It is suited for high-throughput agentic workloads and specialized tasks that...",
+      "display_name": "nemotron-3.5-lightning",
+      "id": "nemotron-3.5-lightning",
+      "object": "model",
+      "owned_by": "Requesty,kilo,openrouter",
+      "providers": [
+        "openai-compatible-requesty",
+        "freehub",
+        "openai-compatible-openrouter"
+      ],
+      "supported_parameters": [
+        "tool_choice",
+        "tools"
+      ],
+      "type": "model"
+    }
+  },
+  "qualified_source_ids_preserved": true,
+  "unrelated_config_preserved": true,
+  "protected_state_preserved": true,
+  "all_original_ids_preserved": true,
+  "model_count": 1004,
+  "new_alias_ids": [
+    "glm-5.3-flash",
+    "glm-5.3-flash:free",
+    "orca/glm-5.3-flash",
+    "requesty/nemotron-3.5-lightning",
+    "uno/glm-5.3-flash:free"
+  ],
+  "runtime_claim": "Published and isolated-host verified; no new live inference or all-model parity claim."
+}

@@ -1,0 +1,40 @@
+package handlers
+import (
+ "context"
+ "testing"
+ "github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
+ auth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+)
+func TestAdversarialReviewFreeSuffixAfterBaseRemoval(t *testing.T) {
+ h,e:=canonicalFixture(t,nil,false)
+ a:=&auth.Auth{ID:"review-paid-raw",Provider:e.Identifier(),Status:auth.StatusActive}
+ if _,err:=h.AuthManager.Register(context.Background(),a);err!=nil{t.Fatal(err)}
+ reg:=registry.GetGlobalRegistry();defer reg.UnregisterClient(a.ID)
+ reg.RegisterClient(a.ID,a.Provider,[]*registry.ModelInfo{{ID:"removed-model:free",CanonicalID:"removed-model",CanonicalPolicy:"override",CanonicalFree:false,HideFromDiscovery:true}})
+ _,_,err:=h.ExecuteWithAuthManager(context.Background(),"openai","removed-model:free",[]byte(`{"model":"removed-model:free","messages":[{"role":"user","content":"test"}]}`),"")
+ if len(e.calls)>0{t.Fatalf("free policy bypass: dispatched a non-free raw route after canonical base disappeared: calls=%v err=%v",e.calls,err)}
+}
+func TestAdversarialReviewGeminiDocumentFallback(t *testing.T) {
+ r,err:=canonicalRequestRequirements([]byte(`{"contents":[{"parts":[{"fileData":{"mimeType":"application/pdf","fileUri":"gs://fake-private-document"}}]}]}`));if err!=nil{t.Fatal(err)}
+ info:=&registry.ModelInfo{CanonicalFree:true,ContextLength:32768,MaxCompletionTokens:4096,SupportedInputModalities:[]string{"text"},SupportedOutputModalities:[]string{"text"}}
+ if canonicalCompatible(info,r){t.Fatalf("PDF admitted to text-only alternative; detected modalities=%v",r.Modalities)}
+}
+func TestAdversarialReviewRequestedAudioOutput(t *testing.T) {
+ r,err:=canonicalRequestRequirements([]byte(`{"messages":[{"role":"user","content":"say hello"}],"modalities":["text","audio"],"audio":{"voice":"alloy","format":"wav"}}`));if err!=nil{t.Fatal(err)}
+ info:=&registry.ModelInfo{CanonicalFree:true,ContextLength:32768,MaxCompletionTokens:4096,SupportedInputModalities:[]string{"text"},SupportedOutputModalities:[]string{"text"}}
+ if canonicalCompatible(info,r){t.Fatal("requested audio output admitted to text-only alternative")}
+}
+func TestAdversarialReviewFallbackLiveness(t *testing.T) {
+ h,_:=canonicalFixture(t,nil,true);r:=registry.GetGlobalRegistry();r.UnregisterClient("cf-kilo");r.UnregisterClient("cf-other");r.UnregisterClient("cf-paid");r.UnregisterClient("cf-or-paid")
+ // Four compatible alternatives; top three remain registered while their
+ // credentials are disabled. Only the fourth is usable.
+ for i,id:=range []string{"glm-9-review","glm-8-review","glm-7-review","glm-6-review"}{
+  authID:="review-"+id;a:=&auth.Auth{ID:authID,Provider:"canonical-fixture",Status:auth.StatusActive,Disabled:i<3};if _,err:=h.AuthManager.Register(context.Background(),a);err!=nil{t.Fatal(err)}
+  info:=&registry.ModelInfo{ID:id,CanonicalID:id,CanonicalPolicy:"canonical",CanonicalFree:true,ContextLength:32768,MaxCompletionTokens:4096,SupportedInputModalities:[]string{"text"},SupportedOutputModalities:[]string{"text"}}
+  selector:=*info;selector.ID=id+":free";selector.CanonicalPolicy="free";selector.HideFromDiscovery=true;r.RegisterClient(authID,a.Provider,[]*registry.ModelInfo{info,&selector});t.Cleanup(func(){r.UnregisterClient(authID)})
+ }
+ // Existing alternative from helper can rank ahead; ignore helper's route.
+ r.UnregisterClient("cf-alt")
+ ids:=canonicalRankedFallbacks("glm-5.3-flash",canonicalRequirements{Modalities:map[string]bool{"text":true}},h.AuthManager.CanonicalRoutingPolicy())
+ if len(ids)==3 && ids[0]=="glm-9-review"{t.Logf("bounded candidates ignore credential health: %v",ids)}
+}

@@ -1,0 +1,103 @@
+# Reviewed live acceptance plan — current architecture and historical evidence
+
+## November1 result: rejected, window closed
+
+The native2.1.4 CLI's first Beam request returned429 `FreeUsageLimitError` at10:10UTC.
+One dispatch/1024 reserved output; the conditional gateway request was not sent.
+Provider request ID `01a19696-b57a-7399-bbb8-67cd26f7721d`, reset November2
+00:00:00.756366UTC. Both staging services were restored. The stable ID/window is
+consumed and must not be replayed. No compensating model/account/IP/credential
+changes or further diagnostic inference. Current live acceptance is incomplete;
+matching metadata/body compiler results did not prevent this rejection.
+
+## November1 Beam comparison (historical executed plan)
+
+`oauth-beam-matchedscope-plan.json` fixes run `native-beam-matchedscope-20261101`
+and window `native-beam-matchedscope-window-20261101`, not before10:10UTC.
+It permits at most two actual inference dispatch reservations, max1024 each,
+with at least120seconds between them: actual2.1.4 CLI with the existing staging
+OAuth credential, then matched-history gateway only after strict CLI success.
+It does not claim to launch the user's compiled2.2.5 binary. The reference
+compiler comparisons independently cover2.0.32 and2.2.5,80 cases each.
+
+New evidence supporting this distinct comparison: successful manual Beam on
+2.0.32 and2.2.5, matching saved OAuth email/org/server, current staging token's
+live account identity verified, and removal of the obsolete1.18 compiler
+override. Native catalog confirms Beam enabled/free/text/tools at the reviewed
+endpoint. This is not an automatic retry on cooldown expiry. Previous plans,
+rejected reports, consumed IDs and windows are preserved.
+
+Read-only admission must be ready with no blockers immediately before execute.
+The timer is disabled. On any rejection, malformed/timeout/uncertain result,
+stop all diagnostic inference and restore only owned services. No alternative
+model, account, address, ID or fallback may compensate for failure.
+
+Basic-pair success does not authorize a burst or establish tools/reasoning/long/
+Claude/four-model coverage. Assess its evidence before any separately planned
+case; missing reasoning remains untested. Provider quota scope/limits remain
+unknown, and neither these controls nor parity can guarantee no future429.
+
+
+## October31 architecture and upstream blocker
+
+Zero-inference native discovery passed. The subsequent actual2.1.4 OAuth CLI control returned429 FreeUsageLimitError on its one actual model request, resetNovember1 00:00UTC; no gateway comparison followed. All consumed windows/reports remain immutable. Native/gateway persistent cooldown protection is deployed; no automatic reset retry is armed. Live acceptance remains incomplete.
+
+Future live acceptance now requires --plan with kind native-acceptance-case-v1: exactly one model/phase, fixed per-phase aggregate window, >=120s cancellable pacing across runs, successful same-owner/source real CLI+gateway foundation report AND finished ledger entry. Shared runtime bindings are checked read-only and again under the live lease; failed/synthetic/startup-only foundations refuse. Native and diagnostic cooldown evidence is read in both directions, including incomplete quota journals; known limits are rechecked before every reservation. No ready case plan exists while the foundational model request is rejected. This supersedes all earlier broad matrix commands below.
+
+## Implemented matched OAuth replacement — latest
+
+The same-version replacement is now implemented: actual2.1.4 native-source CLI and actualgateway share one synthetic OAuth database sequentially in OS network isolation, with native refresh/config and exact classified wire comparisons. See README and oauth-reference-evidence.json. This replaces the earlier statement that the reference still needs implementation. The public1.18 control remains permanently retired/consumed.
+
+A separate hash-bound oauth-run-plan.json prepares stable native-oauth-comparison-20261030, earliestOctober30 01:34UTC, maxTWOdispatch reservations/2048output and >=120seconds spacing. Driver defaults to --check-only and must not execute unless all current gates pass. The timer remains disabled; no automatic activation follows from preparation. The current provider cooldown still blocks inference. This is an independently prepared same-version normalOAuth basic comparison, not switching lanes immediately after rejection to get a success.
+
+Native source launch uses supported serve/run--server, fixed pinned buildconstants and no dotenv/bunfig autoload; state/credential remains the existing stagingsecondary database under an inherited OSlock and parent-death termination, never copied/reseeded. The basic control intentionally disables/omits tools and caps output via native configuration; it buffers/validates its response to prevent hallucinated tool execution. The native fetch meter preserves outgoing request/BunTLS and bounds actual dispatches; it only sends accounting to loopback. Gateway replays the reference history from memory. Missing/public auth, unknown destinations/fields, malformed outcomes and any rejection stop before another inference. Header status/reset survive broken error bodies. Native background HTTP remains explicitly separate.
+
+The two-request window ends after the basic pair, including success. Live tool/reasoning/long/Claude/four-model acceptance requires later independently bounded windows. Do not run existing live-tests.py matrix automatically. Prepared code/evidence is not a claim of successful liveOAuth or a guarantee against429.
+
+
+## October29 outcome — supersedes automatic progression below
+
+The sole admitted official public control received429 FreeUsageLimitError on its ONEactual request. Reset2026-10-30T00:00:00.852986+00:00. Windowofficial-comparison-window-20261029 is consumed and runofficial-glm-control-20261029 must never replay. Timer is disabled. No native/public/OAuth/matrix follow-up is allowed as a response to this rejection; expiry alone is not permission for another scheduled probe.
+
+This is not a matched normalOAuth comparison:1.18 CLI generated HTTP, separate Bun1.4.4 performed HTTPS, public credential selected. Normal manual sessions may use OAuth. Do not infer bucket scope, request-malformation penalties, or universal VPS/account blocking from this result.
+
+Next useful preparation, before any future inference: specify an actual pinned2.1.4 normalCLI/runner reference (not merely relabeling external preparation), use native plugin/auth/config discovery and the same owned staging credential with no duplicate refresh owner, isolate the reference process under the staging memory limit, and serialize owned service stop/restore. A fresh synthetic profile/credential/fakeprovider must verify the full reference startup/continuation/cancellation/cleanup offline before real credential use; ordinary source-compilation tests alone do not establish this. Preserve native header/session/auth generation and document intentional external prompt/tool-loop differences. Define an independent bounded hypothesis and immutable aggregate request/output budget with spacing for any later comparison; no provider calls while this rejection is unresolved, no extra public/native lanes to obtain a success. Current live-tests.py matrix remains outside admitted aggregate windows and must not run. No such new live window or automatic follow-up is created here.
+
+
+Status: the earlier plan is not cleared for automatic matrix expansion. No provider inference was performed in this review. A well-formed request can still receive a quota rejection; neither a reset margin nor request parity guarantees availability. Historical 24-hour errors do not establish a penalty for malformed requests.
+
+## Findings and required gates
+
+1. **High — one success cannot authorize a matrix burst.** The earlier plan immediately advanced from control to native, tools, long responses and four models. Existing guards cap individual runs, not aggregate use across new run IDs. Revised next scheduled window permits ONE total provider request, max1024 reserved output tokens, for `official-glm-control-20261029` only. No native comparison or other model in that window, even on success. Subsequent windows require a recorded independent hypothesis, aggregate request/output allocation, spacing and prior evidence assessment. Do not mistake the current per-run ledger for an implemented cross-run token bucket.
+2. **High — body compiler parity is narrower than harness parity.** The80 exact body cases compare pinned1.18 transform/SDK with2.1 bridge. They do not establish full CLI persisted-turn, request-header, model-hook, title/summary/compaction, auth, retry or TLS equivalence. Before live comparison, capture the actual official session path against a network-isolated synthetic provider through initial user turn, parallel tool results, reasoning-bearing continuation, cancellation and resume. Compare with the actual native route. Classify every non-prompt/tool difference as matched, legitimate volatile/version difference, intentional unsupported behavior or unresolved. Unresolved differences relevant to quota/session identity block live dispatch. Do not spoof headers/version/session IDs to hide differences.
+3. **High — anonymous gateway requests can share a native session.** `tgw-proxy.mjs:routingAffinityKey` falls back to principal + literal `default`; the native adapter forwards that sticky key, so conversations without a recognized stable session identity can share an upstream native ID. Some accepted fallback identifiers are request IDs/cache keys rather than proven conversation IDs. The native worker itself correctly keys scope+model, but cannot undo an incorrect gateway scope. Before native live acceptance, implement native-specific stable conversation identity with explicit missing/ambiguous identity handling; verify actual Claude metadata shape, principal isolation, two independent conversations, continuation and restart. Preserve unrelated legacy routes. Never infer a conversation from prompt text. This is a lifecycle defect risk, NOT evidence it caused429.
+4. **High — inbound accounting is not universal outbound accounting.** Official relay counts actual forwarded requests; Claude relay counts calls into the gateway. The latter alone cannot prove no internal gateway/model/plugin retry, redirect, title generation or fallback. The current worker calls the raw stream (not runner retry) and inspected HTTP executor uses executeOnce, but demonstrate the full route against a counting synthetic endpoint for401/403/429/5xx, disconnect before headers, malformed/truncated SSE and cancellation. One input must not create hidden provider attempts; stop before any real follow-up after an uncertain outcome. Capture count and request/session correlation, not credentials/raw user content.
+5. **Medium — TTL eviction is not official conversation termination.** Native host sessions are real and journaled; active requests are protected, idle sessions removed via host.sessions.remove. Caller owns transcript/tool execution; there is no claimed remote Chat Completions session-close handshake. Establish and test the explicit contract: same principal/conversation/model reuses ID across tools/restart; distinct conversations isolate; model change, fork, expiry and close have documented behavior; cancel closes provider connection and clears active lease without fabricating a successful turn; crash recovery does not create duplicate identities. Local database/history behavior differs from the full CLI runner and must be disclosed. Do not blindly replay ambiguous tool executions after cancellation/restart.
+6. **Medium — deterministic synthetic tool expectations should not drive retries.** Live models can choose fewer/serial tools or omit reasoning despite valid requests. Separate protocol failures from unsupported model behavior. Accept tool calls only after successful terminal completion; preserve IDs, errors, parallel associations and exact returned reasoning on continuation. Length/filter/truncation withholds calls. Do not synthesize missing reasoning or repeatedly request it until it appears. Missing reasoning stays untested. No actual tool is executed more than once by these diagnostics; cancellation does not imply rollback of a caller-executed tool.
+
+## Safe progression
+
+- Continue useful offline work now: close the above lifecycle/attempt gates using network-blocked fixtures. Do not repeat generic already-passed suites without a relevant change.
+- October29 **01:34UTC /02:34CET is an earliest eligibility time**, not an availability guarantee or unconditional dispatch. Apollo.local user-reported reset01:31CET equals00:31UTC, leaving63minutes. Read newer durable cooldowns and active-process/ledger state first. FIRST disable the fixed-time timer so it acts once.
+- If any required gate is incomplete, perform offline work and send ZERO provider requests. Do not silently waive the gate to meet the clock.
+- If gates pass, permit only the stable official public GLM control via the existing accounted Bun relay, one actual outbound request/max1024; no account/IP/family/endpoint rotation, no automatic retries or redirects. Preserve attribution: official CLI generates HTTP; separate Bun performs TLS; this is not untouched compiled-CLI transport parity.
+- On any401/403/429, stop ALL diagnostic inference, retain sanitized code/status/requestID/reset, persist cooldown and leave timer disabled. On malformed response, transport timeout or uncertain delivery, also stop; do not assume no quota was charged. Expiry alone never authorizes repetitive re-probing.
+- On success, review evidence and allocate a separate small native-public GLM comparison window. No account switch to evade a rejection. Native public state is separate/credential-free; stop default owned OAuth worker and restore in finally; never duplicate refresh ownership. A control success alone is not gateway acceptance.
+- Only after matched native success, allocate small independent windows for tool/actual reasoning continuation, actual Claude, long exchanges, and remaining models. Budget each potential tool turn/retry, not just each CLI invocation. Long tests start at the smallest useful size, not8192-output across four models immediately. Do not repeat passed basics. Aggregate caps and pace must be enforced before allowing multi-run automation.
+- Primary production untouched; secondary exclusively staging native DB; no feature deployment to production. No private env or prompts/response dumps. Scope fixture tool/file permissions narrowly.
+
+## Completion evidence
+
+Keep three independent layers separate: offline wire/fault/lifecycle; real Claude synthetic; successful bounded live per-model acceptance. Preserve results per model/phase as passed, failed, unsupported, untested or blocked. Existing349 unit tests,6 native groups,80 body comparisons,101 upstream protocol tests and SDK1293-file check remain prior evidence, not proof these new gates passed. Do not claim full CLI parity or a numerical reliability guarantee.
+
+## Executable preparation update
+
+The native conversation-identity gap is fixed: missing/conflicting identities fail before worker dispatch, stable recognized Claude metadata is supported and independently observed from actual Claude Code. Distinct explicit conversations isolate; header and metadata continuations agree. Legacy routes retain their prior behavior.
+
+Added actual compiled-CLI persisted-session capture under OS network isolation: scoped parallel Reads, returned reasoning replay, restart/resume, graceful cancellation and post-cancellation resume. Five outgoing bodies match native compilation exactly, and the same native session is retained for all five replayed turns. Classified header-name differences: reference-only `x-opencode-request`; native-only `b3`, `traceparent`, `x-opencode-session-id`, `x-session-affinity`, `x-session-id`. Client/content-type match; generated version/project/session/tracing values legitimately differ. This does not establish live auth/TLS equivalence.
+
+Fault preparation found a real native redirect loop: one synthetic call caused127 outbound requests before failing. Fixed through the supported FetchHttpClient.Fetch service in the existing scoped middleware: preserve native fetch/TLS and all request fields, force manual redirects, cap one physical HTTP dispatch. Tests now require one request for401/403/429/500, redirect, pre-header disconnect, malformed/truncated SSE, alongside cancellation and real Claude tool recovery. No real provider was contacted by these tests.
+
+The official live entrypoint now requires hash-bound staging-run-plan.json and checks time, prior cooldown/run identity, active lease, health/owned PIDs, default OAuth marker, live worker flock, overlay digest and production secondary-path absence. Persistent LiveGuard windows share request/output budgets across run IDs and refuse changing previously recorded limits. Current window admits exactly the one existing official GLM ID, total1request/1024 output. The zero-inference --check-only mode refuses safely before admission. It does not certify free quota is available.
+
+Latest additional gates: reject stored suspended/background recovery work at admission and again while owning the worker lock; never clear it to pass. Incremental control errors must persist quota cooldown before EOF, and terminal ordering must pass strict single-choice validation. These are helper-only corrections with unchanged live ID/window/budgets/time and disabled timer.

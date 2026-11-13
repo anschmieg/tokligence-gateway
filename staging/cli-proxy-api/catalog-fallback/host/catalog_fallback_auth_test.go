@@ -1,0 +1,30 @@
+package auth
+
+import (
+	"context"
+	"testing"
+
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
+	ex "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+)
+
+func TestReviewSimilarityCapabilityRevocationAtFinalDispatch(t *testing.T) {
+	selector := "review-capabilities:free"
+	e := &openAICompatPoolExecutor{id: openAICompatPoolProviderKey}
+	m := newOpenAICompatPoolTestManager(t, selector, nil, e)
+	a := m.List()[0]
+	r := registry.GetGlobalRegistry()
+	info := &registry.ModelInfo{ID: selector, CanonicalID: "review-capabilities", CanonicalPolicy: "free", CanonicalFree: true, PluginCostTier: "free", HideFromDiscovery: true, CanonicalSourceID: "fixture-source", ContextLength: 32768, MaxCompletionTokens: 4096, SupportedInputModalities: []string{"text"}, SupportedOutputModalities: []string{"text"}, SupportedParameters: []string{"tools"}}
+	r.RegisterClient(a.ID, a.Provider, []*registry.ModelInfo{info})
+	// Same immutable binding produced after the handler's capability check.
+	opts := reviewPermit(a.ID, selector)
+	revoked := *info
+	revoked.ContextLength = 1
+	revoked.MaxCompletionTokens = 1
+	revoked.SupportedParameters = nil
+	r.RegisterClient(a.ID, a.Provider, []*registry.ModelInfo{&revoked})
+	_, err := m.Execute(context.Background(), []string{a.Provider}, ex.Request{Model: selector, Payload: []byte(`{"messages":[{"role":"user","content":"long fixture input"}],"tools":[{}],"max_tokens":20}`)}, opts)
+	if err == nil || len(e.ExecuteModels()) > 0 {
+		t.Fatalf("capability-revoked target physically dispatched: error=%v calls=%v current_context=%d current_tools=%v", err, e.ExecuteModels(), revoked.ContextLength, revoked.SupportedParameters)
+	}
+}

@@ -1,0 +1,31 @@
+{
+  "phase": "configured",
+  "profile": "assistant",
+  "configuration": {
+    "task": "general",
+    "max-models": 8,
+    "preferred-model": "glm-5.3-flash",
+    "cost-policy": "session"
+  },
+  "provider_inference_requests": 0,
+  "other_settings_verified_before_discovery": true,
+  "credential_writes": 0,
+  "native_restarted": false,
+  "native_artifact_unchanged": true,
+  "one_owner": true,
+  "billing_default": "SUB",
+  "profile_ids": [
+    "glm-5.3-flash",
+    "gpt-5.6-luna",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-6-astra",
+    "nemotron-3-ultra-550b-a55b",
+    "nemotron-3.5-lightning",
+    "north-mini-code"
+  ],
+  "full_catalog_count": 474,
+  "alias_published": true,
+  "public_ingress_verified": false,
+  "verification_note": "Initial discovery raced asynchronous native config watch and returned404; subsequent read-only verification passed, configuration write not repeated."
+}

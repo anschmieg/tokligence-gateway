@@ -34,7 +34,59 @@ function toolChoiceToOpenAI(choice) {
   return undefined;
 }
 
-export function anthropicToOpenAI(request, { forceStream = true } = {}) {
+// Validate the native lane before the general codec can discard unsupported
+// blocks (including blocks nested inside a tool result).
+export function validateNativeAnthropicRequest(request) {
+  const invalid = (message) => { throw Object.assign(new Error(message), { statusCode: 400, code: "unsupported_bridge_request" }); };
+  const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+  if (request.tool_choice !== undefined) {
+    const choice = request.tool_choice;
+    if (!object(choice) || !["auto", "any", "none", "tool"].includes(choice.type)) invalid("Unsupported native tool_choice");
+    if (choice.type === "tool" && (typeof choice.name !== "string" || !choice.name)) invalid("Native selected tool requires a name");
+    if (choice.disable_parallel_tool_use !== undefined) {
+      if (choice.type === "none" || typeof choice.disable_parallel_tool_use !== "boolean") invalid("Invalid native disable_parallel_tool_use");
+      if (request.parallel_tool_calls !== undefined && request.parallel_tool_calls !== !choice.disable_parallel_tool_use) invalid("Conflicting native parallel tool settings");
+    }
+  }
+  const textOnly = (content, label) => {
+    if (typeof content === "string") return;
+    if (!Array.isArray(content)) invalid(`${label} must contain text`);
+    for (const block of content) {
+      if (!object(block) || block.type !== "text" || typeof block.text !== "string" || block.citations?.length) invalid(`${label} supports plain text blocks only`);
+    }
+  };
+  if (request.system !== undefined) textOnly(request.system, "Native system prompt");
+  if (!Array.isArray(request.messages)) invalid("Native messages must be an array");
+  for (const message of request.messages) {
+    if (!object(message) || !["user", "assistant", "system"].includes(message.role)) invalid("Unsupported native Messages role");
+    if (typeof message.content === "string") continue;
+    if (!Array.isArray(message.content)) invalid("Native message content must be text or content blocks");
+    for (const block of message.content) {
+      if (!object(block)) invalid("Invalid native content block");
+      if (block.type === "text") { textOnly([block], "Native message"); continue; }
+      // The shared codec accepts legacy text-shaped blocks. Do not let that
+      // compatibility path swallow a native tool call, result, or reasoning.
+      if (typeof block.text === "string") invalid("Native non-text blocks must not contain a text field");
+      if (block.type === "thinking" && message.role === "assistant") {
+        if (typeof block.thinking !== "string" || (block.signature !== undefined && block.signature !== "")) invalid("Native thinking supports unsigned text only");
+        continue;
+      }
+      if (block.type === "tool_use" && message.role === "assistant") {
+        if (typeof block.id !== "string" || !block.id || typeof block.name !== "string" || !object(block.input)) invalid("Invalid native tool use");
+        continue;
+      }
+      if (block.type === "tool_result" && message.role === "user") {
+        if (typeof block.tool_use_id !== "string" || !block.tool_use_id) invalid("Invalid native tool result ID");
+        if (block.is_error !== undefined && typeof block.is_error !== "boolean") invalid("Native tool error flags must be boolean");
+        if (block.content !== undefined) textOnly(block.content, "Native tool result");
+        continue;
+      }
+      invalid("Native Messages supports text, unsigned thinking and function tools only");
+    }
+  }
+}
+
+export function anthropicToOpenAI(request, { forceStream = true, preserveToolErrors = false } = {}) {
   const out = {};
   for (const key of ["model", "max_tokens", "temperature", "top_p", "user"]) {
     if (request?.[key] !== undefined) out[key] = request[key];
@@ -90,6 +142,7 @@ export function anthropicToOpenAI(request, { forceStream = true } = {}) {
         toolResults.push({
           role: "tool",
           tool_call_id: block.tool_use_id,
+          ...(preserveToolErrors && block.is_error === true ? { is_error: true } : {}),
           content: textOf(block.content) || (typeof block.content === "string" ? block.content : ""),
         });
       }
@@ -290,7 +343,7 @@ export function createAnthropicStreamCodec({ model, messageId, strictCompletion 
 
     end() {
       if (strictCompletion && !finishReason && !terminalDone) throw Object.assign(new Error("OpenCode stream ended without a finish reason or terminal marker"), { upstreamStreamError: true });
-      if (strictCompletion && !semanticStarted && finishReason !== "content_filter") throw Object.assign(new Error("OpenCode stream completed without a message or tool call"), { upstreamStreamError: true });
+      if (strictCompletion && !semanticStarted && !["content_filter", "length"].includes(finishReason)) throw Object.assign(new Error("OpenCode stream completed without a message or tool call"), { upstreamStreamError: true });
       if (!started) {
         started = true;
         emit("message_start", {

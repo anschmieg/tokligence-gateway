@@ -1,0 +1,36 @@
+{
+  "source_commit": "011577f3bdeab38a8b5a409446ace39d640783d0",
+  "targets": {
+    "zhipuai/glm-5.3-flash": {
+      "present": true,
+      "family": "glm-flash",
+      "benchmark_records": 6,
+      "complete_comparison_records": [
+        {
+          "name": "Terminal-Bench",
+          "version": "2.1",
+          "harness": "Claude Code 2.1.207",
+          "variant": "max effort"
+        },
+        {
+          "name": "DeepSWE",
+          "version": "1.1",
+          "harness": "mini-swe-agent",
+          "variant": "max effort"
+        }
+      ]
+    },
+    "zhipuai/glm-4.7-flash": {
+      "present": true,
+      "family": "glm-flash",
+      "benchmark_records": 1,
+      "complete_comparison_records": []
+    },
+    "minimax/MiniMax-M3.1-Flash": {
+      "present": true,
+      "family": "minimax",
+      "benchmark_records": 0,
+      "complete_comparison_records": []
+    }
+  }
+}

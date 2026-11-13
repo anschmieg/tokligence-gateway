@@ -1,8 +1,9 @@
 import http from "node:http";
+import { nativeConversationScope } from "./native-session-identity.mjs";
 import https from "node:https";
 import tls from "node:tls";
 import { randomUUID } from "node:crypto";
-import { anthropicToOpenAI } from "./anthropic-openai-codec.mjs";
+import { anthropicToOpenAI, validateNativeAnthropicRequest } from "./anthropic-openai-codec.mjs";
 import { shapeZenRequest, zenHeaders } from "./opencode-zen-gate.mjs";
 import { canonicalCredentialFile, createTokenProvider } from "./opencode-zen-credential.mjs";
 import { createSessionPool } from "./opencode-zen-session.mjs";
@@ -220,7 +221,7 @@ async function zenAttempt(candidate, { body, env, accountPool, stickyKey, exclud
 // native pass-through instead.
 function translatedRequest(body) {
   const request = Buffer.isBuffer(body) ? JSON.parse(body.toString("utf8")) : body;
-  const upstreamBody = anthropicToOpenAI(request, { forceStream: false });
+  const upstreamBody = anthropicToOpenAI(request, { forceStream: false, preserveToolErrors: true });
   return {
     upstreamBody,
     // Preserve upstream reasoning for replay even when the caller did not
@@ -556,11 +557,18 @@ export async function startAttempt({ candidate, req, path, body, env = process.e
       throw Object.assign(new Error("The native worker is not enabled or configured"), { statusCode: 503, code: "native_bridge_disabled" });
     }
     const request = JSON.parse(Buffer.isBuffer(body) ? body.toString("utf8") : body);
-    const translated = candidate.protocol === "messages" ? anthropicToOpenAI(request, { forceStream: false }) : request;
+    const conversationScope = nativeConversationScope(req.headers, request);
+    if (candidate.protocol === "messages") validateNativeAnthropicRequest(request);
+    const translated = candidate.protocol === "messages" ? anthropicToOpenAI(request, { forceStream: false, preserveToolErrors: true }) : request;
+    if (candidate.protocol === "messages" && request.tool_choice?.disable_parallel_tool_use !== undefined) {
+      translated.parallel_tool_calls = !request.tool_choice.disable_parallel_tool_use;
+    }
     if (candidate.protocol === "messages" && request.system !== undefined) {
       const system = typeof request.system === "string" ? request.system : request.system.map((part) => part.text || "").join("");
-      translated.messages = translated.messages.filter((message) => message.role !== "system");
-      translated.messages.unshift({ role: "system", content: system });
+      // Replace only the top-level system prompt inserted by the codec. Inline
+      // system reminders in Claude Code history must retain their position.
+      if (system.trim()) translated.messages[0] = { role: "system", content: system };
+      else translated.messages.unshift({ role: "system", content: system });
     }
     translated.model = translated.model.replace(/^opencode-native\//i, "");
     const target = requestUrl(candidate, path, env, { suffix: "chat/completions" });
@@ -568,7 +576,7 @@ export async function startAttempt({ candidate, req, path, body, env = process.e
     const headers = {
       "content-type": "application/json", "content-length": String(payload.length),
       authorization: `Bearer ${env.OPENCODE_NATIVE_KEY}`,
-      "x-opencode-bridge-session": stickyKey || trace?.id || randomUUID(),
+      "x-opencode-bridge-session": conversationScope,
     };
     const { response, upstream } = await send({ target, headers, body: payload, signal, trace });
     if (response.headers["x-opencode-native-version"] !== "2.1.4") {
@@ -603,7 +611,7 @@ export async function startAttempt({ candidate, req, path, body, env = process.e
   const translation = candidate.translate === "anthropic-from-openai" ? translatedRequest(body) : null;
   const attemptBody = translation ? Buffer.from(JSON.stringify(translation.upstreamBody)) : body;
 
-  if (candidate.provider.adapter === "cliproxyapi") {
+  if (candidate.provider.adapter === "cline-oauth") {
     const adapter = adapters[candidate.provider.id];
     if (!adapter) throw new Error("Cline OAuth adapter is not configured");
     const response = await adapter.createChatCompletion(JSON.parse(attemptBody.toString()), { signal, trace });

@@ -7,6 +7,7 @@ import { discoverOpenCodeFreeModels, OPENCODE_DISCOVERY_INTERVAL_MS, OPENCODE_DI
 // For GLM-5/Modal models: calls Modal directly (non-streaming only)
 
 import http from "http";
+import { nativeConversationIdentity } from "./native-session-identity.mjs";
 import https from "https";
 import path from "node:path";
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -662,7 +663,15 @@ function handleProfileRequest(req, res, parsed, protocol) {
   }
   PROFILE_RUNTIME_STATE.catalogModels = new Map(getAvailableModels().map((model) => [model.id.toLowerCase(), model]));
   const profile = profileByModel(ROUTING, parsed?.model);
-  const affinityKey = routingAffinityKey(req, parsed);
+  let affinityKey;
+  if (providerById(ROUTING, provider)?.adapter === "opencode-native") {
+    try { affinityKey = principalSessionKey(req, nativeConversationIdentity(req.headers, parsed)); }
+    catch (error) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: { code: error.code, message: error.message } }));
+      return true;
+    }
+  } else affinityKey = routingAffinityKey(req, parsed);
   const historyKey = routingModelHistoryKey(req, parsed);
   PROFILE_RUNTIME_STATE.openRouterFreeModels = new Map([...MODEL_REGISTRY.values()].filter((entry) => entry.provider === "openrouter" && entry.discovered && modelAllowedByCatalog(providerById(ROUTING, "openrouter"), entry)).map((entry) => [resolveOpenRouterModel(entry.id).toLowerCase(), entry.freeVerifiedUntil]));
   const plan = buildRoutePlan(

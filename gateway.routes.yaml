@@ -507,9 +507,6 @@ model_catalog:
     poolside/laguna-xs-2.1:
       routes:
         - { provider: openrouter, model: poolside/laguna-xs-2.1:free }
-    antigravity/antigravity-free:
-      routes:
-        - { provider: antigravity, model: antigravity/antigravity-free }
     thinkingmachines/inkling:
       routes:
         - { provider: openrouter, model: thinkingmachines/inkling:free }

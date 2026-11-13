@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { createSourceOverlay } from "../native/opencode/source-overlay.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const pin = JSON.parse(await fs.readFile(path.join(root, "native/opencode/source.json"), "utf8"));
@@ -43,8 +44,16 @@ if (!requestSource.includes("readonly external:")) {
     '      external: (input) => prepare("primary", input, (draft, tools) => Effect.succeed({ ...draft, agent: input.agent, tools, options: { ...draft.options, ...input.options } })),\n' + implementation);
   await fs.writeFile(requestPath, requestSource);
 }
-for (const [source, target] of [["worker.ts", "tokligence-bridge.ts"], ["bridge-wire.mjs", "tokligence-bridge-wire.mjs"]]) {
+
+// Keep the upstream 2.x compiler untouched. Re-preparing a prior bridge tree
+// also removes the retired 1.18 compatibility patch rather than retaining it.
+for (const relative of ["packages/ai/src/schema/options.ts", "packages/ai/src/protocols/openai-chat.ts"]) {
+  const original = execFileSync("tar", ["-xOf", archivePath, `opencode-${pin.version}/${relative}`]);
+  await fs.writeFile(path.join(destination, relative), original);
+}
+for (const [source, target] of [["worker.ts", "tokligence-bridge.ts"], ["bridge-wire.mjs", "tokligence-bridge-wire.mjs"], ["state-store.mjs", "tokligence-state-store.mjs"], ["scoped-http.ts", "tokligence-scoped-http.ts"], ["source-overlay.mjs", "tokligence-source-overlay.mjs"]]) {
   await fs.copyFile(path.join(root, "native/opencode", source), path.join(destination, "packages/sdk/src", target));
 }
 await fs.copyFile(path.join(root, "native/opencode/source.json"), path.join(destination, "packages/sdk/src/tokligence-source.json"));
+await fs.writeFile(path.join(destination, "packages/sdk/src/tokligence-overlay.json"), JSON.stringify(await createSourceOverlay(destination)) + "\n");
 console.log(JSON.stringify({ source: destination, version: pin.version, commit: pin.commit, bun: pin.bun }));

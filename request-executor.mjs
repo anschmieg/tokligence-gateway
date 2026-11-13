@@ -408,7 +408,7 @@ async function respondWithCodec({ response, codec, res, status, requestId, model
     const text = typeof message.content === "string" && message.content.trim().length > 0;
     const reasoning = codec.keepReasoning && openaiReasoningText(message).length > 0;
     const tools = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
-    if (!text && !reasoning && !tools && finish !== "content_filter") {
+    if (!text && !reasoning && !tools && !["content_filter", "length"].includes(finish)) {
       throw Object.assign(new Error("Upstream completed without a message or tool call"), { upstreamStreamError: true });
     }
   };
@@ -991,7 +991,9 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
         const isLastCandidate = candidate === plan.candidates[plan.candidates.length - 1];
         if (candidate.provider.adapter === "opencode-native") {
           res.writeHead(error?.statusCode === 400 ? 400 : error?.statusCode === 503 ? 503 : 502, { "content-type": "application/json", "x-gateway-request-id": requestId, "x-gateway-provider": candidate.provider.id });
-          res.end(JSON.stringify({ error: { code: error?.statusCode === 400 ? "unsupported_bridge_request" : error?.code === "native_worker_version_mismatch" ? error.code : "native_worker_unavailable", type: "native_bridge_error", message: "The experimental OpenCode native worker is unavailable or incompatible; no legacy fallback was attempted", request_id: requestId } }));
+          const unsupported = error?.statusCode === 400 && error?.code === "unsupported_bridge_request";
+          const detail = unsupported && typeof error.message === "string" && error.message.length <= 512 ? error.message : "The experimental OpenCode native worker is unavailable or incompatible; no legacy fallback was attempted";
+          res.end(JSON.stringify({ error: { code: error?.statusCode === 400 ? "unsupported_bridge_request" : error?.code === "native_worker_version_mismatch" ? error.code : "native_worker_unavailable", type: unsupported ? "invalid_request_error" : "native_bridge_error", message: detail, request_id: requestId } }));
           return { committed: false, requestId, provider: candidate.provider.id };
         }
         if (candidate.provider.adapter === "agy-native") {

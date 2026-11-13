@@ -1,0 +1,30 @@
+=== RUN   TestAdversarialLogicCatastrophicTaskRegressionNotCompensated
+    adversarial_review_test.go:21: rank=[{ModelID:glm-4.7-flash EvidenceID:lab/glm-4.7-flash Family:lab/glm Comparison:{Matched:2 ReferenceCount:2 Coverage:1 MeanLoss:-1.4802973661668754e-17 WorstLoss:0.8 Confidence:0.6 RiskLoss:0.09999999999999999 Band:comparable} RouteIDs:[older] FailureDomains:[] LatencyP95:0s Continuity:false Reason:confidence-weighted published benchmark evidence; missing settings reduce confidence} {ModelID:minimax-3.1 EvidenceID:other/minimax-3.1 Family:other/minimax Comparison:{Matched:2 ReferenceCount:2 Coverage:1 MeanLoss:0.010000000000000009 WorstLoss:0.010000000000000009 Confidence:0.6 RiskLoss:0.10600000000000001 Band:comparable} RouteIDs:[cross] FailureDomains:[] LatencyP95:0s Continuity:false Reason:confidence-weighted published benchmark evidence; missing settings reduce confidence}]
+    adversarial_review_test.go:23: 80-point catastrophic regression ranks above 1-point-balanced degradation
+--- FAIL: TestAdversarialLogicCatastrophicTaskRegressionNotCompensated (0.00s)
+=== RUN   TestAdversarialLogicNewUnmappedRouteCannotEraseKnownModelEvidence
+    adversarial_review_test.go:38: before=[{ModelID:minimax-3.1 EvidenceID:other/minimax-3.1 Family:other/minimax Comparison:{Matched:2 ReferenceCount:2 Coverage:1 MeanLoss:0.275 WorstLoss:0.30000000000000004 Confidence:0.6 RiskLoss:0.265 Band:comparable} RouteIDs:[cross] FailureDomains:[] LatencyP95:0s Continuity:false Reason:confidence-weighted published benchmark evidence; missing settings reduce confidence} {ModelID:glm-4.7-flash EvidenceID:lab/glm-4.7-flash Family:lab/glm Comparison:{Matched:2 ReferenceCount:2 Coverage:1 MeanLoss:0.75 WorstLoss:0.8 Confidence:0.6 RiskLoss:0.5499999999999999 Band:comparable} RouteIDs:[older] FailureDomains:[] LatencyP95:0s Continuity:false Reason:confidence-weighted published benchmark evidence; missing settings reduce confidence}] after=[{ModelID:glm-4.7-flash EvidenceID: Family: Comparison:{Matched:0 ReferenceCount:0 Coverage:0 MeanLoss:0 WorstLoss:0 Confidence:0 RiskLoss:0.25 Band:unknown} RouteIDs:[new-transport older] FailureDomains:[] LatencyP95:0s Continuity:false Reason:capability-compatible; quality evidence unknown} {ModelID:minimax-3.1 EvidenceID:other/minimax-3.1 Family:other/minimax Comparison:{Matched:2 ReferenceCount:2 Coverage:1 MeanLoss:0.275 WorstLoss:0.30000000000000004 Confidence:0.6 RiskLoss:0.265 Band:comparable} RouteIDs:[cross] FailureDomains:[] LatencyP95:0s Continuity:false Reason:confidence-weighted published benchmark evidence; missing settings reduce confidence}]
+    adversarial_review_test.go:40: adding an unmapped route promoted the known-worse model by erasing its quality evidence
+--- FAIL: TestAdversarialLogicNewUnmappedRouteCannotEraseKnownModelEvidence (0.00s)
+=== RUN   TestAdversarialLogicBenchmarkAliasesCannotInflateSupport
+    adversarial_review_test.go:60: before={Matched:1 ReferenceCount:1 Coverage:1 MeanLoss:0.020000000000000018 WorstLoss:0.020000000000000018 Confidence:0.45 RiskLoss:0.14650000000000002 Band:partial} after={Matched:2 ReferenceCount:2 Coverage:1 MeanLoss:0.020000000000000018 WorstLoss:0.020000000000000018 Confidence:0.6 RiskLoss:0.11200000000000002 Band:comparable}
+    adversarial_review_test.go:62: two names for the same benchmark counted as independent support
+--- FAIL: TestAdversarialLogicBenchmarkAliasesCannotInflateSupport (0.00s)
+=== RUN   TestAdversarialLogicGeminiForcedToolChoiceRequiresCapability
+    adversarial_review_test.go:73: requirements={Bytes:222 Output:0 Tools:true ToolChoice:false Parallel:false JSON:false StructuredJSON:false Reasoning:false ReasoningEffort: ReasoningBudget:<nil> DisableReasoning:false Continuity:false OpaqueState:false Modalities:map[text:true] Outputs:map[text:true] Task:agent} compatible=true
+    adversarial_review_test.go:75: forced tool-call request admitted to a model without tool-choice support
+--- FAIL: TestAdversarialLogicGeminiForcedToolChoiceRequiresCapability (0.00s)
+=== RUN   TestAdversarialLogicDuplicateProtocolControlsRefused
+    adversarial_protocol_external_test.go:18: router_tools=false native_translated_tools=1 parse_error=<nil>
+    adversarial_protocol_external_test.go:20: last-wins router under-admits a first-wins native translator request
+--- FAIL: TestAdversarialLogicDuplicateProtocolControlsRefused (0.00s)
+FAIL
+FAIL	github.com/router-for-me/CLIProxyAPI/v8/internal/catalogfallback	0.066s
+=== RUN   TestAdversarialLogicPaidOnlyModelCanHaveFreeAlternative
+    adversarial_evidence_review_test.go:20: handled=true invalid=<nil> planned_stages=[{Model:glm-5.3-flash:free Tier:0 Alternative:false Allowed:map[]} {Model:glm-4.7-flash:free Tier:0 Alternative:true Allowed:map[cf-alt:true]}]
+    adversarial_evidence_review_test.go:25: direct_free_routes=0 calls=[] resolved="" error=&{400 {"error":{"message":"unknown provider for model glm-5.3-flash:free","type":"invalid_request_error","code":"model_not_found","param":"model"}} map[] false [] map[]}
+    adversarial_evidence_review_test.go:27: &{400 {"error":{"message":"unknown provider for model glm-5.3-flash:free","type":"invalid_request_error","code":"model_not_found","param":"model"}} map[] false [] map[]} [] map[]
+--- FAIL: TestAdversarialLogicPaidOnlyModelCanHaveFreeAlternative (0.00s)
+FAIL
+FAIL	github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers	0.083s
+FAIL

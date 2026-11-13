@@ -40,7 +40,7 @@ function normalizeClineOAuthProvider(provider, index) {
       : "https://api.workos.com",
     credentials_path: provider.credentials_path
       ? requireString(provider.credentials_path, `${label}.credentials_path`)
-      : "/data/cliproxyapi/credentials.json",
+      : "/data/cline-oauth/credentials.json",
     model_cache_ttl_ms: optionalBoundedInteger(
       provider.model_cache_ttl_ms,
       `${label}.model_cache_ttl_ms`,

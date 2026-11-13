@@ -1,0 +1,238 @@
+{
+  "counts": {
+    "blocked_native_metadata": 1,
+    "catalog_get": 3,
+    "denied_connect": 0,
+    "inference_posts": 12,
+    "quota_origin": 0,
+    "redirect_origin": 0,
+    "redirect_target": 0,
+    "stream_origin": 9,
+    "unexpected_http": 0
+  },
+  "failures": [],
+  "gates": {
+    "auxiliary_events_distinguished": true,
+    "both_plugins_registered": true,
+    "chat_alias_selectable": true,
+    "compaction_inherits": true,
+    "configured_defaults_disclosed_and_first": true,
+    "default_sub": true,
+    "disabled_opencode_preserved": true,
+    "explicit_paid_preferred_model": true,
+    "free_suffix_uses_similarity_never_paid": true,
+    "idempotent_explicit_set": true,
+    "messages_alias_stream": true,
+    "messages_stream": true,
+    "network_namespace_isolated": true,
+    "new_session_defaults_sub": true,
+    "normal_binding_policy-free": true,
+    "normal_binding_policy-plain": true,
+    "only_deliberate_calls": true,
+    "original_rows_canonical": true,
+    "profile_scope_isolation": true,
+    "qualified_free_override": true,
+    "responses_stream": true,
+    "routing_control_requires_auth": true,
+    "session_telemetry_isolated": true,
+    "stopped_host_auth_ownership": true,
+    "stopped_host_exact_counts": true,
+    "subagent_inference": true,
+    "subagent_policy_inherits": true,
+    "telemetry_actual_route_and_correlation": true,
+    "unknown_entitlement_not_mislabelled_free": true,
+    "unverified_feature_costs_refused": true,
+    "virtual_aliases_discovered": true
+  },
+  "input_sha256": {
+    "binary": "3217a6838f8b9581723c9e9e592a527d5bfd18f7c5a3e1c705c2301b9d983416",
+    "free_model_hub": "927df784dedb67537cb37f61d26adace52ec374922820a8f3c001bfe0981e8b0",
+    "opencode": "19ee4302f7f96418ba0c59d443c4682ba1972de67d7cf1d687ea4e9004df354b"
+  },
+  "namespace": {
+    "inner": "net:[4026534118]",
+    "outer": "net:[4026533177]"
+  },
+  "policy_calls": [
+    {
+      "case": "policy-override",
+      "lane": "free",
+      "model": "nvidia/nemotron-3.5-lightning:free"
+    },
+    {
+      "case": "policy-plain",
+      "lane": "free",
+      "model": "nvidia/nemotron-3.5-lightning:free"
+    },
+    {
+      "case": "policy-plain",
+      "lane": "free",
+      "model": "nvidia/nemotron-3.5-lightning:free"
+    },
+    {
+      "case": "policy-plain",
+      "lane": "free",
+      "model": "nvidia/nemotron-3.5-lightning:free"
+    },
+    {
+      "case": "policy-plain",
+      "lane": "unknown-metered",
+      "model": "nvidia/nemotron-3.5-lightning:free"
+    },
+    {
+      "case": "policy-free",
+      "lane": "free",
+      "model": "glm-4.7-flash:free"
+    },
+    {
+      "case": "policy-override",
+      "lane": "free",
+      "model": "glm-4.7-flash:free"
+    },
+    {
+      "case": "policy-override",
+      "lane": "free",
+      "model": "glm-4.7-flash:free"
+    },
+    {
+      "case": "profile-messages",
+      "lane": "free",
+      "model": "glm-4.7-flash:free"
+    },
+    {
+      "case": "profile-message-alias",
+      "lane": "free",
+      "model": "glm-4.7-flash:free"
+    },
+    {
+      "case": "profile-responses",
+      "lane": "free",
+      "model": "glm-4.7-flash:free"
+    },
+    {
+      "case": "policy-override",
+      "lane": "free",
+      "model": "glm-4.7-flash:free"
+    }
+  ],
+  "supervision": {
+    "deadline_seconds": 52,
+    "environment_cleared": true,
+    "exact_plugins_read_only": true,
+    "process_group_killed": true,
+    "unshare_net_required": true
+  },
+  "telemetry": [
+    {
+      "billing_class": "UNKNOWN",
+      "completed_at": "2026-11-04T08:30:51.576986793Z",
+      "http_status": 200,
+      "kind": "main",
+      "policy": "PAID",
+      "policy_version": 1,
+      "profile": "coding",
+      "prompt_id": "smoke-prompt",
+      "provider": "paidfixture",
+      "request_id": "9ec2aed5c9223dcf066fb6dd17a1e6f0",
+      "requested_model": "nemotron-3.5-lightning",
+      "resolved_model": "nemotron-3.5-lightning",
+      "selected_at": "2026-11-04T08:30:51.569233139Z",
+      "session": "smoke-session",
+      "started_at": "2026-11-04T08:30:51.568312132Z",
+      "state": "completed"
+    },
+    {
+      "billing_class": "FREE",
+      "completed_at": "2026-11-04T08:30:51.58663246Z",
+      "http_status": 200,
+      "kind": "main",
+      "policy": "FREE",
+      "policy_version": 1,
+      "profile": "coding",
+      "prompt_id": "smoke-prompt",
+      "provider": "retiredfixture",
+      "request_id": "58f7e4557def160784b541ceafdc0209",
+      "requested_model": "nemotron-3.5-lightning:free",
+      "resolved_model": "glm-4.7-flash",
+      "selected_at": "2026-11-04T08:30:51.578745085Z",
+      "session": "smoke-session",
+      "started_at": "2026-11-04T08:30:51.577807399Z",
+      "state": "completed"
+    },
+    {
+      "billing_class": "FREE",
+      "completed_at": "2026-11-04T08:30:51.600723239Z",
+      "http_status": 200,
+      "kind": "subagent",
+      "parent_request_id": "58f7e4557def160784b541ceafdc0209",
+      "parent_session": "smoke-session",
+      "policy": "FREE",
+      "policy_version": 2,
+      "profile": "coding",
+      "prompt_id": "51d9924c3a4283168c31cae247d184d6",
+      "provider": "kilo",
+      "request_id": "51d9924c3a4283168c31cae247d184d6",
+      "requested_model": "glm-4.7-flash",
+      "resolved_model": "glm-4.7-flash",
+      "selected_at": "2026-11-04T08:30:51.592478501Z",
+      "session": "child-session",
+      "started_at": "2026-11-04T08:30:51.591207732Z",
+      "state": "completed"
+    },
+    {
+      "billing_class": "FREE",
+      "completed_at": "2026-11-04T08:30:51.688397892Z",
+      "http_status": 200,
+      "kind": "main",
+      "policy": "FREE",
+      "policy_version": 2,
+      "profile": "coding",
+      "prompt_id": "smoke-prompt",
+      "provider": "retiredfixture",
+      "request_id": "b6d24d69eba216195533ab3022efd3c1",
+      "requested_model": "glm-4.7-flash",
+      "resolved_model": "glm-4.7-flash",
+      "selected_at": "2026-11-04T08:30:51.615436862Z",
+      "session": "smoke-session",
+      "started_at": "2026-11-04T08:30:51.614593096Z",
+      "state": "completed"
+    },
+    {
+      "billing_class": "FREE",
+      "completed_at": "2026-11-04T08:30:51.707949948Z",
+      "http_status": 200,
+      "kind": "main",
+      "policy": "FREE",
+      "policy_version": 2,
+      "profile": "coding",
+      "prompt_id": "smoke-prompt",
+      "provider": "openrouter",
+      "request_id": "12ba56b5236c627f608ab70998478fdc",
+      "requested_model": "glm-4.7-flash",
+      "resolved_model": "glm-4.7-flash",
+      "selected_at": "2026-11-04T08:30:51.700164174Z",
+      "session": "smoke-session",
+      "started_at": "2026-11-04T08:30:51.699475249Z",
+      "state": "completed"
+    },
+    {
+      "billing_class": "FREE",
+      "completed_at": "2026-11-04T08:30:51.716622849Z",
+      "http_status": 200,
+      "kind": "compaction",
+      "policy": "FREE",
+      "policy_version": 2,
+      "profile": "coding",
+      "prompt_id": "smoke-prompt",
+      "provider": "retiredfixture",
+      "request_id": "d58b91921c327bf01ade57b670c66aad",
+      "requested_model": "glm-4.7-flash",
+      "resolved_model": "glm-4.7-flash",
+      "selected_at": "2026-11-04T08:30:51.709301278Z",
+      "session": "smoke-session",
+      "started_at": "2026-11-04T08:30:51.708622233Z",
+      "state": "completed"
+    }
+  ],
+  "verdict": "pass"
+}

@@ -1,0 +1,37 @@
+{
+  "phase": "deployed",
+  "source_commit": "2a36871",
+  "native_sha256": "3217a6838f8b9581723c9e9e592a527d5bfd18f7c5a3e1c705c2301b9d983416",
+  "provider_inference_requests": 0,
+  "models_before": 472,
+  "default_billing_policy": "SUB",
+  "profile_cost_policy": "session",
+  "deployment_uuid": "5sios9qn6e0eb16jzcwoqxnw",
+  "one_native_owner": true,
+  "model_count": 472,
+  "profile_model_count": 4,
+  "profile_ids": [
+    "glm-5.3-flash",
+    "nemotron-3-ultra-550b-a55b",
+    "nemotron-3.5-lightning",
+    "north-mini-code"
+  ],
+  "old_catalog_ids_retained": false,
+  "withdrawn_catalog_ids": [
+    "auto"
+  ],
+  "unrelated_config_preserved": true,
+  "accounts_preserved": true,
+  "protected_state_preserved": true,
+  "aliases": [
+    "chat",
+    "coding"
+  ],
+  "preferred_models": {
+    "chat": "nemotron-3-ultra-550b-a55b",
+    "coding": "glm-5.3-flash"
+  },
+  "session_control_default": "SUB",
+  "public_ingress_verified": false,
+  "live_provider_evaluation": false
+}

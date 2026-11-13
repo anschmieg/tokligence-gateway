@@ -1,0 +1,22 @@
+# Native config fragment; merge ONLY this plugin subtree using If-Match.
+plugins:
+  enabled: true
+  configs:
+    free-model-hub:
+      enabled: true
+      # All compiled API-key and login providers, except existing owners.
+      allowed_vendors: ""
+      blocked_vendors: opencodezen,opencodego,openrouter
+      # With the above admission filter, ONLY Kilo supports auto keyless.
+      # No OpenCode public account is created; no inference is sent at startup.
+      keyless_accounts: true
+      keepalive_enabled: false
+      console_keyless: true
+      console_management_base: /admin
+      state_dir: /home/agent/cliproxy-staging/state/free-model-hub
+      log_level: info
+      log_to_file: false
+      # Keep newly added provider models separate from native model aliases.
+      model_name_tag: prefix
+      openrouter_paid_models: false
+      cline_pass_models: false
