@@ -1,4 +1,4 @@
-import { isVerifiedFreeOpenRouterModel } from "./upstream-model.mjs";
+import { isVerifiedFreeOpenRouterModel, openRouterRequestError } from "./upstream-model.mjs";
 import { randomUUID } from "node:crypto";
 import { startAttempt } from "./provider-adapters.mjs";
 import {
@@ -621,6 +621,10 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
         lastStatus = 503;
         continue;
       }
+      if (candidate.provider.id === "openrouter" && openRouterRequestError(body)) {
+        lastStatus = 400;
+        continue;
+      }
       const hasNextCandidate = i + 1 < plan.candidates.length;
       if (aborter.signal.aborted) break;
       trace?.stage("attempt");
@@ -1040,7 +1044,7 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
     const retry = limited ? Math.min(...failures.map((item) => item.retry_after_seconds).filter((value) => value > 0)) : null;
     const commonStatus = failures.length && failures.every((item) => item.upstream_status === failures[0].upstream_status) ? failures[0].upstream_status : null;
     const freeTierRejected = failures.some((item) => item.upstream_error_code === "FreeTierError");
-    const status = commonStatus >= 400 && commonStatus < 500 ? commonStatus : failureStatus(lastStatus);
+    const status = commonStatus >= 400 && commonStatus < 500 ? commonStatus : lastStatus === 400 && !failures.length ? 400 : failureStatus(lastStatus);
     const message = limited
       ? "OpenCode Zen free usage or rate limit reached on all eligible accounts; see upstream_errors for account, egress, reason, and reset time."
       : freeTierRejected ? "OpenCode Zen rejected free-tier access (client/session/authentication gate); see upstream_errors. This is distinct from free usage quota exhaustion."

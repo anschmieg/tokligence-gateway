@@ -37,6 +37,12 @@ only to loopback and is never exposed directly to the internet.
 - `POST /v1/chat/completions` — OpenAI Chat Completions
 - `POST /v1/systemone` — native OpenCode Jev typed evaluations
 
+Provider catalog fetches have a 15-second total deadline and an 8 MiB response
+limit. Interrupted fetches release the refresh so the next discovery can retry.
+OpenRouter's free-only lane rejects plugins, server tools, and presets that can
+add charges; client-side function tools remain supported. Aliases are resolved
+before provider policy checks.
+
 Buffered chat and generic proxy requests are limited to 8 MiB; admin JSON
 requests are limited to 64 KiB. These bodies must arrive within 30 seconds.
 Specialist audio/document endpoints retain their separate 32 MiB limit.

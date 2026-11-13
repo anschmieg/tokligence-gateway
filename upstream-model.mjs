@@ -77,3 +77,13 @@ export function isVerifiedFreeOpenRouterModel(model, snapshot, now = Date.now())
   const id = resolveOpenRouterModel(model)?.toLowerCase();
   return id === "openrouter/free" || Number(snapshot?.get(id)) > now;
 }
+
+// Only client-side function tools are permitted on the free OpenRouter lane.
+export function openRouterRequestError(body) {
+  if (body.plugins != null && (!Array.isArray(body.plugins) || body.plugins.length)) return "OpenRouter plugins are disabled on the free-only gateway";
+  if (["preset", "web_search_options", "search_parameters"].some((key) => body[key] != null)) return "OpenRouter presets and search add-ons are disabled on the free-only gateway";
+  if (body.tools != null && (!Array.isArray(body.tools) || body.tools.some((tool) =>
+    !tool || (tool.type != null && tool.type !== "function" && !(tool.type === "custom" && typeof tool.name === "string" && tool.input_schema)) || /^openrouter:/i.test(tool.name || tool.function?.name || "")
+  ))) return "OpenRouter server tools are disabled; use client-side function tools";
+  return null;
+}

@@ -1,3 +1,4 @@
+import { openRouterRequestError } from "./upstream-model.mjs";
 import http from "node:http";
 import { nativeConversationScope } from "./native-session-identity.mjs";
 import https from "node:https";
@@ -552,6 +553,10 @@ function sendThroughProxy({ target, headers, body, signal, proxy, trace }) {
 
 export async function startAttempt({ candidate, req, path, body, env = process.env, signal, trace, adapters = {}, accountPool = null, stickyKey = null, excludedAccounts = [] }) {
   throwIfAborted(signal);
+  if (candidate.provider.id === "openrouter") {
+    const error = openRouterRequestError(JSON.parse(Buffer.isBuffer(body) ? body.toString("utf8") : body));
+    if (error) throw Object.assign(new Error(error), { statusCode: 400, code: "openrouter_paid_features_disabled" });
+  }
   if (candidate.provider.adapter === "opencode-native") {
     if (env.OPENCODE_NATIVE_ENABLED !== "true" || !env.OPENCODE_NATIVE_URL || !env.OPENCODE_NATIVE_KEY) {
       throw Object.assign(new Error("The native worker is not enabled or configured"), { statusCode: 503, code: "native_bridge_disabled" });

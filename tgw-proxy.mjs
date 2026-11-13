@@ -7,13 +7,14 @@ import { discoverOpenCodeFreeModels, OPENCODE_DISCOVERY_INTERVAL_MS, OPENCODE_DI
 // For GLM-5/Modal models: calls Modal directly (non-streaming only)
 
 import http from "http";
+import { fetchProviderJson } from "./provider-json.mjs";
 import { readRequestBody, parseRequestObject, sendRequestError } from "./http-request.mjs";
 import { nativeConversationIdentity } from "./native-session-identity.mjs";
 import https from "https";
 import path from "node:path";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { sendChatCompletionResult } from "./openai-stream.mjs";
-import { resolveMistralModel, resolveOpenCodeModel, resolveOpenRouterModel } from "./upstream-model.mjs";
+import { resolveMistralModel, resolveOpenCodeModel, resolveOpenRouterModel, openRouterRequestError } from "./upstream-model.mjs";
 import { sanitizeHeaders } from "./sanitize-headers.mjs";
 import {
   CODEX_REASONING_LEVELS,
@@ -296,29 +297,7 @@ function registerRoutingProfiles() {
   }
 }
 
-function fetchJson(options) {
-  return new Promise((resolve, reject) => {
-    const client = options.protocol === "https:" || Number(options.port) === 443 ? https : http;
-    const req = client.request(options, (res) => {
-      const chunks = [];
-      res.on("data", (chunk) => chunks.push(chunk));
-      res.on("end", () => {
-        const text = Buffer.concat(chunks).toString();
-        if (res.statusCode < 200 || res.statusCode >= 300) {
-          reject(new Error(`HTTP ${res.statusCode}: ${text.slice(0, 200)}`));
-          return;
-        }
-        try {
-          resolve(JSON.parse(text));
-        } catch {
-          reject(new Error("Invalid JSON from model provider"));
-        }
-      });
-    });
-    req.on("error", reject);
-    req.end();
-  });
-}
+const fetchJson = fetchProviderJson;
 
 function prefixedModelId(id, prefix) {
   if (!prefix || id.toLowerCase().startsWith(prefix.toLowerCase())) return id;
@@ -656,6 +635,12 @@ function handleProfileRequest(req, res, parsed, protocol) {
     return true;
   }
   const provider = matchConfiguredProvider(ROUTING, parsed?.model);
+  const policyError = provider === "openrouter" && openRouterRequestError(parsed);
+  if (policyError) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: { code: "openrouter_paid_features_disabled", message: policyError } }));
+    return true;
+  }
   const surface = modelSurface({ id: parsed?.model || "", provider });
   if (surface.type !== "chat") {
     res.writeHead(400, { "Content-Type": "application/json" });
@@ -733,9 +718,6 @@ function handleProfileRequest(req, res, parsed, protocol) {
   return true;
 }
 
-function isOpenRouterModel(model) {
-  return matchConfiguredProvider(ROUTING, model) === "openrouter";
-}
 
 function isOpenCodeModel(model) {
   const provider = matchConfiguredProvider(ROUTING, model);
@@ -1247,47 +1229,6 @@ function callOpenCodeMessages(model, messages, maxTokens) {
   });
 }
 
-function callOpenRouterOpenAI(model, messages, maxTokens) {
-  return new Promise((resolve, reject) => {
-    const body = JSON.stringify({
-      model: resolveOpenRouterModel(model),
-      messages,
-      stream: false,
-      max_tokens: maxTokens
-    });
-
-    const options = {
-      hostname: OPENROUTER_URL.hostname,
-      port: OPENROUTER_URL.port || 443,
-      path: `${OPENROUTER_URL.pathname.replace(/\/$/, "")}/chat/completions`,
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${OPENROUTER_KEY}`,
-        "Content-Length": Buffer.byteLength(body),
-        "HTTP-Referer": "https://github.com/tokligence/gateway",
-        "X-Title": "Tokligence Gateway"
-      }
-    };
-
-    const req = https.request(options, (res) => {
-      const chunks = [];
-      res.on("data", (chunk) => chunks.push(chunk));
-      res.on("end", () => {
-        try {
-          const data = JSON.parse(Buffer.concat(chunks).toString());
-          resolve(data);
-        } catch {
-          reject(new Error("Invalid JSON from OpenRouter"));
-        }
-      });
-    });
-
-    req.on("error", reject);
-    req.write(body);
-    req.end();
-  });
-}
 
 function isMistralModel(model) {
   return matchConfiguredProvider(ROUTING, model) === "mistral";
@@ -1534,7 +1475,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Not found" }));
     return;
-    });
+    }).catch((error) => sendRequestError(req, res, error));
     return;
   }
 
@@ -1655,7 +1596,7 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ error: { message: "Jev requires the native /v1/systemone endpoint", type: "invalid_request_error" } }));
         return;
       }
-      if (handleProfileRequest(req, res, parsed, "chat_completions")) return;
+      if (handleProfileRequest(req, res, { ...parsed, model }, "chat_completions")) return;
 
       if (model === COPILOT_AUTO_MODEL) {
         if (!COPILOT_AUTO) {
@@ -1790,37 +1731,6 @@ const server = http.createServer((req, res) => {
             res.writeHead(502, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: err.message }));
           });
-      } else if (isOpenRouterModel(model)) {
-        const rewritten = resolveOpenRouterModel(model);
-        const proxyBody = Buffer.from(JSON.stringify({ ...parsed, model: rewritten }));
-        
-        const forwardHeaders = {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${OPENROUTER_KEY}`,
-          "Content-Length": String(proxyBody.length),
-          "HTTP-Referer": "https://github.com/tokligence/gateway",
-          "X-Title": "Tokligence Gateway"
-        };
-
-        const options = {
-          hostname: OPENROUTER_URL.hostname,
-          port: OPENROUTER_URL.port || 443,
-          path: `${OPENROUTER_URL.pathname.replace(/\/$/, "")}/chat/completions`,
-          method: "POST",
-          headers: forwardHeaders
-        };
-
-        const upstream = https.request(options, (upRes) => {
-          res.writeHead(upRes.statusCode, upRes.headers);
-          pipeAndRecordUsage("opencode-go", model, upRes, res);
-        });
-
-        upstream.on("error", (err) => {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: err.message }));
-        });
-
-        upstream.end(proxyBody);
       } else if (isMistralModel(model)) {
         const rewritten = resolveMistralModel(model);
         const proxyBody = Buffer.from(JSON.stringify({ ...parsed, model: rewritten }));
@@ -1924,7 +1834,7 @@ const server = http.createServer((req, res) => {
       synthesizeMetadataUserId(parsed, req);
       const messages = responsesPayloadToMessages(parsed);
 
-      if (handleProfileRequest(req, res, parsed, "responses")) return;
+      if (handleProfileRequest(req, res, { ...parsed, model }, "responses")) return;
 
       if (handleCodexRoute(req, res, parsed, model)) return;
       if (DEBUG) {
@@ -1959,19 +1869,6 @@ const server = http.createServer((req, res) => {
           });
       } else if (isOpenCodeModel(model)) {
         callOpenCodeGoOpenAI(model, toOpenAIChatMessages(messages), parsed.max_tokens || 4096)
-          .then((data) => {
-            const msg = data.choices?.[0]?.message;
-            let text = msg?.content || "";
-            
-            sendResponsesResult(res, model, text, parsed.stream === true);
-            recordModelObservedUsage(model, data);
-          })
-          .catch((err) => {
-            res.writeHead(502, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err.message }));
-          });
-      } else if (isOpenRouterModel(model)) {
-        callOpenRouterOpenAI(model, toOpenAIChatMessages(messages), parsed.max_tokens || 4096)
           .then((data) => {
             const msg = data.choices?.[0]?.message;
             let text = msg?.content || "";
@@ -2102,7 +1999,7 @@ const server = http.createServer((req, res) => {
         return;
       }
 
-      if (handleProfileRequest(req, res, parsed, "messages")) return;
+      if (handleProfileRequest(req, res, { ...parsed, model }, "messages")) return;
 
       if (handleCodexRoute(req, res, parsed, model)) return;
 
@@ -2199,41 +2096,6 @@ const server = http.createServer((req, res) => {
             res.writeHead(502, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: err.message }));
           });
-      } else if (isOpenRouterModel(model)) {
-        const rewritten = resolveOpenRouterModel(model);
-        parsed.model = rewritten;
-        const proxyBody = Buffer.from(JSON.stringify(parsed));
-
-        const forwardHeaders = {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${OPENROUTER_KEY}`,
-          "HTTP-Referer": "https://github.com/tokligence/gateway",
-          "X-Title": "Tokligence Gateway"
-        };
-        
-        if (req.headers["anthropic-version"]) {
-          forwardHeaders["anthropic-version"] = req.headers["anthropic-version"];
-        }
-
-        const options = {
-          hostname: OPENROUTER_URL.hostname,
-          port: OPENROUTER_URL.port || 443,
-          path: `${OPENROUTER_URL.pathname.replace(/\/$/, "")}/messages`,
-          method: "POST",
-          headers: forwardHeaders
-        };
-
-        const upstream = https.request(options, (upRes) => {
-          res.writeHead(upRes.statusCode, upRes.headers);
-          pipeAndRecordUsage("opencode-go", model, upRes, res);
-        });
-
-        upstream.on("error", (err) => {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: err.message }));
-        });
-
-        upstream.end(proxyBody);
       } else if (isMistralModel(model)) {
         const messages = toOpenAIChatMessages(parsed.messages || []);
 

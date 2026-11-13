@@ -17,8 +17,10 @@ async function listen(server, t) {
 
 test("catalog aliases route free-first, exclude unauthorized paid fallback, and guard specialist APIs", async (t) => {
   const seen = [];
+  let routerMode = "healthy";
   const upstream = http.createServer(async (req, res) => {
     if (req.method === "GET") {
+      if (req.url === "/router/models" && routerMode === "truncated") { res.writeHead(200, { "content-length": 100, connection: "close" }); res.end("{"); return; }
       const models = req.url === "/router/models" ? [
         { id: "minimax/minimax-m3.1-flash:free", pricing: { prompt: "0", completion: "0" }, context_length: 1000000 },
         { id: "poolside/laguna-s-2.1:free", pricing: { prompt: "0", completion: "0" }, context_length: 262144 },
@@ -56,7 +58,10 @@ test("catalog aliases route free-first, exclude unauthorized paid fallback, and 
       { ...shipped.providers.find((p) => p.id === "mistral"), models: [], default_base_url: `http://127.0.0.1:${port}/mistral`, base_url_env: "TEST_MISTRAL_BASE" },
     ],
     routes: [{ provider: "mistral", prefixes: ["mistral/"] }, { provider: "opencode-zen", prefixes: ["minimax-m3.1-flash-free"] }, { provider: "openrouter", prefixes: ["openrouter/"] }],
-    aliases: [],
+    aliases: [
+      { id: "legacy-paid", patterns: ["glm-5.3-flash"], target: "openrouter/poolside/laguna-s-2.1" },
+      { id: "legacy-free", patterns: ["free-alias"], target: "openrouter/free" },
+    ],
     model_catalog: { ...shipped.model_catalog, models: {
       "minimax-m3.1-flash-free": { routes: [{ provider: "opencode-zen", model: "minimax-m3.1-flash-free" }, { provider: "openrouter", model: "minimax/minimax-m3.1-flash:free" }] },
       "poolside/laguna-s-2.1": shipped.model_catalog.models["poolside/laguna-s-2.1"],
@@ -101,13 +106,28 @@ test("catalog aliases route free-first, exclude unauthorized paid fallback, and 
     assert.equal(paid.status, 403);
     assert.equal((await paid.json()).error.code, "openrouter_model_not_verified_free");
   }
+  for (const endpoint of ["/v1/chat/completions", "/v1/messages", "/v1/responses"]) {
+    const alias = await complete("glm-5.3-flash", endpoint);
+    assert.equal(alias.status, 403, "resolved paid alias must not reach legacy routing");
+    await alias.text();
+  }
+  const beforeAddons = seen.length;
+  for (const model of ["openrouter/free", "free-alias"]) {
+    for (const addon of [ { plugins: [{ id: "web" }] }, { preset: "paid-preset" }, { web_search_options: {} }, { tools: [{ type: "openrouter:web_search" }] } ]) {
+      const denied = await fetch(base + "/v1/chat/completions", { method: "POST", headers, body: JSON.stringify({ model, messages: [], ...addon }) });
+      assert.equal(denied.status, 400);
+      await denied.text();
+    }
+  }
+  assert.equal(seen.length, beforeAddons, "add-ons are rejected before dispatch");
   const before = seen.length;
-  const free = await fetch(base + "/v1/chat/completions", { method: "POST", headers, body: JSON.stringify({ model: "openrouter/free", models: ["poolside/laguna-s-2.1"], route: "fallback", messages: [{ role: "user", content: "hello" }] }) });
+  const free = await fetch(base + "/v1/chat/completions", { method: "POST", headers, body: JSON.stringify({ model: "openrouter/free", models: ["poolside/laguna-s-2.1"], route: "fallback", tools: [{ type: "function", function: { name: "lookup", parameters: { type: "object" } } }], messages: [{ role: "user", content: "hello" }] }) });
   assert.equal(free.status, 200);
   await free.text();
   assert.equal(seen[before].body.model, "openrouter/free");
   assert.equal(seen[before].body.models, undefined);
   assert.equal(seen[before].body.route, undefined);
+  assert.equal(seen[before].body.tools[0].function.name, "lookup", "client-side function tools remain usable");
   seen.length = 0;
   const success = await complete("minimax-m3.1-flash-free");
   assert.equal(success.status, 200);
@@ -151,5 +171,14 @@ test("catalog aliases route free-first, exclude unauthorized paid fallback, and 
   const renewed = await complete("openrouter/minimax/minimax-m3.1-flash:free");
   assert.equal(renewed.status, 200, "successful rediscovery renews authorization");
   await renewed.text();
+
+  routerMode = "truncated";
+  const broken = await fetch(base + "/v1/models", { headers, signal: AbortSignal.timeout(3000) });
+  assert.equal(broken.status, 200);
+  assert(!(await broken.json()).data.some((row) => row.provider === "openrouter"));
+  routerMode = "healthy";
+  const recovered = await fetch(base + "/v1/models", { headers, signal: AbortSignal.timeout(3000) });
+  assert.equal(recovered.status, 200);
+  assert((await recovered.json()).data.some((row) => row.provider === "openrouter"));
 
 });

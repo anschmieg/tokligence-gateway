@@ -63,7 +63,7 @@ incompatible endpoints/features, context windows that are too small, and cooling
 routes. Paid-route affinity never displaces a recovered free route.
 
 OpenRouter is limited to models verified as free by discovery, plus its
-`openrouter/free` router. Both prompt and completion prices must be zero;
+`openrouter/free` router. Prompt, completion, and every supplied additional price component must be zero;
 missing prices do not qualify. This restriction applies to direct requests,
 profiles, and fallback routes. Unverified models fail closed; refresh
 `/v1/models` to update the discovered prices. OpenRouter verification expires
