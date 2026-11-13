@@ -1,12 +1,11 @@
 import { isDiscoveredOpenCodeFree } from "./opencode-free-models.mjs";
 import { matchConfiguredProvider, profileByModel, providerById, providerEnabled, roleByModel } from "./route-config.mjs";
 import { inspectRequestFeatures, supportsFeatures } from "./protocol-codecs.mjs";
-import { normalizeUpstreamModel } from "./upstream-model.mjs";
+import { normalizeUpstreamModel, isVerifiedFreeOpenRouterModel } from "./upstream-model.mjs";
 
 function openRouterFree(provider, model, runtimeState) {
   if (provider?.id !== "openrouter") return true;
-  const id = normalizeUpstreamModel("openrouter", model).toLowerCase();
-  return id === "openrouter/free" || Number(runtimeState?.openRouterFreeModels?.get(id)) > Date.now();
+  return isVerifiedFreeOpenRouterModel(model, runtimeState?.openRouterFreeModels);
 }
 
 function circuitOpen(runtimeState, provider, model, protocol) {

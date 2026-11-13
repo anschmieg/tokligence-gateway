@@ -1,3 +1,4 @@
+import { isVerifiedFreeOpenRouterModel } from "./upstream-model.mjs";
 import { randomUUID } from "node:crypto";
 import { startAttempt } from "./provider-adapters.mjs";
 import {
@@ -616,6 +617,10 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
     candidateLoop: for (let i = 0; i < plan.candidates.length; i++) {
       const candidate = plan.candidates[i];
       if (aborter.signal.aborted) break;
+      if (candidate.provider.id === "openrouter" && !isVerifiedFreeOpenRouterModel(candidate.upstreamModel, runtimeState.openRouterFreeModels)) {
+        lastStatus = 503;
+        continue;
+      }
       const hasNextCandidate = i + 1 < plan.candidates.length;
       if (aborter.signal.aborted) break;
       trace?.stage("attempt");
