@@ -16,7 +16,7 @@ classRouting:
   enabled: true
   cheapPolicyModel:
     provider: mistral
-    model: mistral-medium-3-5
+    model: mistral-small-latest
 
 providers:
   - id: tokligence
@@ -49,6 +49,9 @@ providers:
         family: openai
         context_window: 1050000
       - id: gpt-6.1-sol
+        family: openai
+        context_window: 1050000
+      - id: gpt-6.1-terra
         family: openai
         context_window: 1050000
       - id: gpt-6-astra
@@ -151,6 +154,15 @@ providers:
         family: mistral
       - id: mistral-small-latest
         family: mistral
+        # Mistral Small 4, 256k context: official Mistral model card.
+        context_window: 256000
+      - id: deepseek-v4-1-flash-1017
+        family: deepseek
+        # Mistral-hosted DeepSeek V4.1 Flash 1017 (not DeepSeek V4 Pro).
+        context_window: 1000000
+      - id: zai-glm-5-3-flash
+        family: glm
+        context_window: 1000000
       - id: mistral-medium-3-5
         family: mistral
         # Mistral docs: Mistral Medium 3.5 has a 256k context window.
@@ -179,12 +191,16 @@ providers:
 
   - id: google-ai-studio
     adapter: middleware
-    billing_class: free
+    # Gemini 3.8 Flash is billed per token; do not silently classify as free.
+    billing_class: payg
     base_url: https://ai-studio.google.com/v1
     api_key_env: GOOGLE_AI_STUDIO_API_KEY
     base_url_env: GOOGLE_AI_STUDIO_API_BASE
     protocols: [chat_completions]
     models:
+      - id: gemini-3.8-flash
+        family: gemini
+        context_window: 1048576
       - id: gemini-3.1-pro-latest
         family: gemini
       - id: gemini-3-flash-latest
@@ -192,9 +208,9 @@ providers:
       - id: gemini-2.5-pro-preview
         family: gemini
     metadata:
-      cost_class: free
+      cost_class: payg
       capabilities: [text, vision, tool_calling]
-      quota_type: free_tier
+      quota_type: payg
 
   # === KOSTENLOS (FREE TIER) ===
   - id: nvidia
@@ -523,7 +539,7 @@ model_picker:
   priority:
     - "^gpt-6\\.1-sol$"
     - "^gpt-6-astra$"
-    - "^gpt-6-luna$"
+    - '^gpt-6\.1-terra$'
     - "^(?:beam|deepseek-v4\\.1-flash|glm-5\\.3-flash|longcat-2\\.5-preview|mimo-v2\\.6-flash|minimax-m3\\.1-flash|nemotron-3\\.5-(?:lightning|super-vl))-free$"
     - "^mistral/(?:codestral-latest|mistral-(?:large|medium|small)-latest|mistral-code-latest|mistral-vibe-cli-(?:fast|latest|with-tools)|zai-glm-latest|ministral-14b-latest)$"
     - "^(?:(?:openrouter/)?poolside/laguna-|(?:openrouter/)?thinkingmachines/inkling(?:-|:|$)|openrouter/cohere/north-(?:mini-)?code(?:-|:|$)|openrouter/liquid/lfm-)"
@@ -535,6 +551,7 @@ model_picker:
     cline-oauth: free
     ollama-cloud: subscription
     codex-oauth: subscription
+    google-ai-studio: paid
     openrouter: free
     mistral: paid
     modal: paid
@@ -554,6 +571,10 @@ model_picker:
       enabled: false
       reason: "Internal routing alias rather than a selectable model"
   hide:
+    - pattern: "^gpt-6-luna$"
+      reason: "Superseded GPT generation; use GPT-6.1 Terra or Sol where available"
+    - pattern: "^gemini-3-flash-latest$"
+      reason: "Superseded by stable Gemini 3.8 Flash; old ID remains callable for compatibility"
     - pattern: "^mistral/voxtral-"
       reason: "Audio specialists remain available through their supported APIs"
     - pattern: "(^|/)lyria-|content-safety"
@@ -606,9 +627,9 @@ profiles:
       - provider: nous
         model: stepfun/step-3.7-flash
       - provider: mistral
-        model: mistral-medium-3-5
+        model: mistral-small-latest
       - provider: google-ai-studio
-        model: gemini-3-flash-latest
+        model: gemini-3.8-flash
       - provider: copilot-auto
         model: copilot-auto
       - provider: codex-oauth
@@ -647,7 +668,7 @@ profiles:
       - provider: nous
         model: stepfun/step-3.7-flash
       - provider: google-ai-studio
-        model: gemini-3-flash-latest
+        model: gemini-3.8-flash
       - provider: copilot-auto
         model: copilot-auto
       - provider: codex-oauth
@@ -764,7 +785,7 @@ roles:
     fallback: agent-default
     candidates:
       - provider: mistral
-        model: mistral-medium-3-5
+        model: mistral-small-latest
         family: mistral
       - provider: together
         model: Prism-ML/Ternary-Bonsai-27B
@@ -800,7 +821,7 @@ aliases:
   - id: profile-medium
     patterns: [medium, worker, standard, implement]
     provider: codex-oauth
-    target: gpt-6-luna
+    target: gpt-6.1-terra
     fallback: profile-low
 
   - id: profile-low

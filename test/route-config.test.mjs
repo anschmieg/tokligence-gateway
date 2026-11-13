@@ -167,16 +167,16 @@ test("class routing is opt-in and targets only configured provider models", () =
     () => parseRoutingConfig(noWindow.replace("  enabled: false", "  enabled: true")),
     /requires a verified context_window/,
   );
-  assert.throws(() => parseRoutingConfig(source.replace("provider: mistral\n    model: mistral-medium-3-5", "provider: codex-oauth\n    model: gpt-6-astra")), /cannot target an oauth-proxy/);
-  assert.throws(() => parseRoutingConfig(source.replace("model: mistral-medium-3-5\n", "model: not-configured\n")), /must reference a configured provider model/);
+  assert.throws(() => parseRoutingConfig(source.replace("provider: mistral\n    model: mistral-small-latest", "provider: codex-oauth\n    model: gpt-6-astra")), /cannot target an oauth-proxy/);
+  assert.throws(() => parseRoutingConfig(source.replace("model: mistral-small-latest\n", "model: not-configured\n")), /must reference a configured provider model/);
 });
 
 
 test("the shipped routing policy enables class routing with a documented window target", () => {
   assert.equal(config.classRouting.enabled, true);
-  assert.deepEqual(config.classRouting.cheapPolicyModel, { provider: "mistral", model: "mistral-medium-3-5" });
+  assert.deepEqual(config.classRouting.cheapPolicyModel, { provider: "mistral", model: "mistral-small-latest" });
   const mistral = config.providers.find(({ id }) => id === "mistral");
-  const target = mistral.models.find(({ id }) => id === "mistral-medium-3-5");
+  const target = mistral.models.find(({ id }) => id === "mistral-small-latest");
   assert.equal(target.context_window, 256000);
 });
 
@@ -246,4 +246,20 @@ test("a provider may opt out of Anthropic translation with a boolean flag", () =
 test("the Modal lane opts out of Anthropic translation", () => {
   const modal = config.providers.find(({ id }) => id === "modal");
   assert.equal(modal.messages_translation, false);
+});
+
+
+test("current model routes resolve explicitly and preserve legacy compatibility", () => {
+  const mistral = config.providers.find(({ id }) => id === "mistral");
+  const google = config.providers.find(({ id }) => id === "google-ai-studio");
+  const codex = config.providers.find(({ id }) => id === "codex-oauth");
+  assert.equal(matchConfiguredProvider(config, "mistral/deepseek-v4-1-flash-1017"), "mistral");
+  assert.equal(matchConfiguredProvider(config, "mistral/zai-glm-5-3-flash"), "mistral");
+  assert.equal(matchConfiguredProvider(config, "gemini-3.8-flash"), "google-ai-studio");
+  assert.ok(mistral.models.some(({ id, context_window }) => id === "deepseek-v4-1-flash-1017" && context_window >= 1000000));
+  assert.ok(mistral.models.some(({ id }) => id === "zai-glm-5-3-flash"));
+  assert.ok(google.models.some(({ id }) => id === "gemini-3.8-flash"));
+  assert.equal(google.billing_class, "payg", "new Gemini Flash must not be advertised as unconditional free tier");
+  assert.ok(codex.models.some(({ id }) => id === "gpt-6.1-terra"));
+  assert.ok(codex.models.some(({ id }) => id === "gpt-6-luna"), "old direct model remains callable for existing clients");
 });

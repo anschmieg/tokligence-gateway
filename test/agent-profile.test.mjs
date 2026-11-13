@@ -28,8 +28,8 @@ test("agent profiles preserve deterministic candidate order", () => {
     { provider: "nous", model: "nousresearch/laguna-xs-2.1" },
     { provider: "nous", model: "nousresearch/laguna-s-2.1" },
     { provider: "nous", model: "stepfun/step-3.7-flash" },
-    { provider: "mistral", model: "mistral-medium-3-5" },
-    { provider: "google-ai-studio", model: "gemini-3-flash-latest" },
+    { provider: "mistral", model: "mistral-small-latest" },
+    { provider: "google-ai-studio", model: "gemini-3.8-flash" },
     { provider: "copilot-auto", model: "copilot-auto" },
     { provider: "codex-oauth", model: "gpt-6-astra" },
     { provider: "openrouter", model: "openrouter/free" },
@@ -66,7 +66,7 @@ test("route planner builds the ordered fallback chain", () => {
   assert.deepEqual(plan.candidates.map(({ provider, upstreamModel }) => [provider.id, upstreamModel]), [
     ["cline-oauth", "cline/cline-free/deepseek-v4.1-flash"],
     ["cline-oauth", "cline/cline-free/mimo-v2.6-flash"],
-    ["mistral", "mistral-medium-3-5"],
+    ["mistral", "mistral-small-latest"],
     ["codex-oauth", "gpt-6-astra"],
     ["openrouter", "openrouter/free"],
   ]);
@@ -98,7 +98,7 @@ test("route planner filters candidates by request capabilities", () => {
 });
 
 test("route planner keeps a successful model sticky within a profile", () => {
-  const affinity = new Map([["principal:agent-default", { provider: "mistral", model: "mistral-medium-3-5", updatedAt: Date.now() }]]);
+  const affinity = new Map([["principal:agent-default", { provider: "mistral", model: "mistral-small-latest", updatedAt: Date.now() }]]);
   const plan = buildRoutePlan(config, {
     model: "agent-default",
     protocol: "chat_completions",
@@ -106,15 +106,15 @@ test("route planner keeps a successful model sticky within a profile", () => {
     affinityKey: "principal",
   }, env, { cooldowns: new Map(), affinity });
   assert.equal(plan.candidates[0].provider.id, "mistral");
-  assert.equal(plan.candidates[0].upstreamModel, "mistral-medium-3-5");
+  assert.equal(plan.candidates[0].upstreamModel, "mistral-small-latest");
 });
 
 test("enabled class routing prepends a window-safe cheap target and retains session fallbacks", () => {
   const routed = structuredClone(config);
-  routed.classRouting = { enabled: true, cheapPolicyModel: { provider: "mistral", model: "mistral-medium-3-5" } };
+  routed.classRouting = { enabled: true, cheapPolicyModel: { provider: "mistral", model: "mistral-small-latest" } };
   const mistral = routed.providers.find(({ id }) => id === "mistral");
   routed.profiles.find(({ id }) => id === "agent-default").candidates.splice(13, 0, { provider: "mistral", model: "mistral-small-latest" });
-  mistral.models.find(({ id }) => id === "mistral-medium-3-5").context_window = 128000;
+  mistral.models.find(({ id }) => id === "mistral-small-latest").context_window = 128000;
   const plan = buildRoutePlan(routed, {
     model: "agent-default",
     protocol: "messages",
@@ -125,7 +125,7 @@ test("enabled class routing prepends a window-safe cheap target and retains sess
   // Anthropic request can now reach the OpenAI-protocol providers through
   // translation, so Cline (the profile's first candidate) comes next.
   assert.deepEqual(plan.candidates.slice(0, 2).map(({ provider, upstreamModel }) => [provider.id, upstreamModel]), [
-    ["mistral", "mistral-medium-3-5"],
+    ["mistral", "mistral-small-latest"],
     ["cline-oauth", "cline/cline-free/deepseek-v4.1-flash"],
   ]);
 });
@@ -133,9 +133,9 @@ test("enabled class routing prepends a window-safe cheap target and retains sess
 test("class routing keeps the session route when cheap target window is unknown or below floor", () => {
   for (const window of [undefined, 127999]) {
     const routed = structuredClone(config);
-    routed.classRouting = { enabled: true, cheapPolicyModel: { provider: "mistral", model: "mistral-medium-3-5" } };
+    routed.classRouting = { enabled: true, cheapPolicyModel: { provider: "mistral", model: "mistral-small-latest" } };
     const mistral = routed.providers.find(({ id }) => id === "mistral");
-    const model = mistral.models.find(({ id }) => id === "mistral-medium-3-5");
+    const model = mistral.models.find(({ id }) => id === "mistral-small-latest");
     if (window === undefined) delete model.context_window;
     else model.context_window = window;
     const plan = buildRoutePlan(routed, {
@@ -149,9 +149,9 @@ test("class routing keeps the session route when cheap target window is unknown 
 
 test("unrecognized agent-type hints cannot activate class routing", () => {
   const routed = structuredClone(config);
-  routed.classRouting = { enabled: true, cheapPolicyModel: { provider: "mistral", model: "mistral-medium-3-5" } };
+  routed.classRouting = { enabled: true, cheapPolicyModel: { provider: "mistral", model: "mistral-small-latest" } };
   const mistral = routed.providers.find(({ id }) => id === "mistral");
-  mistral.models.find(({ id }) => id === "mistral-medium-3-5").context_window = 128000;
+  mistral.models.find(({ id }) => id === "mistral-small-latest").context_window = 128000;
   const plan = buildRoutePlan(routed, {
     model: "agent-default", protocol: "chat_completions", requestClass: "subagent",
     agentType: "invented", body: { messages: [{ role: "user", content: "hello" }] },

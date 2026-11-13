@@ -129,7 +129,7 @@ test("picker capacity is explicit and preferred models survive new discoveries",
 
 test("selected picker families survive a crowded catalog while new models use spare slots", () => {
   const preferred = [
-    ["gpt-6.1-sol", "codex-oauth"], ["gpt-6-astra", "codex-oauth"], ["gpt-6-luna", "codex-oauth"],
+    ["gpt-6.1-sol", "codex-oauth"], ["gpt-6-astra", "codex-oauth"], ["gpt-6.1-terra", "codex-oauth"],
     ["minimax-m3.1-flash-free", "opencode-zen"], ["deepseek-v4.1-flash-free", "opencode-zen"],
     ["mistral/codestral-latest", "mistral"], ["mistral/ministral-14b-latest", "mistral"],
     ["mistral/mistral-vibe-cli-with-tools", "mistral"],
