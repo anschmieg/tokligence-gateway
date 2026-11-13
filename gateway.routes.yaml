@@ -193,7 +193,8 @@ providers:
     adapter: middleware
     # Gemini 3.8 Flash is billed per token; do not silently classify as free.
     billing_class: payg
-    base_url: https://ai-studio.google.com/v1
+    # Official Gemini OpenAI-compatible endpoint; env override still supported.
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
     api_key_env: GOOGLE_AI_STUDIO_API_KEY
     base_url_env: GOOGLE_AI_STUDIO_API_BASE
     protocols: [chat_completions]
