@@ -3,6 +3,12 @@ import { matchConfiguredProvider, profileByModel, providerById, providerEnabled,
 import { inspectRequestFeatures, supportsFeatures } from "./protocol-codecs.mjs";
 import { normalizeUpstreamModel } from "./upstream-model.mjs";
 
+function openRouterFree(provider, model, runtimeState) {
+  if (provider?.id !== "openrouter") return true;
+  const id = normalizeUpstreamModel("openrouter", model).toLowerCase();
+  return id === "openrouter/free" || Number(runtimeState?.openRouterFreeModels?.get(id)) > Date.now();
+}
+
 function circuitOpen(runtimeState, provider, model, protocol) {
   const until = runtimeState?.cooldowns?.get(`${provider}:${model}:${protocol}`) || 0;
   return until > Date.now();
@@ -117,6 +123,7 @@ function cheapClassCandidate(config, profile, requestClass, agentType, protocol,
   const { provider: providerId, model: modelId } = policy.cheapPolicyModel;
   const provider = providerById(config, providerId);
   if (!provider || !providerEnabled(provider, env)) return null;
+  if (!openRouterFree(provider, modelId, runtimeState)) return null;
   const model = provider.models.find(({ id }) => id === modelId);
   const window = Number(model?.context_window || provider.metadata?.context_window || 0);
   const floor = Number(profile.context_window || 0);
@@ -148,6 +155,11 @@ export function buildRoutePlan(config, { model, protocol, body, requestClass = n
     if (!providerEnabled(direct, env)) return { error: { status: 503, code: "native_bridge_disabled", message: "The experimental OpenCode native bridge is not enabled or configured" } };
     if (!direct.models.some((entry) => entry.id.toLowerCase() === model.toLowerCase())) return { error: { status: 400, code: "native_model_not_declared", message: "Select an explicitly configured native bridge model" } };
   }
+
+  if (!profile && !role && direct?.id === "openrouter" && !catalogModel) {
+    if (!openRouterFree(direct, model, runtimeState)) return { error: { status: 403, code: "openrouter_model_not_verified_free", message: "Only verified free OpenRouter models are available; refresh /v1/models" } };
+    catalogModel = { routes: [{ provider: "openrouter", model, supported_endpoints: ["/v1/messages", "/v1/chat/completions"] }], supported_endpoints: ["/v1/messages", "/v1/chat/completions"] };
+  }
   const freeOnly = providerById(config, "opencode-zen")?.catalog?.discover_free_only === true;
   if (freeOnly && (direct?.id === "opencode-go" || /^(?:opencode-go|go)\//i.test(model))) {
     return { error: { status: 403, code: "opencode_paid_route_disabled", message: "Only verified free OpenCode models are available" } };
@@ -174,7 +186,7 @@ export function buildRoutePlan(config, { model, protocol, body, requestClass = n
      for (const reference of catalogModel.routes) {
        const provider = providerById(config, reference.provider);
        const translate = translationFor(provider, protocol);
-       if (!provider || !providerEnabled(provider, env)) continue;
+       if (!provider || !providerEnabled(provider, env) || !openRouterFree(provider, reference.model, runtimeState)) continue;
        if (!reference.supported_endpoints.includes(endpoint) && translate === null) continue;
        if (translate === null || (translate && !TRANSLATING_ADAPTERS.has(provider.adapter))) continue;
       if (!candidateSupports(provider, reference, required, body, Boolean(translate))) continue;
@@ -205,7 +217,7 @@ export function buildRoutePlan(config, { model, protocol, body, requestClass = n
     let candidates = [];
     for (const reference of role.candidates) {
       const provider = providerById(config, reference.provider);
-      if (!provider || !providerEnabled(provider, env)) continue;
+      if (!provider || !providerEnabled(provider, env) || !openRouterFree(provider, reference.model, runtimeState)) continue;
       const translate = translationFor(provider, protocol);
       if (translate === null || (translate && !TRANSLATING_ADAPTERS.has(provider.adapter))) continue;
       if (circuitOpen(runtimeState, provider.id, reference.model, protocol)) continue;
@@ -297,6 +309,7 @@ export function buildRoutePlan(config, { model, protocol, body, requestClass = n
         }],
       };
     }
+
     if (provider.adapter === "opencode-zen") {
       // Direct model requests for Zen are routed through the adapter so the
       // free-tier gate (OAuth token, OpenCode identity, real session, streaming,
@@ -342,7 +355,7 @@ export function buildRoutePlan(config, { model, protocol, body, requestClass = n
   const candidates = [];
   for (const reference of profile.candidates) {
     const provider = providerById(config, reference.provider);
-    if (!provider || !providerEnabled(provider, env)) continue;
+    if (!provider || !providerEnabled(provider, env) || !openRouterFree(provider, reference.model, runtimeState)) continue;
     const translate = translationFor(provider, protocol);
     if (translate === null || (translate && !TRANSLATING_ADAPTERS.has(provider.adapter))) continue;
     if (circuitOpen(runtimeState, provider.id, reference.model, protocol)) continue;

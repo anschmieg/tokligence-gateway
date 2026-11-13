@@ -139,10 +139,10 @@ export function parseRoutingConfig(source) {
     if (!Array.isArray(betaAllowlist) || betaAllowlist.some((value) => typeof value !== "string" || !value.trim())) {
       throw new Error(`providers[${index}].anthropic_beta_allowlist must contain only non-empty strings`);
     }
-    if (betaAllowlist.length && ["oauth-proxy", "opencode-zen", "cliproxyapi", "copilot-sdk", "tokligence"].includes(adapter)) {
+    if (betaAllowlist.length && ["oauth-proxy", "opencode-zen", "cline-oauth", "copilot-sdk", "tokligence"].includes(adapter)) {
       throw new Error(`providers[${index}] cannot allow Anthropic betas on the ${adapter} adapter`);
     }
-    const normalizedProvider = adapter === "cliproxyapi"
+    const normalizedProvider = adapter === "cline-oauth"
       ? normalizeClineOAuthProvider(provider, index)
       : provider;
     const opencodePool = provider.opencode_pool;

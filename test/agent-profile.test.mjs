@@ -32,7 +32,6 @@ test("agent profiles preserve deterministic candidate order", () => {
     { provider: "google-ai-studio", model: "gemini-3-flash-latest" },
     { provider: "copilot-auto", model: "copilot-auto" },
     { provider: "codex-oauth", model: "gpt-6-astra" },
-    { provider: "openrouter", model: "deepseek/deepseek-v4-flash-0731" },
     { provider: "openrouter", model: "openrouter/free" },
   ]);
   assert.equal(profileByModel(config, "AGENTIC-WORKER").candidates[0].provider, "cline-oauth");
@@ -69,7 +68,6 @@ test("route planner builds the ordered fallback chain", () => {
     ["cline-oauth", "cline/cline-free/mimo-v2.6-flash"],
     ["mistral", "mistral-medium-3-5"],
     ["codex-oauth", "gpt-6-astra"],
-    ["openrouter", "deepseek/deepseek-v4-flash-0731"],
     ["openrouter", "openrouter/free"],
   ]);
 });
@@ -164,6 +162,7 @@ test("unrecognized agent-type hints cannot activate class routing", () => {
 
 test("role aliases select a family unused by recent session models and retain profile fallback", () => {
   const routed = structuredClone(config);
+  routed.providers.find((p) => p.id === "openrouter").models.push({ id: "deepseek/deepseek-v4-flash" });
   routed.roles = [{
     id: "role/review-strong", max_attempts: 2, context_window: 128000, avoid_recent_families: true, fallback: "agent-default",
     candidates: [
@@ -175,7 +174,7 @@ test("role aliases select a family unused by recent session models and retain pr
   const plan = buildRoutePlan(routed, {
     model: "role/review-strong", protocol: "chat_completions", affinityKey: "session-1",
     body: { messages: [{ role: "user", content: "review" }] },
-  }, env, { cooldowns: new Map(), modelHistory });
+  }, env, { cooldowns: new Map(), modelHistory, openRouterFreeModels: new Map([["deepseek/deepseek-v4-flash", Date.now() + 60000]]) });
   assert.equal(plan.error, undefined);
   assert.equal(plan.candidates[0].family, "family-b");
   assert.ok(plan.candidates.some(({ provider }) => provider.id === "cline-oauth"));
@@ -184,6 +183,7 @@ test("role aliases select a family unused by recent session models and retain pr
 
 test("role aliases fall back to their full candidate list if no unused family remains", () => {
   const routed = structuredClone(config);
+  routed.providers.find((p) => p.id === "openrouter").models.push({ id: "deepseek/deepseek-v4-flash" });
   routed.roles = [{
     id: "role/review-strong", max_attempts: 2, context_window: 128000, avoid_recent_families: true, fallback: "agent-default",
     candidates: [
@@ -195,7 +195,7 @@ test("role aliases fall back to their full candidate list if no unused family re
   const plan = buildRoutePlan(routed, {
     model: "role/review-strong", protocol: "chat_completions", affinityKey: "session-1",
     body: { messages: [{ role: "user", content: "review" }] },
-  }, env, { cooldowns: new Map(), modelHistory });
+  }, env, { cooldowns: new Map(), modelHistory, openRouterFreeModels: new Map([["deepseek/deepseek-v4-flash", Date.now() + 60000]]) });
   assert.ok(plan.candidates.length > 2);
   assert.deepEqual(plan.candidates.slice(0, 2).map(({ family }) => family), ["family-a", "family-b"]);
 });
@@ -257,7 +257,7 @@ test("translated Messages resolves a discovered OpenRouter id to its upstream id
     model,
     protocol: "messages",
     body: { model, max_tokens: 32, messages: [{ role: "user", content: "ping" }] },
-  }, env, { cooldowns: new Map() });
+  }, env, { cooldowns: new Map(), openRouterFreeModels: new Map([["z-ai/glm-5.3-flash", Date.now() + 60000]]) });
   assert.equal(plan.error, undefined);
   const [candidate] = plan.candidates;
   assert.equal(candidate.provider.id, "openrouter");

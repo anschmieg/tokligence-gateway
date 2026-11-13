@@ -52,10 +52,12 @@ export function buildModelCatalog(models, config) {
   const groups = new Map();
   for (const model of models) {
     const provider = config.providers.find((p) => p.id === model.provider);
-    if (provider?.catalog?.discover_free_only === true && !isDiscoveredOpenCodeFree(provider, model.id)) continue;
+    if (!provider) continue;
+    if (provider.adapter === "cline-oauth" && model.discovered !== true) continue;
+    if (provider.catalog?.discover_free_only === true && !isDiscoveredOpenCodeFree(provider, model.id)) continue;
     if (!provider || provider.catalog?.visible === false || retiredModelReason(config, model.id)) continue;
     const upstream = normalizeUpstreamModel(model.provider, model.id);
-    if (model.provider === "openrouter" && !modelAllowedByCatalog(provider, { ...model, id: upstream })) continue;
+    if (model.provider === "openrouter" && (!modelAllowedByCatalog(provider, { ...model, id: upstream }) || (model.freeVerifiedUntil != null && model.freeVerifiedUntil <= Date.now()))) continue;
     const mapping = Object.entries(mappings).find(([, value]) => value.routes.some((route) =>
       route.provider === model.provider && normalizeUpstreamModel(route.provider, route.model) === upstream));
     const latest = policy.prefer_latest && model.provider === "mistral"
@@ -111,8 +113,8 @@ export function modelAllowedByCatalog(provider, candidate) {
   const id = String(model.id || "");
   if (!id || (/^(?:(?:opencode-zen|zen)\/)?jev-1\.13(?:-free)?$/i.test(id) && provider?.id === "opencode-zen")) return false;
 
-  if (provider?.id === "openrouter" && catalog.zero_price_only === true) {
-    return hasZeroPrice(model) || (catalog.paid_allowlist || []).includes(id);
+  if (provider?.id === "openrouter") {
+    return hasZeroPrice(model);
   }
 
   if (provider?.id === "opencode-zen" && Array.isArray(catalog.id_suffixes)) {

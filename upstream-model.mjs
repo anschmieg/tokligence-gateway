@@ -17,6 +17,7 @@ const OPENROUTER_ALIASES = {
 
 export function resolveOpenRouterModel(model) {
   if (!model) return model;
+  if (/^(?:openrouter\/|or\/)?free$/i.test(model)) return "openrouter/free";
   if (model.toLowerCase().startsWith("openrouter/")) {
     return model.slice(11);
   }

@@ -252,7 +252,7 @@ test("refresh rotation is persisted before inference with exact bearer and truth
   assert.equal((await stat(credentialsPath)).mode & 0o777, 0o600);
 });
 
-test("model discovery exposes only free models, caches transient failures, and removes retired entries after success", async () => {
+test("model discovery exposes only verified free models and fails closed on expired feed errors", async () => {
   let now = 1_000_000;
   let response = {
     ok: true,
@@ -291,10 +291,7 @@ test("model discovery exposes only free models, caches transient failures, and r
 
   now += 300001;
   response = new Error("transient network failure");
-  assert.deepEqual((await adapter.discoverFreeModels()).map(({ id }) => id), [
-    "cline/z-ai/first",
-    "cline/cline-free/second",
-  ]);
+  assert.deepEqual(await adapter.discoverFreeModels(), []);
 
   response = {
     ok: true,
@@ -307,6 +304,14 @@ test("model discovery exposes only free models, caches transient failures, and r
   assert.deepEqual((await adapter.discoverFreeModels()).map(({ id }) => id), ["cline/z-ai/first"]);
 });
 
+
+test("configured Cline models do not bypass a failed free feed", async () => {
+  const adapter = new ClineOAuthAdapter({
+    provider: { api_base_url: "https://cline.invalid", models: [{ id: "paid/model" }] },
+    fetch: async () => { throw new Error("feed unavailable"); },
+  });
+  assert.deepEqual(await adapter.discoverFreeModels(), []);
+});
 
 test("logout clears stored credentials and prevents a pending device login from persisting", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "cline-logout-test-"));

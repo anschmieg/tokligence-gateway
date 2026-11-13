@@ -33,6 +33,21 @@ Mistral aliases. It retains Ministral 14B, Codestral, and Mistral Code/Vibe alia
 GPT-6.1 Sol, GPT-6 Astra, and GPT-6 Luna use Codex OAuth. This is configuration,
 not a guarantee that every model is available to every upstream account.
 
+## Duplicate display names
+
+The catalog can publish several genuinely distinct IDs that collapse to one
+human-readable label — a free tier, a dated revision, and a provider variant of
+the same base model. A client that selects by label would surface the same
+option three times. The gateway keeps every row but makes each label unique by
+appending the full model ID, matching the client-side safety net:
+
+- `DeepSeek V4 Flash (deepseek-v4-flash)`
+- `DeepSeek V4 Flash (deepseek-v4-flash-free)`
+- `DeepSeek V4 Flash (deepseek-v4-flash-0731)`
+
+This is a display-only rewrite. The `id`, `aliases`, and `routes` that clients
+actually call are untouched, so routing identity is unchanged.
+
 ## Canonical IDs and fallback
 
 Bare/prefixed duplicates from one backend produce one discovery row. Mistral
@@ -47,16 +62,16 @@ explicit route order within a cost class. Fallback skips unavailable providers,
 incompatible endpoints/features, context windows that are too small, and cooling
 routes. Paid-route affinity never displaces a recovered free route.
 
-OpenRouter discovery uses `catalog.zero_price_only: true`. Only explicit
-`catalog.paid_allowlist` exceptions are discovered or eligible for canonical
-fallback; listing a paid route in an equivalence mapping does not authorize it.
-Missing/null prices are not treated as zero. Existing paid exceptions are
-preserved; new paid models are not opted in automatically. Explicit legacy
-provider-addressed requests retain their existing behavior.
+OpenRouter is limited to models verified as free by discovery, plus its
+`openrouter/free` router. Both prompt and completion prices must be zero;
+missing prices do not qualify. This restriction applies to direct requests,
+profiles, and fallback routes. Unverified models fail closed; refresh
+`/v1/models` to update the discovered prices. OpenRouter verification expires
+after five minutes; expired routes are hidden and rejected until discovery
+succeeds again.
 
 Discovery refreshes when `/v1/models` is requested. OpenCode also refreshes at
-startup and every 12 hours. Requests reuse that cache and do not trigger extra
-OpenCode discovery within the 12-hour interval. OpenRouter free models and
+startup and approximately every minute, retrying failures after 10 seconds. OpenRouter free models and
 OpenCode free models appear automatically, subject to personal catalog exclusions
 and the picker limit. OpenCode discovery intersects the public
 `https://opencode.ai/inference/v1/models` list with the `opencode` provider in
@@ -67,10 +82,10 @@ are rejected; a `-free` suffix alone grants no access.
 OAuth accounts opt in with `discover_free_models: true`. With provider
 `catalog.discover_free_only: true`, the live verified free set replaces static
 chat allowlists for both advertisement and execution, including prefixed/direct
-requests and fallback. Snapshots expire after 12 hours plus a one-minute
-refresh grace period; refresh failures clear them, blocking chat until the next successful scheduled refresh. Failed attempts
-are also cached for 12 hours to prevent request-driven retries. API keys remain
+requests and fallback. Snapshots expire after one minute plus a 15-second refresh grace period; refresh failures clear them, blocking chat until the next successful scheduled refresh. API keys remain
 SystemOne-only.
+Cline advertises and serves only models in its current free feed; expired entries are removed if refresh fails. Copilot exposes only Auto. Google AI Studio is configured for the account’s free tier. Mistral remains classified as a subscription for the user’s Vibe quota.
+
 No OpenCode credits or paid fallback are needed. Other providers' paid exceptions
 and native SystemOne eligibility are configured separately.
 

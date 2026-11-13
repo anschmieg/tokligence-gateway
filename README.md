@@ -13,9 +13,9 @@ only to loopback and is never exposed directly to the internet.
 - `GET /health` — façade and backend-configuration status
 - `GET /v1/models` — unified model registry, rebuilt live on every request by
   re-pulling each enabled provider's `/models` endpoint (so the list always
-  reflects the current upstream contents). OpenRouter surfaces free models by
-  default; any paid exceptions must be explicitly allowlisted in the routing
-  catalog.
+  reflects the current upstream contents). OpenRouter is restricted to its
+  free router and models verified as free by discovery; refresh this endpoint
+  to update the available free models.
 - `GET /v1/providers` — configured provider registry without secrets
 - `GET /admin/routes` — effective routing policy without secrets
 - `GET /admin/status` — dashboard status (providers, model count)

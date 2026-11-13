@@ -66,9 +66,13 @@ test("catalog aliases route free-first, exclude unauthorized paid fallback, and 
   raw.model_catalog.models["poolside/laguna-s-2.1"].routes = raw.model_catalog.models["poolside/laguna-s-2.1"].routes.filter((route) => route.provider === "openrouter");
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "catalog-routes-"));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const clockPath = path.join(dir, "clock.json");
+  const preload = path.join(dir, "clock.mjs");
+  await fs.writeFile(clockPath, "0");
+  await fs.writeFile(preload, `import {readFileSync} from 'node:fs'; const realNow = Date.now; Date.now = () => realNow() + Number(readFileSync(${JSON.stringify(clockPath)}, 'utf8'));`);
   const configPath = path.join(dir, "routes.yaml");
   await fs.writeFile(configPath, stringify(raw));
-  const child = spawn(process.execPath, ["tgw-proxy.mjs"], { env: {
+  const child = spawn(process.execPath, ["--import", preload, "tgw-proxy.mjs"], { env: {
     ...process.env, PROXY_PORT: "0", ROUTING_CONFIG_PATH: configPath, PUBLIC_SECRET: "public", ADMIN_SECRET: "admin", ZEN_TEST_KEY: "zen-key", TEST_ROUTER_BASE: `http://127.0.0.1:${port}/router`, TEST_MISTRAL_BASE: `http://127.0.0.1:${port}/mistral`, OPENROUTER_API_KEY: "router-key", MISTRAL_API_KEY: "mistral-key", TGW_HOST: "127.0.0.1", TGW_PORT: String(port), CODEX_PROXY_ENABLED: "false", CHATGPT_RESPONSES_ENABLED: "false",
   }, stdio: ["ignore", "pipe", "pipe"] });
   t.after(() => child.kill());
@@ -92,6 +96,19 @@ test("catalog aliases route free-first, exclude unauthorized paid fallback, and 
   assert.deepEqual(transcript.supported_endpoints, ["/v1/audio/transcriptions"]);
   assert.equal(transcript.model_picker_enabled, false);
   const complete = (model, endpoint = "/v1/chat/completions", auth = headers) => fetch(base + endpoint, { method: "POST", headers: auth, body: JSON.stringify({ model, messages: [{ role: "user", content: "hello" }] }) });
+  for (const endpoint of ["/v1/chat/completions", "/v1/messages", "/v1/responses"]) {
+    const paid = await complete("openrouter/poolside/laguna-s-2.1", endpoint);
+    assert.equal(paid.status, 403);
+    assert.equal((await paid.json()).error.code, "openrouter_model_not_verified_free");
+  }
+  const before = seen.length;
+  const free = await fetch(base + "/v1/chat/completions", { method: "POST", headers, body: JSON.stringify({ model: "openrouter/free", models: ["poolside/laguna-s-2.1"], route: "fallback", messages: [{ role: "user", content: "hello" }] }) });
+  assert.equal(free.status, 200);
+  await free.text();
+  assert.equal(seen[before].body.model, "openrouter/free");
+  assert.equal(seen[before].body.models, undefined);
+  assert.equal(seen[before].body.route, undefined);
+  seen.length = 0;
   const success = await complete("minimax-m3.1-flash-free");
   assert.equal(success.status, 200);
   await success.text();
@@ -121,4 +138,18 @@ test("catalog aliases route free-first, exclude unauthorized paid fallback, and 
   await specialist.text();
   assert.equal(seen.at(-1).headers.authorization, "Bearer mistral-key");
   assert.equal(seen.at(-1).body.model, "voxtral-mini-transcribe-3");
+  await fs.writeFile(clockPath, String(6 * 60_000));
+  const beforeExpired = seen.length;
+  const expired = await complete("openrouter/minimax/minimax-m3.1-flash:free");
+  assert.equal(expired.status, 403, "expired free verification blocks direct dispatch");
+  await expired.text();
+  const unavailable = await complete("poolside/laguna-s-2.1");
+  assert.equal(unavailable.status, 503, "expired canonical route cannot dispatch");
+  await unavailable.text();
+  assert.equal(seen.length, beforeExpired);
+  await (await fetch(base + "/v1/models", { headers })).text();
+  const renewed = await complete("openrouter/minimax/minimax-m3.1-flash:free");
+  assert.equal(renewed.status, 200, "successful rediscovery renews authorization");
+  await renewed.text();
+
 });

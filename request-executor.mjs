@@ -619,7 +619,14 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
       const hasNextCandidate = i + 1 < plan.candidates.length;
       if (aborter.signal.aborted) break;
       trace?.stage("attempt");
-      const candidateBody = Buffer.from(JSON.stringify({ ...body, model: candidate.upstreamModel }));
+      const payload = { ...body, model: candidate.upstreamModel };
+      if (candidate.provider.id === "openrouter") {
+        // OpenRouter accepts alternative model lists and auto-routing controls.
+        // The gateway chooses one verified free model for each attempt.
+        delete payload.models;
+        delete payload.route;
+      }
+      const candidateBody = Buffer.from(JSON.stringify(payload));
       const excludedAccounts = [];
       let poolAttempt = 0;
       let attemptNumber = 0;
@@ -993,7 +1000,7 @@ export async function executeRoutePlan({ plan, req, res, path, body, trace = req
           res.end(JSON.stringify({ error: { code: error?.code || "agy_native_worker_unavailable", type: "agy_native_bridge_error", message: "The experimental AGY native worker is unavailable or incompatible; no canonical fallback was attempted", request_id: requestId } }));
           return { committed: false, requestId, provider: candidate.provider.id };
         }
-        if (isLastCandidate && candidate.provider.adapter === "cliproxyapi" && error?.status && error?.code) {
+        if (isLastCandidate && candidate.provider.adapter === "cline-oauth" && error?.status && error?.code) {
           runtimeState.cooldowns?.set(`${candidate.provider.id}:${candidate.model?.id || candidate.upstreamModel}:${candidate.protocol}`, Date.now() + errorCooldownMs(error));
           res.writeHead(error.status, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: { code: error.code, message: error.message, type: "cline_oauth_error" } }));
